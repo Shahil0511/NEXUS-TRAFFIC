@@ -58,6 +58,8 @@ export interface AdminAuditRow {
 /** @see ../../migrations/0004_api_requests.sql — the columns list endpoints SELECT. */
 export interface ApiRequestRow {
   occurred_at: Date;
+  /** occurred_at as µs-precision ISO text (`keysetTimeExpr`), the keyset cursor position. */
+  occurred_at_key: string;
   event_id: string;
   app_slug: string;
   endpoint_id: string;
@@ -90,4 +92,83 @@ export interface IngestCounterRow {
   duplicates: number;
   rejected: number;
   rate_limited: number;
+}
+
+// ─── Analytics query rows (read side, aggregates) ───────────────────────────
+// int8 counts and float8/numeric aggregates arrive as JS numbers (type parsers in src/db/pool.ts).
+
+/** @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeTraffic */
+export interface TrafficSummaryRow {
+  requests: number;
+  /** Requests with status_code >= 400. */
+  errors: number;
+  /** p95 of duration_ms over kind = 'http' only; null when there is no http row. */
+  p95_ms: number | null;
+  identified_users: number;
+}
+
+/**
+ * One chart bucket.
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.timeseries
+ */
+export interface TrafficBucketRow {
+  bucket: Date;
+  requests: number;
+  errors_4xx: number;
+  errors_5xx: number;
+  p95_ms: number | null;
+}
+
+/**
+ * One (endpoint, app, method, route template).
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listEndpointStats
+ */
+export interface EndpointStatsRow {
+  endpoint_id: string;
+  app_slug: string;
+  method: string;
+  route_template: string;
+  calls: number;
+  errors_4xx: number;
+  errors_5xx: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  p99_ms: number | null;
+  avg_ms: number | null;
+  last_seen_at: Date;
+}
+
+/** @see ../repositories/api-request-query.repository.ts */
+export interface StatusCountRow {
+  status_code: number;
+  count: number;
+}
+
+/** @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeErrors */
+export interface ErrorTotalsRow {
+  total: number;
+  errors_4xx: number;
+  errors_5xx: number;
+}
+
+/** Everything the endpoint detail page needs (null from the repository when there are no rows). */
+export interface EndpointDetailRows {
+  stats: EndpointStatsRow;
+  timeseries: TrafficBucketRow[];
+  statusBreakdown: StatusCountRow[];
+  slowest: ApiRequestRow[];
+}
+
+/** Everything the Errors page summary needs. */
+export interface ErrorSummaryRows {
+  totals: ErrorTotalsRow;
+  byStatus: StatusCountRow[];
+  timeseries: TrafficBucketRow[];
+  topEndpoints: EndpointStatsRow[];
+}
+
+/** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.pageViewTimeseries */
+export interface PageViewBucketRow {
+  bucket: Date;
+  page_views: number;
 }

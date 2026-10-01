@@ -26,9 +26,12 @@ import { UserAgentParser } from './enrichment/user-agent.parser';
 import { UserKeyHasher } from './enrichment/user-key.hasher';
 import { AppController } from './http/controllers/app.controller';
 import { DocsController } from './http/controllers/docs.controller';
+import { EndpointController } from './http/controllers/endpoint.controller';
+import { ErrorController } from './http/controllers/error.controller';
 import { HealthController } from './http/controllers/health.controller';
 import { IngestController } from './http/controllers/ingest.controller';
 import { MeController } from './http/controllers/me.controller';
+import { OverviewController } from './http/controllers/overview.controller';
 import { dashboardCsrfMiddleware, requireAdminMiddleware } from './http/middleware/dashboard-guards.middleware';
 import { anyKeyAuthMiddleware, serverKeyAuthMiddleware } from './http/middleware/ingest-auth.middleware';
 import { dashboardJsonBody, serverIngestJsonBody } from './http/middleware/json-body.middleware';
@@ -42,15 +45,20 @@ import { LiveFeed } from './live/live-feed';
 import { AdminAuditRepository } from './repositories/admin-audit.repository';
 import { ApiKeyRepository } from './repositories/api-key.repository';
 import { ApiRequestIngestRepository } from './repositories/api-request-ingest.repository';
+import { ApiRequestQueryRepository } from './repositories/api-request-query.repository';
 import { AppRepository } from './repositories/app.repository';
 import { HealthRepository } from './repositories/health.repository';
 import { IngestCounterRepository } from './repositories/ingest-counter.repository';
 import { PartitionRepository } from './repositories/partition.repository';
+import { WebEventQueryRepository } from './repositories/web-event-query.repository';
 import { AppAdminService } from './services/app-admin.service';
 import { AppQueryService } from './services/app-query.service';
 import { AppSlugResolver } from './services/app-slug.resolver';
+import { EndpointService } from './services/endpoint.service';
+import { ErrorService } from './services/error.service';
 import { HealthService } from './services/health.service';
 import { IngestService } from './services/ingest.service';
+import { OverviewService } from './services/overview.service';
 import { PartitionService } from './services/partition.service';
 
 export interface ContainerOverrides {
@@ -78,6 +86,9 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ingestCounters: new IngestCounterRepository(pools.write),
     partitions: new PartitionRepository(pools.write),
     health: new HealthRepository(pools.query),
+    // Dashboard reads: QUERY pool (read-only transactions), never queued behind ingest writes.
+    apiRequestQuery: new ApiRequestQueryRepository(pools.query),
+    webEventQuery: new WebEventQueryRepository(pools.query),
   };
   const schemaGuard = new SchemaGuard(pools.query, MIGRATIONS_DIR);
 
@@ -121,6 +132,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
   const liveFeed = new LiveFeed();
 
   // ─── Services ─────────────────────────────────────────────────────────────
+  const appSlugs = new AppSlugResolver(repositories.apps);
   const services = {
     health: new HealthService(repositories.health, repositories.partitions, schemaGuard),
     partitions: new PartitionService(repositories.partitions, env.RAW_RETENTION_MONTHS, logger),
@@ -143,7 +155,15 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
       keyCache,
       clock,
     ),
-    appSlugs: new AppSlugResolver(repositories.apps),
+    appSlugs,
+    overview: new OverviewService(
+      repositories.apiRequestQuery,
+      repositories.webEventQuery,
+      appSlugs,
+      clock,
+    ),
+    endpoints: new EndpointService(repositories.apiRequestQuery, appSlugs, clock),
+    errors: new ErrorService(repositories.apiRequestQuery, appSlugs, clock),
   };
 
   // ─── Controllers ──────────────────────────────────────────────────────────
@@ -153,6 +173,9 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ingest: new IngestController(services.ingest, clock),
     me: new MeController(),
     apps: new AppController(services.appQuery, services.appAdmin),
+    overview: new OverviewController(services.overview),
+    endpoints: new EndpointController(services.endpoints),
+    errors: new ErrorController(services.errors),
   };
 
   // ─── HTTP middleware instances ────────────────────────────────────────────

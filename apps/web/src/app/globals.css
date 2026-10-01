@@ -1,0 +1,154 @@
+/*
+ * Design tokens of the Data Nexus Traffic dashboard.
+ *
+ * WHY: the house look of the Data Nexus portal apps (Finance_recon "DataNexus palette": violet
+ * #7c3aed on near-black / clean white, Plus Jakarta Sans + JetBrains Mono). Every colour is a CSS
+ * variable so components, Tailwind utilities AND recharts (fill="var(--chart-…)") switch with the
+ * theme class set by next-themes. Chart colours were checked with the dataviz palette validator
+ * (lightness band, CVD separation, contrast) against the card surface of each mode.
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-chart-requests: var(--chart-requests);
+  --color-chart-4xx: var(--chart-4xx);
+  --color-chart-5xx: var(--chart-5xx);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+:root {
+  --background: #fafafa;
+  --foreground: #0d0c14;
+  --card: #ffffff;
+  --card-foreground: #0d0c14;
+  --popover: #ffffff;
+  --popover-foreground: #0d0c14;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f3ff;
+  --secondary-foreground: #0d0c14;
+  --muted: #f4f3f8;
+  --muted-foreground: #5c5a6e;
+  --accent: #f0eaff;
+  --accent-foreground: #6d28d9;
+  --destructive: #dc2626;
+  --success: #15803d;
+  --warning: #b45309;
+  --border: rgba(13, 12, 20, 0.08);
+  --input: rgba(13, 12, 20, 0.12);
+  --ring: #7c3aed;
+  --radius: 0.625rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #3d3b4a;
+  --sidebar-accent: #f0eaff;
+  --sidebar-accent-foreground: #6d28d9;
+  --sidebar-border: rgba(13, 12, 20, 0.08);
+
+  /* Charts: series identity + reserved status hues (4xx = warning, 5xx = critical). */
+  --chart-requests: #7c3aed;
+  --chart-4xx: #eda100;
+  --chart-5xx: #dc2626;
+  --chart-grid: rgba(13, 12, 20, 0.07);
+  --chart-axis: #5c5a6e;
+  --chart-cursor: rgba(124, 58, 237, 0.08);
+}
+
+.dark {
+  --background: #060608;
+  --foreground: #f1f0f5;
+  --card: #111116;
+  --card-foreground: #f1f0f5;
+  --popover: #0e0e12;
+  --popover-foreground: #f1f0f5;
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --secondary: #16161d;
+  --secondary-foreground: #f1f0f5;
+  --muted: #16161d;
+  --muted-foreground: #8b8a99;
+  --accent: #1c1430;
+  --accent-foreground: #c084fc;
+  --destructive: #f87171;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #8b5cf6;
+  --sidebar: #08080b;
+  --sidebar-foreground: #c9c8d3;
+  --sidebar-accent: #1c1430;
+  --sidebar-accent-foreground: #c084fc;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  --chart-requests: #8b5cf6;
+  --chart-4xx: #c98500;
+  --chart-5xx: #e5484d;
+  --chart-grid: rgba(255, 255, 255, 0.06);
+  --chart-axis: #8b8a99;
+  --chart-cursor: rgba(139, 92, 246, 0.12);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  /* Numbers line up in tables and KPI cards. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

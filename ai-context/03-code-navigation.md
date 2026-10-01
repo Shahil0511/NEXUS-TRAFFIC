@@ -1,8 +1,7 @@
 # 03 — code navigation
 
-Where to start reading code, which folder is which layer, and the two chains that exist after S1
-(server ingest and app/key admin). The dashboard chain (UI → SQL) arrives in **S2** and gets its own
-section here then. See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
+Where to start reading code, which folder is which layer, and the chains that exist: server ingest
+and app/key admin (S1), and the dashboard read side UI → SQL for Overview / API Routes / Errors (S2). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
 for status.
 
 ## 1. Entry files
@@ -29,7 +28,7 @@ for status.
 | `services/` | use cases | orchestrate; method name = leaf name; `@see` to repositories |
 | `enrichment/` | pure-ish transforms | one transformation per class; `ServerEventEnricher` orchestrates |
 | `auth/` | key + SSO auth | parse / hash / generate / cache keys; read the SSO cookie |
-| `domain/` | types + mappers | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO), `to-api-request-insert.ts` (wire → row) |
+| `domain/` | types + pure rules | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO, IP admin-only), `to-api-request-insert.ts` (wire → row); read side: `filters.ts` (repository inputs), `compute-deltas.ts` (KPI deltas), `timeseries-gaps.ts` (zero-filled IST buckets), `pagination.ts` (limit + 1, cursors), `numbers.ts` (rounding) |
 | `repositories/` | SQL | one class per table concern; `@see ../../migrations/NNNN_x.sql` |
 | `db/` | DB plumbing | pools, transactions, pg error classifiers, migration runner, schema guard |
 | `jobs/` | timers | partition maintenance, retention (listed in `jobs/scheduler.ts`) |
@@ -41,7 +40,10 @@ self-skip unless `RUN_DB_TESTS=1`. Shared helpers live in `apps/api/test/` (`db/
 creates a fresh migrated database per suite). Contract tests: `apps/api/test/routes-contract.test.ts`
 (every built leaf registered once, `EXPECTED_PENDING` lists what S2–S5 still add),
 `apps/api/test/no-scaffolding.test.ts`, `apps/api/test/db/schema-parity.integration.test.ts`.
-End to end: `apps/api/test/e2e/ingest.integration.test.ts`.
+End to end: `apps/api/test/e2e/ingest.integration.test.ts` (S1) and
+`apps/api/test/e2e/dashboard.integration.test.ts` (S2). The S2 read side is proven on a real database by
+`apps/api/test/db/analytics-queries.integration.test.ts`; both S2 suites share the dataset in
+`apps/api/test/db/analytics-seed.ts`.
 
 ## 3. The server ingest chain (`POST /api/v1/ingest/server`)
 
@@ -97,10 +99,47 @@ Health: `ROUTES.health.ready` → `HealthController.ready` → `HealthService.re
 future partitions). Docs: `ROUTES.docs.*` → `apps/api/src/http/controllers/docs.controller.ts`, serving
 `docs/dist` built by `scripts/build-docs.ts` from `docs/integration/`.
 
-## 5. Dashboard chain (S2)
+## 5. The dashboard chain (S2): Overview, API Routes, Errors
 
-Not built yet. S2 adds the first UI → SQL chain (`apps/web` → `ROUTES.overview.*` / `ROUTES.endpoints.*`
-→ query repositories) following the traced-chain template in the plan; this section is filled then.
+Every analytics route uses `...dashboard` (`ssoAuth` + `dashboardCsrf`) and validates with the
+SHARED schema of its leaf (`packages/shared/src/schemas/analytics.ts`). Leaf = controller method =
+service method; the repository method is named in each service's `@see`. Example: the API Routes
+table (`ROUTES.endpoints.list`), clicked from the UI down to SQL:
+
+```
+apps/web/src/features/endpoints/EndpointsView.tsx      table + RangePicker; const q = useEndpointStats(…)
+apps/web/src/features/filters/useGlobalFilters.ts      nuqs URL state {app, range, from, to}
+apps/web/src/features/endpoints/useEndpointStats.ts    useQuery(qk.endpoints.list(f)) → api.endpoints.list
+apps/web/src/lib/api.ts                                api.endpoints.list → request(ROUTES.endpoints.list, q)
+packages/shared/src/routes.ts                          ROUTES.endpoints.list = { method: 'GET', path: '/v1/endpoints' }
+packages/shared/src/schemas/analytics.ts               endpointListQuerySchema (sort whitelist, cursor, limit)
+apps/api/src/http/routes/index.ts                      r.get(…, ...dashboard, validateQuery(endpointListQuerySchema), ctl.endpoints.list)
+apps/api/src/http/controllers/endpoint.controller.ts   EndpointController.list  (Cache-Control: private, max-age=15)
+apps/api/src/services/endpoint.service.ts              EndpointService.list
+  services/query-window.ts                             resolveQueryWindow (shared resolveTimeWindow; percentiles capped
+                                                       at MAX_PERCENTILE_RANGE_MS → 400 RANGE_TOO_LARGE)
+  services/app-slug.resolver.ts                        app slug → apps.id (unknown → 404)
+apps/api/src/repositories/api-request-query.repository.ts  ApiRequestQueryRepository.listEndpointStats
+                                                       (percentile_cont over kind='http', ORDER BY whitelist, offset cursor)
+apps/api/migrations/0004_api_requests.sql              traffic.api_requests (+ 0002 traffic.apps for the slug)
+apps/api/src/domain/mappers.ts                         mapEndpointStats → EndpointStatsDto (packages/shared/src/dto/endpoints.ts)
+```
+
+| ROUTES leaf | Controller / service method | Repository method(s) | Notes |
+|---|---|---|---|
+| `overview.summary` | `OverviewController.summary` / `OverviewService.summary` | `ApiRequestQueryRepository.summarizeTraffic`, `WebEventQueryRepository.summarizePageViews` / `countActiveUsers` | current + previous window → `domain/compute-deltas.ts`; active users = last `ACTIVE_USER_WINDOW_MS` |
+| `overview.timeseries` | `OverviewController.timeseries` / `OverviewService.timeseries` | `ApiRequestQueryRepository.timeseries`, `WebEventQueryRepository.pageViewTimeseries` | `bucketExpr` (IST) in `apps/api/src/db/sql.ts`; gaps → `domain/timeseries-gaps.ts` |
+| `endpoints.list` | `EndpointController.list` / `EndpointService.list` | `listEndpointStats` | offset cursor (`encodeOffsetCursor`) |
+| `endpoints.detail` | `EndpointController.detail` / `EndpointService.detail` | `getEndpointDetail` | by stored `endpoint_id`; 404 when no rows; slowest samples role-masked |
+| `errors.summary` | `ErrorController.summary` / `ErrorService.summary` | `summarizeErrors` | totals, by status, series, top failing endpoints |
+| `errors.list` | `ErrorController.list` / `ErrorService.list` | `listFailures` | keyset `(occurred_at, event_id)` DESC; counts cap `MAX_COUNT_RANGE_MS` |
+
+Read-side rules (all in `apps/api/src/repositories/api-request-query.repository.ts`): every query is
+bounded by `occurred_at >= from AND < to` (partition pruning); failure filters emit the partial-index
+predicate `status_code >= 400` LITERALLY (`FAILURE_PREDICATES`, never a parameter); the keyset cursor
+carries `occurred_at` as microsecond text (`keysetTimeExpr` in `apps/api/src/db/sql.ts`), because a JS
+`Date` keeps only milliseconds and would repeat rows at page boundaries. Both query repositories run on
+the read-only QUERY pool. IPs leave the API for admins only (`mapActor` in `apps/api/src/domain/mappers.ts`).
 
 ## 6. How to find X
 

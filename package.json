@@ -12,6 +12,9 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "tsx --conditions=@nexus/source scripts/dev/index.ts",
+    "dev:stop": "tsx --conditions=@nexus/source scripts/dev/stop.ts",
+    "dev:reset": "tsx --conditions=@nexus/source scripts/dev/reset.ts",
     "build:shared": "npm run build -w @nexus/shared && npm run build -w @nexus/auth",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",

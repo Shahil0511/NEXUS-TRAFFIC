@@ -1,0 +1,364 @@
+/**
+ * S2 read side against a real, migrated database: ApiRequestQueryRepository and
+ * WebEventQueryRepository through the Overview / Endpoint / Error services, connected as nexus_app on
+ * a READ-ONLY query pool (exactly the runtime options of src/db/pool.ts createQueryPool).
+ *
+ * WHY: the unit suites prove SQL shape and service orchestration with fakes; only PostgreSQL can
+ * prove the numbers — counts, error rate, percentile_cont, IST bucket alignment, window bounds,
+ * ordering and both kinds of pagination. The dataset is described in ./analytics-seed.ts.
+ */
+import type { Pool } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { ERROR_CODES, type EndpointStatsDto, type FailedRequestDto } from '@nexus/shared';
+
+import { createQueryPool } from '../../src/db/pool';
+import type { Viewer } from '../../src/domain/viewer';
+import { FixedClock } from '../../src/lib/clock';
+import { ApiRequestQueryRepository } from '../../src/repositories/api-request-query.repository';
+import { AppRepository } from '../../src/repositories/app.repository';
+import { WebEventQueryRepository } from '../../src/repositories/web-event-query.repository';
+import { AppSlugResolver } from '../../src/services/app-slug.resolver';
+import { EndpointService } from '../../src/services/endpoint.service';
+import { ErrorService } from '../../src/services/error.service';
+import { OverviewService } from '../../src/services/overview.service';
+import {
+  ENDPOINT_IDS,
+  EXPECTED,
+  HR_SLUG,
+  HTTP_DURATIONS,
+  microsecondBlockAt,
+  percentileCont,
+  SALES_SLUG,
+  seedAnalytics,
+  SEEDED_IP,
+  type AnalyticsSeed,
+} from './analytics-seed';
+import { createTestDatabase, quietLogger, RUN_DB_TESTS, type TestDatabase } from './test-database';
+
+const HOUR = 3_600_000;
+const ADMIN: Viewer = { email: 'boss@libas.in', isAdmin: true };
+const VIEWER: Viewer = { email: 'viewer@libas.in', isAdmin: false };
+
+/** Every percentile in a DTO is rounded to 2 decimals (src/domain/numbers.ts). */
+const expectMs = (actual: number | null, expected: number) =>
+  expect(actual).toBeCloseTo(expected, 2);
+
+describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool (db)', () => {
+  let db: TestDatabase;
+  let queryPool: Pool;
+  let seed: AnalyticsSeed;
+  let requests: ApiRequestQueryRepository;
+  let overview: OverviewService;
+  let endpoints: EndpointService;
+  let errors: ErrorService;
+
+  beforeAll(async () => {
+    db = await createTestDatabase('analytics');
+    seed = await seedAnalytics(db);
+    queryPool = createQueryPool(db.appUrl, 4, quietLogger);
+    requests = new ApiRequestQueryRepository(queryPool);
+    const webEvents = new WebEventQueryRepository(queryPool);
+    const appSlugs = new AppSlugResolver(new AppRepository(queryPool));
+    const clock = new FixedClock(seed.now);
+    overview = new OverviewService(requests, webEvents, appSlugs, clock);
+    endpoints = new EndpointService(requests, appSlugs, clock);
+    errors = new ErrorService(requests, appSlugs, clock);
+  });
+
+  afterAll(async () => {
+    await queryPool?.end();
+    await db?.drop();
+  });
+
+  // ─── Overview ─────────────────────────────────────────────────────────────
+
+  describe('OverviewService.summary', () => {
+    it('counts requests, error rate, p95 (http only) and identified users, with previous-window deltas', async () => {
+      const dto = await overview.summary({ range: '24h' });
+      const allHttp = Object.values(HTTP_DURATIONS).flat();
+
+      expect(dto.requests).toEqual({
+        value: EXPECTED.requests,
+        previous: EXPECTED.previousRequests,
+        deltaPct: 320,
+      });
+      expect(dto.errorRate.value).toBeCloseTo((EXPECTED.failures / EXPECTED.requests) * 100, 2);
+      expect(dto.errorRate.previous).toBe(0);
+      expect(dto.errorRate.deltaPct).toBeNull();
+      // The 600 000 ms stream is excluded from latency: p95 stays far below it.
+      expectMs(dto.p95Ms.value, percentileCont(allHttp, 0.95));
+      expectMs(dto.p95Ms.previous, 10);
+      expect(dto.identifiedUsers).toEqual({
+        value: EXPECTED.identifiedUsers,
+        previous: EXPECTED.previousIdentifiedUsers,
+        deltaPct: 100,
+      });
+      expect(dto.pageViews).toEqual({
+        value: EXPECTED.pageViews,
+        previous: EXPECTED.previousPageViews,
+        deltaPct: 200,
+      });
+      expect(dto.activeUsersNow).toBe(EXPECTED.activeUsersNow);
+      expect(dto.window).toEqual({
+        from: new Date(seed.now.getTime() - 24 * HOUR).toISOString(),
+        to: seed.now.toISOString(),
+        grain: 'hour',
+      });
+    });
+
+    it('scopes every KPI to one app', async () => {
+      const hr = await overview.summary({ range: '24h', app: HR_SLUG });
+      expect(hr.requests.value).toBe(EXPECTED.calls.leaveList);
+      expect(hr.errorRate.value).toBe(50);
+      expect(hr.identifiedUsers.value).toBe(0);
+      expect(hr.pageViews.value).toBe(1);
+      expect(hr.activeUsersNow).toBe(1);
+
+      const sales = await overview.summary({ range: '24h', app: SALES_SLUG });
+      expect(sales.requests.value).toBe(EXPECTED.calls.storeLookup + EXPECTED.calls.reportExport);
+      expect(sales.requests.previous).toBe(EXPECTED.previousRequests);
+    });
+
+    it('refuses 90 days (percentiles) with RANGE_TOO_LARGE', async () => {
+      await expect(overview.summary({ range: '90d' })).rejects.toMatchObject({
+        code: ERROR_CODES.RANGE_TOO_LARGE,
+      });
+    });
+  });
+
+  describe('OverviewService.timeseries', () => {
+    it('returns 24 IST-aligned hour buckets with the seeded counts and zeros elsewhere', async () => {
+      const { points, window } = await overview.timeseries({ range: '24h' });
+      expect(window.grain).toBe('hour');
+      expect(points).toHaveLength(24);
+      // IST is +05:30, so every hour bucket starts at :30 UTC.
+      for (const point of points) expect(point.bucket).toMatch(/T\d{2}:30:00\.000Z$/);
+
+      const at = (hoursBeforeNow: number) =>
+        points.find(
+          (p) => p.bucket === new Date(seed.now.getTime() - hoursBeforeNow * HOUR).toISOString(),
+        );
+      expect(at(1)).toMatchObject({ requests: 6, errors4xx: 2, errors5xx: 1, pageViews: 2 });
+      expect(at(2)).toMatchObject({ requests: 10, errors4xx: 0, errors5xx: 0 });
+      expectMs(at(2)?.p95Ms ?? null, percentileCont(HTTP_DURATIONS.storeLookup, 0.95));
+      expect(at(3)).toMatchObject({ requests: 0, pageViews: 1, p95Ms: null });
+      expect(at(5)).toMatchObject({ requests: 5, errors4xx: 1, errors5xx: 2 });
+      expectMs(at(5)?.p95Ms ?? null, percentileCont(HTTP_DURATIONS.reportExport, 0.95));
+
+      const total = points.reduce((sum, p) => sum + p.requests, 0);
+      expect(total).toBe(EXPECTED.requests);
+    });
+
+    it('day buckets start at IST midnight (18:30 UTC the day before)', async () => {
+      const rows = await requests.timeseries(
+        { from: new Date(seed.now.getTime() - 24 * HOUR), to: seed.now },
+        'day',
+      );
+      const istMidnight = new Date(seed.now.getTime() - 12 * HOUR); // now is 12:00 IST
+      expect(rows.map((r) => r.bucket.toISOString())).toEqual([istMidnight.toISOString()]);
+      expect(rows[0]?.requests).toBe(EXPECTED.requests);
+    });
+  });
+
+  // ─── API Routes ───────────────────────────────────────────────────────────
+
+  describe('EndpointService.list', () => {
+    const ids = (items: EndpointStatsDto[]) => items.map((i) => i.endpointId);
+
+    it('aggregates per endpoint with percentiles over http rows only', async () => {
+      const page = await endpoints.list({ range: '24h', sort: 'calls', dir: 'desc', limit: 50 });
+      expect(ids(page.items)).toEqual([
+        ENDPOINT_IDS.storeLookup,
+        ENDPOINT_IDS.leaveList,
+        ENDPOINT_IDS.reportExport,
+      ]);
+      const report = page.items.find((i) => i.endpointId === ENDPOINT_IDS.reportExport);
+      expect(report).toMatchObject({
+        app: SALES_SLUG,
+        method: 'POST',
+        routeTemplate: '/ebo-sales/api/reports/export',
+        calls: EXPECTED.calls.reportExport,
+        errors4xx: 1,
+        errors5xx: 2,
+        errorRate: 60,
+      });
+      expectMs(report?.p50Ms ?? null, percentileCont(HTTP_DURATIONS.reportExport, 0.5));
+      expectMs(report?.p95Ms ?? null, percentileCont(HTTP_DURATIONS.reportExport, 0.95));
+      expectMs(report?.p99Ms ?? null, percentileCont(HTTP_DURATIONS.reportExport, 0.99));
+      expectMs(report?.avgMs ?? null, 2500);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it('orders by each whitelisted key', async () => {
+      const byErrorRate = await endpoints.list({
+        range: '24h',
+        sort: 'errorRate',
+        dir: 'desc',
+        limit: 50,
+      });
+      expect(ids(byErrorRate.items)).toEqual([
+        ENDPOINT_IDS.reportExport,
+        ENDPOINT_IDS.leaveList,
+        ENDPOINT_IDS.storeLookup,
+      ]);
+      const byP95 = await endpoints.list({ range: '24h', sort: 'p95', dir: 'asc', limit: 50 });
+      expect(ids(byP95.items)).toEqual([
+        ENDPOINT_IDS.leaveList,
+        ENDPOINT_IDS.storeLookup,
+        ENDPOINT_IDS.reportExport,
+      ]);
+    });
+
+    it('pages with the offset cursor without duplicates or gaps', async () => {
+      const first = await endpoints.list({ range: '24h', sort: 'calls', dir: 'desc', limit: 2 });
+      expect(ids(first.items)).toEqual([ENDPOINT_IDS.storeLookup, ENDPOINT_IDS.leaveList]);
+      expect(first.nextCursor).not.toBeNull();
+      const second = await endpoints.list({
+        range: '24h',
+        sort: 'calls',
+        dir: 'desc',
+        limit: 2,
+        cursor: first.nextCursor ?? undefined,
+      });
+      expect(ids(second.items)).toEqual([ENDPOINT_IDS.reportExport]);
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it('filters by app and by a route-template search', async () => {
+      const hr = await endpoints.list({
+        range: '24h',
+        app: HR_SLUG,
+        sort: 'calls',
+        dir: 'desc',
+        limit: 50,
+      });
+      expect(ids(hr.items)).toEqual([ENDPOINT_IDS.leaveList]);
+      const search = await endpoints.list({
+        range: '24h',
+        search: 'REPORTS',
+        sort: 'calls',
+        dir: 'desc',
+        limit: 50,
+      });
+      expect(ids(search.items)).toEqual([ENDPOINT_IDS.reportExport]);
+    });
+  });
+
+  describe('EndpointService.detail', () => {
+    it('returns stats, the series, the status breakdown and the slowest http calls', async () => {
+      const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, ADMIN);
+      expect(dto.endpoint.calls).toBe(EXPECTED.calls.reportExport);
+      expect(dto.timeseries).toHaveLength(24);
+      expect(dto.timeseries.reduce((sum, p) => sum + p.requests, 0)).toBe(
+        EXPECTED.calls.reportExport,
+      );
+      expect(dto.statusBreakdown).toEqual([
+        { status: 200, count: 2 },
+        { status: 500, count: 2 },
+        { status: 404, count: 1 },
+      ]);
+      // Streams are not "slow calls"; slowest first.
+      expect(dto.slowest.map((s) => s.durationMs)).toEqual([4000, 3000, 2000, 1000]);
+      expect(dto.slowest[0]?.actor.ip).toBe(SEEDED_IP);
+      expect(dto.slowest[0]?.actor.userKey).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('masks IPs for non-admins', async () => {
+      const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, VIEWER);
+      expect(dto.slowest.every((s) => s.actor.ip === null)).toBe(true);
+      expect(JSON.stringify(dto)).not.toContain(SEEDED_IP);
+    });
+
+    it('404 for an endpoint with no rows in the window, or outside the app filter', async () => {
+      await expect(
+        endpoints.detail('00000000-0000-5000-8000-000000000000', { range: '24h' }, ADMIN),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      await expect(
+        endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h', app: HR_SLUG }, ADMIN),
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+  });
+
+  // ─── Errors ───────────────────────────────────────────────────────────────
+
+  describe('ErrorService.summary', () => {
+    it('totals failures by class and status, and lists the failing endpoints only', async () => {
+      const dto = await errors.summary({ range: '24h' });
+      expect(dto).toMatchObject({
+        total: EXPECTED.failures,
+        errors4xx: EXPECTED.errors4xx,
+        errors5xx: EXPECTED.errors5xx,
+      });
+      expect(dto.byStatus).toEqual([
+        { status: 401, count: 2 },
+        { status: 500, count: 2 },
+        { status: 404, count: 1 },
+        { status: 503, count: 1 },
+      ]);
+      expect(dto.timeseries).toHaveLength(24);
+      expect(new Set(dto.topEndpoints.map((e) => e.endpointId))).toEqual(
+        new Set([ENDPOINT_IDS.reportExport, ENDPOINT_IDS.leaveList]),
+      );
+    });
+  });
+
+  describe('ErrorService.list', () => {
+    /** Follows nextCursor until the end; returns every page. */
+    async function allPages(
+      query: Parameters<ErrorService['list']>[0],
+    ): Promise<FailedRequestDto[][]> {
+      const pages: FailedRequestDto[][] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await errors.list({ ...query, cursor }, ADMIN);
+        pages.push(page.items);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor && pages.length < 20);
+      return pages;
+    }
+
+    it('keyset-pages the failures newest first, without duplicates or gaps', async () => {
+      const pages = await allPages({ range: '24h', statusClass: 'all', limit: 2 });
+      expect(pages.map((p) => p.length)).toEqual([2, 2, 2]);
+      expect(pages.flat().map((f) => f.eventId)).toEqual(seed.failureIds);
+    });
+
+    it('keeps microsecond order at page boundaries (same millisecond, distinct µs, tied instants)', async () => {
+      const at = microsecondBlockAt(seed.now);
+      const pages = await allPages({
+        range: 'custom',
+        from: new Date(at.getTime() - 60_000).toISOString(),
+        to: new Date(at.getTime() + 60_000).toISOString(),
+        statusClass: '5xx',
+        limit: 2,
+      });
+      expect(pages.flat().map((f) => f.eventId)).toEqual(seed.microsecondIds);
+    });
+
+    it('filters by status class, endpoint and app', async () => {
+      const only = async (query: Partial<Parameters<ErrorService['list']>[0]>) =>
+        (await errors.list({ range: '24h', statusClass: 'all', limit: 50, ...query }, ADMIN)).items;
+      expect((await only({ statusClass: '5xx' })).map((f) => f.status).sort()).toEqual([
+        500, 500, 503,
+      ]);
+      expect((await only({ statusClass: '4xx' })).map((f) => f.status).sort()).toEqual([
+        401, 401, 404,
+      ]);
+      expect((await only({ endpointId: ENDPOINT_IDS.leaveList })).length).toBe(3);
+      expect((await only({ app: SALES_SLUG })).every((f) => f.app === SALES_SLUG)).toBe(true);
+    });
+
+    it('masks IPs for non-admins', async () => {
+      const page = await errors.list({ range: '24h', statusClass: 'all', limit: 50 }, VIEWER);
+      expect(page.items.length).toBe(EXPECTED.failures);
+      expect(JSON.stringify(page)).not.toContain(SEEDED_IP);
+    });
+  });
+
+  it('the query pool is read-only (a dashboard bug can never write)', async () => {
+    await expect(queryPool.query('DELETE FROM traffic.api_requests')).rejects.toMatchObject({
+      code: '25006',
+    });
+  });
+});

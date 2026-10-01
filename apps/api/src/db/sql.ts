@@ -25,6 +25,12 @@ export function orderByClause(
   return `ORDER BY ${column} ${direction === 'asc' ? 'ASC' : 'DESC'} NULLS LAST`;
 }
 
+/**
+ * Origin of every sub-day bucket: midnight IST on 2000-01-01. Shared with the gap filler
+ * (domain/timeseries-gaps.ts) so empty buckets land exactly where SQL buckets would.
+ */
+export const BUCKET_ORIGIN_ISO = `2000-01-01T00:00:00${REPORTING_UTC_OFFSET}`;
+
 const DATE_BIN_STRIDE: Record<Exclude<Grain, 'day'>, string> = {
   minute: '1 minute',
   hour: '1 hour',
@@ -37,7 +43,7 @@ const DATE_BIN_STRIDE: Record<Exclude<Grain, 'day'>, string> = {
  */
 export function bucketExpr(grain: Grain, column = 'occurred_at'): string {
   if (grain === 'day') return `date_trunc('day', ${column}, '${REPORTING_TIME_ZONE}')`;
-  return `date_bin('${DATE_BIN_STRIDE[grain]}', ${column}, TIMESTAMPTZ '2000-01-01 00:00:00${REPORTING_UTC_OFFSET}')`;
+  return `date_bin('${DATE_BIN_STRIDE[grain]}', ${column}, TIMESTAMPTZ '${BUCKET_ORIGIN_ISO}')`;
 }
 
 /** Opaque offset cursor for aggregate lists (keyset is not meaningful over GROUP BY results). */
@@ -52,17 +58,45 @@ export function decodeOffsetCursor(cursor: string | undefined): number {
   return Number.isInteger(offset) && offset >= 0 ? offset : 0;
 }
 
-/** Keyset cursor over (occurred_at, event_id) for raw event lists. */
-export function encodeKeysetCursor(occurredAt: Date, eventId: string): string {
-  return Buffer.from(`k:${occurredAt.toISOString()}|${eventId}`).toString('base64url');
+/**
+ * SQL rendering `column` (a timestamptz) as ISO-8601 UTC text with MICROSECONDS, e.g.
+ * `2026-10-01T09:15:30.123456Z`. Keyset cursors MUST use it instead of the parsed JS Date:
+ * `occurred_at` is the sender's value stored verbatim (up to µs precision) and a Date keeps only
+ * milliseconds, so a Date-based cursor would repeat rows at a page boundary. `column` MUST be a
+ * trusted identifier.
+ */
+export function keysetTimeExpr(column: string): string {
+  return `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 }
 
-export function decodeKeysetCursor(cursor: string | undefined): { occurredAt: Date; eventId: string } | null {
+/** What keysetTimeExpr produces (also accepts fewer fractional digits). */
+const KEYSET_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+/**
+ * Keyset cursor over (occurred_at, event_id) for raw event lists. `occurredAt` is the µs-precision
+ * text of keysetTimeExpr (never `Date#toISOString`, see there).
+ */
+export function encodeKeysetCursor(occurredAt: string, eventId: string): string {
+  return Buffer.from(`k:${occurredAt}|${eventId}`).toString('base64url');
+}
+
+/** Cursor → keyset, or null when it is not a well-formed keyset cursor. */
+export function decodeKeysetCursor(
+  cursor: string | undefined,
+): { occurredAt: string; eventId: string } | null {
   if (!cursor) return null;
   const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
   if (!decoded.startsWith('k:')) return null;
-  const [iso, eventId] = decoded.slice(2).split('|');
-  const occurredAt = new Date(iso ?? '');
-  if (!eventId || Number.isNaN(occurredAt.getTime())) return null;
+  const [occurredAt, eventId] = decoded.slice(2).split('|');
+  if (!eventId || !occurredAt || !KEYSET_TIME_PATTERN.test(occurredAt)) return null;
+  if (Number.isNaN(Date.parse(occurredAt))) return null;
   return { occurredAt, eventId };
+}
+
+/**
+ * `%text%` for a parameterised (I)LIKE "contains" search. `\`, `%` and `_` in user input are
+ * escaped (backslash is PostgreSQL's default LIKE escape), so a search for `50%` matches literally.
+ */
+export function likeContains(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }

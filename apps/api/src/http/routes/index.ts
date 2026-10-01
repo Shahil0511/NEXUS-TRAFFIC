@@ -7,8 +7,15 @@ import {
   appSlugParamsSchema,
   createAppBodySchema,
   createKeyBodySchema,
+  endpointDetailParamsSchema,
+  endpointDetailQuerySchema,
+  endpointListQuerySchema,
   ERROR_CODES,
+  errorListQuerySchema,
+  errorSummaryQuerySchema,
   expireKeyBodySchema,
+  overviewSummaryQuerySchema,
+  overviewTimeseriesQuerySchema,
   ROUTES,
   serverIngestEnvelopeSchema,
   updateAppBodySchema,
@@ -16,7 +23,7 @@ import {
 import { Router } from 'express';
 
 import type { Container } from '../../container';
-import { validateBody, validateParams } from '../middleware/validate.middleware';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.middleware';
 
 export function buildRouter(c: Container): Router {
   const r = Router();
@@ -77,6 +84,49 @@ export function buildRouter(c: Container): Router {
     ctl.apps.expireKey,
   );
   r.delete(ROUTES.apps.revokeKey.path, ...admin, validateParams(appKeyParamsSchema), ctl.apps.revokeKey);
+
+  // ─── Dashboard: overview ──────────────────────────────────────────────────
+  r.get(
+    ROUTES.overview.summary.path,
+    ...dashboard,
+    validateQuery(overviewSummaryQuerySchema),
+    ctl.overview.summary,
+  );
+  r.get(
+    ROUTES.overview.timeseries.path,
+    ...dashboard,
+    validateQuery(overviewTimeseriesQuerySchema),
+    ctl.overview.timeseries,
+  );
+
+  // ─── Dashboard: API routes ────────────────────────────────────────────────
+  r.get(
+    ROUTES.endpoints.list.path,
+    ...dashboard,
+    validateQuery(endpointListQuerySchema),
+    ctl.endpoints.list,
+  );
+  r.get(
+    ROUTES.endpoints.detail.path,
+    ...dashboard,
+    validateParams(endpointDetailParamsSchema),
+    validateQuery(endpointDetailQuerySchema),
+    ctl.endpoints.detail,
+  );
+
+  // ─── Dashboard: errors ────────────────────────────────────────────────────
+  r.get(
+    ROUTES.errors.summary.path,
+    ...dashboard,
+    validateQuery(errorSummaryQuerySchema),
+    ctl.errors.summary,
+  );
+  r.get(
+    ROUTES.errors.list.path,
+    ...dashboard,
+    validateQuery(errorListQuerySchema),
+    ctl.errors.list,
+  );
 
   return r;
 }

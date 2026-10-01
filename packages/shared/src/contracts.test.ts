@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { toEndpointId, uuidV5 } from './endpoint-id';
 import { liveRoom, liveScopeKey, SOCKET_EVENTS } from './events';
-import { buildPath, listRoutes, ROUTES } from './routes';
+import {
+  buildPath,
+  listRoutes,
+  NON_DASHBOARD_ROUTE_GROUPS,
+  PENDING_ROUTE_LEAVES,
+  ROUTES,
+} from './routes';
 import { endpointListQuerySchema, timeWindowQuerySchema } from './schemas';
 import { grainFor, resolveTimeWindow, TimeWindowError } from './time-window';
 
@@ -17,6 +23,16 @@ describe('ROUTES', () => {
   it('has no duplicate method+path', () => {
     const keys = listRoutes().map(({ route }) => `${route.method} ${route.path}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('lists each pending leaf once, and only real leaves', () => {
+    const known = new Set(listRoutes().map(({ group, leaf }) => `${group}.${leaf}`));
+    expect(new Set(PENDING_ROUTE_LEAVES).size).toBe(PENDING_ROUTE_LEAVES.length);
+    expect(PENDING_ROUTE_LEAVES.filter((id) => !known.has(id))).toEqual([]);
+  });
+
+  it('names only real groups as non-dashboard groups', () => {
+    for (const group of NON_DASHBOARD_ROUTE_GROUPS) expect(ROUTES[group]).toBeDefined();
   });
 
   it('buildPath encodes params and throws on missing ones', () => {
@@ -55,8 +71,35 @@ describe('time windows', () => {
   });
 
   it('validates custom ranges and caps', () => {
-    expect(() => resolveTimeWindow({ range: 'custom', from: '2026-10-02T00:00:00Z', to: '2026-10-01T00:00:00Z' }, now)).toThrow(TimeWindowError);
+    expect(() =>
+      resolveTimeWindow(
+        { range: 'custom', from: '2026-10-02T00:00:00Z', to: '2026-10-01T00:00:00Z' },
+        now,
+      ),
+    ).toThrow(TimeWindowError);
     expect(() => resolveTimeWindow({ range: '90d' }, now, 31 * 86_400_000)).toThrow(/too large/);
+  });
+
+  it('tags refusals with a reason (tooLarge → RANGE_TOO_LARGE in the API)', () => {
+    const reasonOf = (fn: () => unknown) => {
+      try {
+        fn();
+      } catch (err) {
+        return err instanceof TimeWindowError ? err.reason : 'not a TimeWindowError';
+      }
+      return 'did not throw';
+    };
+    expect(reasonOf(() => resolveTimeWindow({ range: '90d' }, now, 31 * 86_400_000))).toBe(
+      'tooLarge',
+    );
+    expect(
+      reasonOf(() =>
+        resolveTimeWindow(
+          { range: 'custom', from: '2026-10-02T00:00:00Z', to: '2026-10-01T00:00:00Z' },
+          now,
+        ),
+      ),
+    ).toBe('invalid');
   });
 
   it('query schema defaults range and requires from/to for custom', () => {

@@ -5,9 +5,10 @@
  * WHY: ROUTES is the only link across HTTP. This test fails if a leaf that a step claims to have
  * built is not registered (or is registered twice, or with the wrong verb, or not wired to the
  * controller method of the same name), and EXPECTED_PENDING documents, leaf by leaf, what later
- * steps still have to add. When a step registers a leaf, it MUST remove it from EXPECTED_PENDING.
+ * steps still have to add. When a step registers a leaf, it MUST remove it from PENDING_ROUTE_LEAVES
+ * (packages/shared/src/routes.ts) and add its api.* function in apps/web/src/lib/api.ts.
  */
-import { listRoutes, type RouteDescriptor } from '@nexus/shared';
+import { listRoutes, PENDING_ROUTE_LEAVES, type RouteDescriptor } from '@nexus/shared';
 import type { RequestHandler, Router } from 'express';
 import { describe, expect, it } from 'vitest';
 
@@ -16,32 +17,11 @@ import type { Container } from '../src/container';
 import { buildRouter } from '../src/http/routes';
 import { silentLogger } from './ingest-fixtures';
 
-/** `group.leaf` of every ROUTES leaf that is deliberately NOT registered yet, with its step. */
-const EXPECTED_PENDING = [
-  // S2: dashboard Overview / API Routes / Errors
-  'overview.summary',
-  'overview.timeseries',
-  'endpoints.list',
-  'endpoints.detail',
-  'errors.summary',
-  'errors.list',
-  // S3: browser ingest + Users / Journeys / Pages & Tools / Geography
-  'ingest.browser',
-  'users.list',
-  'users.profile',
-  'users.timeline',
-  'journeys.sessions',
-  'journeys.session',
-  'journeys.topPaths',
-  'pages.list',
-  'tools.usage',
-  'geo.countries',
-  'geo.cities',
-  // S4: live page
-  'live.snapshot',
-  // S5: Integration Health
-  'integration.health',
-] as const;
+/**
+ * `group.leaf` of every ROUTES leaf that is deliberately NOT registered yet (shared with the web
+ * client coverage test, so the dashboard client covers exactly what the API serves).
+ */
+const EXPECTED_PENDING = PENDING_ROUTE_LEAVES;
 
 // ─── Fake container: every handler is a stable, named function ─────────────
 

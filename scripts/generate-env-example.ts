@@ -3,7 +3,7 @@
  *
  * WHY: the env keys are defined ONCE (apps/api/src/config/env.schema.ts); hand-maintaining a second
  * list in .env.example always drifts. This script renders every api key (in a fixed section order,
- * with a human description) plus the keys that only migrate, compose or the future web container
+ * with a human description) plus the keys that only migrate, compose or the web container
  * read. `--check` exits 1 when the committed file is stale, and
  * apps/api/test/env-example.test.ts asserts every key is claimed by someone.
  *
@@ -33,7 +33,7 @@ export const COMPOSE_ONLY_KEYS = [
   'BACKUP_DATABASE_URL',
 ] as const;
 
-/** Read by the web container, which arrives in S2 (listed now so the TL fills .env once). */
+/** Read ONLY by the web container (apps/web/src/env.schema.ts + its test). */
 export const WEB_KEYS = [
   'PORTAL_LOGIN_URL',
   'PORTAL_RETURN_PARAM',

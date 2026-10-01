@@ -30,7 +30,8 @@ name: nexus-traffic
 #   pg-backup  nightly pg_dump of BACKUP_DATABASE_URL (default: MIGRATION_DATABASE_URL) at 01:30 IST
 #              into ./backups, keeps the newest 14.
 #   edge       ONLY with --profile local: a local copy of the gateway on 127.0.0.1:8080.
-#   web        the dashboard — arrives in S2 (placeholder block below).
+#   web        the dashboard (Next.js, basePath /traffic). Host port 127.0.0.1:3305 only; the gateway
+#              nginx proxies https://nexus.libas.in/traffic/ → here. Gets ONLY an env allowlist.
 #
 # Requires Docker Compose v2.20+ (`docker compose`, not the old `docker-compose` v1). v2.20 is the
 # first with `depends_on: … required: false`, which lets migrate/pg-backup run without the postgres
@@ -124,37 +125,38 @@ services:
     #   nexus-ingest:
     #     aliases: [nexus-traffic-api]
 
-  # ─── Web dashboard (added in S2) ────────────────────────────────────────────
-  # PLACEHOLDER — uncomment in S2 when apps/web exists. Kept here so the layout is visible now.
-  # web:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/web/Dockerfile
-  #     args:
-  #       NEXT_PUBLIC_SOCKET_PATH: ${NEXT_PUBLIC_SOCKET_PATH:-/traffic/socket.io}
-  #   image: nexus-traffic-web:local
-  #   pull_policy: build
-  #   environment: # allowlist — the web container gets only what it needs
-  #     LIBAS_JWT_SECRET: ${LIBAS_JWT_SECRET}
-  #     PORTAL_LOGIN_URL: ${PORTAL_LOGIN_URL}
-  #     PORTAL_RETURN_PARAM: ${PORTAL_RETURN_PARAM:-return}
-  #     PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://nexus.libas.in}
-  #     DASHBOARD_ALLOWED_EMAILS: ${DASHBOARD_ALLOWED_EMAILS:-}
-  #     DASHBOARD_ALLOWED_DOMAINS: ${DASHBOARD_ALLOWED_DOMAINS:-libas.in}
-  #     DASHBOARD_ADMIN_EMAILS: ${DASHBOARD_ADMIN_EMAILS:-}
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #   ports:
-  #     - '127.0.0.1:3305:3000'
-  #   healthcheck:
-  #     test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/traffic/healthz >/dev/null || exit 1']
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 30s
-  #   restart: unless-stopped
-  #   logging: *logging
+  # ─── Web dashboard ──────────────────────────────────────────────────────────
+  # Next.js standalone, served at /traffic (basePath). The gateway nginx proxies
+  # https://nexus.libas.in/traffic/ → here; /traffic/api/ and /traffic/socket.io/ go to the api.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_SOCKET_PATH: ${NEXT_PUBLIC_SOCKET_PATH:-/traffic/socket.io}
+    image: nexus-traffic-web:local
+    pull_policy: build
+    environment: # allowlist — the web container gets ONLY what it needs (no DB URL, no peppers)
+      LIBAS_JWT_SECRET: ${LIBAS_JWT_SECRET:?set LIBAS_JWT_SECRET in .env}
+      PORTAL_LOGIN_URL: ${PORTAL_LOGIN_URL:-https://nexus.libas.in/login}
+      PORTAL_RETURN_PARAM: ${PORTAL_RETURN_PARAM:-return}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://nexus.libas.in}
+      DASHBOARD_ALLOWED_EMAILS: ${DASHBOARD_ALLOWED_EMAILS:-}
+      DASHBOARD_ALLOWED_DOMAINS: ${DASHBOARD_ALLOWED_DOMAINS:-libas.in}
+      DASHBOARD_ADMIN_EMAILS: ${DASHBOARD_ADMIN_EMAILS:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:3305:3000' # loopback only: the gateway nginx on this host proxies to it
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/traffic/healthz >/dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
 
   # ─── Nightly backup ─────────────────────────────────────────────────────────
   # The shared server may already be backed up by its owners; this is a Nexus-only dump (ADR 0002).
@@ -184,6 +186,8 @@ services:
       - '127.0.0.1:8080:80'
     depends_on:
       api:
+        condition: service_healthy
+      web:
         condition: service_healthy
     restart: unless-stopped
     logging: *logging

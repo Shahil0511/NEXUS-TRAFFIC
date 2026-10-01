@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+  ADMIN_VIEWER,
+  apiRequestSampleRow,
+  ENDPOINT_ID,
+  endpointStatsRow,
+  EVENT_ID,
+  OCCURRED_AT,
+  PLAIN_VIEWER,
+  trafficBucketRow,
+} from '../../test/fixtures/analytics-rows';
 import { apiKeyRow, appRow, CREATED_AT } from '../../test/fixtures/app-rows';
-import { mapApiKey, mapApp } from './mappers';
+import {
+  mapActor,
+  mapApiKey,
+  mapApp,
+  mapEndpointStats,
+  mapRequestSample,
+  mapStatusCount,
+  mapTimeseriesPoint,
+} from './mappers';
 
 describe('mapApiKey', () => {
   it('maps every column to camelCase with ISO dates', () => {
@@ -69,5 +87,109 @@ describe('mapApp', () => {
     dto.allowedOrigins.push('https://evil.example');
     expect(row.allowed_origins).toEqual(['https://nexus.libas.in']);
     expect(dto.keys).toEqual([]);
+  });
+});
+
+// ─── Analytics mappers ──────────────────────────────────────────────────────
+
+describe('mapActor / mapRequestSample — IP is ADMIN-ONLY', () => {
+  it('admins see the stored IP', () => {
+    expect(mapActor(apiRequestSampleRow(), ADMIN_VIEWER).ip).toBe('8.8.8.8');
+  });
+
+  it('non-admins NEVER receive the IP, anywhere in the payload', () => {
+    const dto = mapRequestSample(apiRequestSampleRow(), PLAIN_VIEWER);
+    expect(dto.actor.ip).toBeNull();
+    expect(JSON.stringify(dto)).not.toContain('8.8.8.8');
+  });
+
+  it('renders user_key as 64-char hex and keeps the identity fields', () => {
+    const actor = mapActor(apiRequestSampleRow(), PLAIN_VIEWER);
+    expect(actor).toEqual({
+      userKey: 'ab'.repeat(32),
+      userEmail: 'someone@libas.in',
+      claimedEmail: null,
+      identitySource: 'app_attested',
+      ip: null,
+      geo: { country: 'US', region: 'CA', city: 'Mountain View' },
+    });
+  });
+
+  it('anonymous rows have no user key and an all-null location becomes geo: null', () => {
+    const actor = mapActor(
+      apiRequestSampleRow({
+        user_email: null,
+        user_key: null,
+        identity_source: 'anonymous',
+        geo_country: null,
+        geo_region: null,
+        geo_city: null,
+      }),
+      ADMIN_VIEWER,
+    );
+    expect(actor.userKey).toBeNull();
+    expect(actor.geo).toBeNull();
+  });
+});
+
+describe('mapRequestSample', () => {
+  it('maps status_code → status, ISO dates and rounded duration', () => {
+    expect(mapRequestSample(apiRequestSampleRow(), ADMIN_VIEWER)).toMatchObject({
+      eventId: EVENT_ID,
+      occurredAt: OCCURRED_AT.toISOString(),
+      app: 'ebo-sales',
+      kind: 'http',
+      method: 'POST',
+      endpointId: ENDPOINT_ID,
+      status: 500,
+      durationMs: 1290.4,
+      errorCode: 'REPORT_TIMEOUT',
+      requestId: 'req-1',
+    });
+  });
+});
+
+describe('mapEndpointStats', () => {
+  it('derives the error rate and rounds latencies', () => {
+    expect(mapEndpointStats(endpointStatsRow())).toEqual({
+      endpointId: ENDPOINT_ID,
+      app: 'ebo-sales',
+      method: 'GET',
+      routeTemplate: '/ebo-sales/api/v1/stores/:id',
+      calls: 200,
+      errors4xx: 6,
+      errors5xx: 2,
+      errorRate: 4,
+      p50Ms: 41.7,
+      p95Ms: 120.25,
+      p99Ms: 480,
+      avgMs: 55.12,
+      lastSeenAt: OCCURRED_AT.toISOString(),
+    });
+  });
+
+  it('keeps null percentiles (a stream-only endpoint has no latency)', () => {
+    const dto = mapEndpointStats(
+      endpointStatsRow({ p50_ms: null, p95_ms: null, p99_ms: null, avg_ms: null }),
+    );
+    expect([dto.p50Ms, dto.p95Ms, dto.p99Ms, dto.avgMs]).toEqual([null, null, null, null]);
+  });
+});
+
+describe('mapTimeseriesPoint / mapStatusCount', () => {
+  it('maps a bucket with ISO time and default page views 0', () => {
+    expect(mapTimeseriesPoint(trafficBucketRow())).toEqual({
+      bucket: '2026-10-01T08:30:00.000Z',
+      requests: 10,
+      errors4xx: 1,
+      errors5xx: 1,
+      p95Ms: 99.5,
+      pageViews: 0,
+    });
+    expect(mapTimeseriesPoint(trafficBucketRow(), 3).pageViews).toBe(3);
+  });
+
+  it('maps a status count', () => {
+    expect(mapStatusCount({ status_code: 404, count: 12 })).toEqual({ status: 404, count: 12 });
   });
 });

@@ -17,6 +17,32 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-01 — S2 Dashboard shell + SSO + Overview / API Routes / Errors
+
+**Done**
+- **Contract**: dashboard leaves for overview / endpoints / errors in `packages/shared/src/routes.ts`;
+  `PENDING_ROUTE_LEAVES` now lists only the S3–S5 leaves (shared by the api route contract test and the
+  web client coverage test); `time-window.ts` extended for bucket alignment.
+- **API read side**: `ApiRequestQueryRepository` (+ `WebEventQueryRepository` stub for S3), services
+  `OverviewService`, `EndpointService`, `ErrorService`, `query-window.ts`; domain helpers
+  `compute-deltas`, `pagination` (keyset cursors), `timeseries-gaps`, `filters`, `numbers`; mappers/rows;
+  controllers + `cache-control.ts`. Chain documented in [03-code-navigation.md](03-code-navigation.md) §5.
+- **Web** (`apps/web`, Next.js): SSO proxy (`proxy.ts`), app shell + nav, global filters (app, range),
+  Overview (KPIs, traffic/latency/error charts), API Routes list + endpoint detail, Errors (summary, top
+  failing endpoints, failed requests with "Load more"); later pages render `ComingSoon`.
+- **Local dev**: `npm run dev` launcher (`scripts/dev/`: dev Postgres container on :55434, migrate, seed,
+  sample traffic, dev token, launcher page), `scripts/mint-dev-token.ts`. See
+  [09-local-development.md](09-local-development.md).
+- **Docker**: `web` service in compose, nginx routes `/traffic` → web and `/traffic/api` → api.
+- **Tests**: api 502 unit + DB suites (`analytics-queries`, `e2e/dashboard`), web 81, dev scripts 41,
+  shared 31 — green.
+
+**Next (S3)**: browser ingest (`POST /api/v1/ingest/browser`, public key, `exposed_at` on secret-key use),
+`web_events` query repository, Users / Journeys / Pages & Tools / Geography pages; remove the S3 leaves
+from `PENDING_ROUTE_LEAVES`.
+
+---
+
 ## 2026-10-01 — Production database created (ADR 0002)
 
 - Database `nexus_traffic` created on the shared server 10.150.0.5 (PostgreSQL 18.1, owner `shahil`).

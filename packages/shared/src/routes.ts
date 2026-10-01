@@ -133,3 +133,48 @@ export function listRoutes(): Array<{ group: string; leaf: string; route: RouteD
     Object.entries(leaves).map(([leaf, route]) => ({ group, leaf, route })),
   );
 }
+
+/** `group.leaf` id of a ROUTES leaf, e.g. 'endpoints.detail' (a typo is a compile error). */
+export type RouteLeafId = {
+  [G in RouteGroup]: `${G}.${Extract<keyof (typeof ROUTES)[G], string>}`;
+}[RouteGroup];
+
+/**
+ * Groups the dashboard never calls: probes, the public guide and the ingest contract (SDKs).
+ * WHY: the web client coverage test (apps/web/src/lib/api.test.ts) skips them.
+ */
+export const NON_DASHBOARD_ROUTE_GROUPS = [
+  'health',
+  'docs',
+  'ingest',
+] as const satisfies readonly RouteGroup[];
+
+/**
+ * Leaves the API does NOT serve yet, with the step that adds them.
+ *
+ * WHY one shared list: two tests read it — the api route contract (every other leaf is
+ * registered exactly once) and the web client coverage (every other dashboard leaf has an
+ * `api.*` function, and a pending one has none). So the web client covers EXACTLY the routes
+ * the API serves. A step that registers a leaf removes it here and adds its `api.*` function.
+ *
+ * @see ../../../apps/api/test/routes-contract.test.ts
+ * @see ../../../apps/web/src/lib/api.test.ts
+ */
+export const PENDING_ROUTE_LEAVES = [
+  // S3: browser ingest + Users / Journeys / Pages & Tools / Geography
+  'ingest.browser',
+  'users.list',
+  'users.profile',
+  'users.timeline',
+  'journeys.sessions',
+  'journeys.session',
+  'journeys.topPaths',
+  'pages.list',
+  'tools.usage',
+  'geo.countries',
+  'geo.cities',
+  // S4: live page
+  'live.snapshot',
+  // S5: Integration Health
+  'integration.health',
+] as const satisfies readonly RouteLeafId[];

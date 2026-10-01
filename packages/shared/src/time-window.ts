@@ -28,7 +28,19 @@ export interface ResolvedTimeWindow {
   durationMs: number;
 }
 
-export class TimeWindowError extends Error {}
+/** Why a window was refused: `tooLarge` maps to RANGE_TOO_LARGE, `invalid` to a validation error. */
+export const TIME_WINDOW_ERROR_REASON_VALUES = ['invalid', 'tooLarge'] as const;
+export type TimeWindowErrorReason = (typeof TIME_WINDOW_ERROR_REASON_VALUES)[number];
+
+export class TimeWindowError extends Error {
+  constructor(
+    message: string,
+    readonly reason: TimeWindowErrorReason = 'invalid',
+  ) {
+    super(message);
+    this.name = 'TimeWindowError';
+  }
+}
 
 /** Bucket grain for a window length. */
 export function grainFor(durationMs: number): Grain {
@@ -45,7 +57,10 @@ export function resolveTimeWindow(
   const durationMs = to.getTime() - from.getTime();
   if (durationMs <= 0) throw new TimeWindowError('"from" must be before "to"');
   if (durationMs > maxRangeMs) {
-    throw new TimeWindowError(`range too large (max ${Math.round(maxRangeMs / 86_400_000)} days)`);
+    throw new TimeWindowError(
+      `range too large (max ${Math.round(maxRangeMs / 86_400_000)} days)`,
+      'tooLarge',
+    );
   }
   return {
     from,
