@@ -1,0 +1,51 @@
+{
+  "name": "@nexus/express",
+  "version": "1.0.0",
+  "description": "Data Nexus Traffic Express middleware (Express 4 and 5): records one server event per request and sends it through the bundled @nexus/node client.",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@nexus/source": "./src/index.ts",
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "express": "^4.17.0 || ^5.0.0"
+  },
+  "devDependencies": {
+    "@nexus/node": "*",
+    "@nexus/shared": "*",
+    "@types/express": "^5.0.6",
+    "@types/express4": "npm:@types/express@^4.17.25",
+    "@types/supertest": "^6.0.3",
+    "express": "^5.2.1",
+    "express4": "npm:express@^4.22.3",
+    "supertest": "^7.3.0",
+    "tsup": "^8.5.1"
+  }
+}
