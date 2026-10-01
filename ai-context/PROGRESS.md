@@ -17,6 +17,19 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-01 — Production database created (ADR 0002)
+
+- Database `nexus_traffic` created on the shared server 10.150.0.5 (PostgreSQL 18.1, owner `shahil`).
+  No other database (Unicorn, agreementvault, app_chatbot) was modified.
+- `migrate` run in `DB_APP_ROLE_MODE=owner`: 0001–0006 applied, 8 monthly partitions
+  (2026-09 … 2026-12) for `api_requests` and `web_events`. No role was created on the cluster.
+- Schema `traffic` contains: apps, api_keys, admin_audit_log, api_requests (partitioned),
+  web_events (partitioned), ingest_counters, schema_migrations. No test data was written.
+- The TL's `.env` must use `DB_APP_ROLE_MODE=owner` and identical `DATABASE_URL` /
+  `MIGRATION_DATABASE_URL` pointing at `10.150.0.5:5432/nexus_traffic` (password URL-encoded).
+
+---
+
 ## 2026-10-01 — ADR 0002 (external database) + S1 carry-over fixes
 
 **Done**
