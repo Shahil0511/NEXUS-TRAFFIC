@@ -1,0 +1,33 @@
+{
+  "name": "nexus-traffic",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Data Nexus Traffic — real-time traffic analytics for the nexus.libas.in apps",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @nexus/shared && npm run build -w @nexus/auth",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:db": "npm run test:db -w @nexus/api",
+    "docs:build": "tsx scripts/build-docs.ts",
+    "openapi:emit": "tsx --conditions=@nexus/source scripts/emit-openapi.ts",
+    "env:example": "tsx --conditions=@nexus/source scripts/generate-env-example.ts",
+    "sdk:pack": "tsx scripts/sdk-pack.ts",
+    "demo:traffic": "tsx --conditions=@nexus/source scripts/demo-traffic.ts",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

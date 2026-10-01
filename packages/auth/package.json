@@ -1,0 +1,21 @@
+{
+  "name": "@nexus/auth",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SSO access_token verification (HS256, node:crypto) and the dashboard access policy. Zero dependencies. Shared by the web proxy, the API and the Socket.io handshake.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@nexus/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}

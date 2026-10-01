@@ -1,0 +1,64 @@
+{
+  "name": "@nexus/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Data Nexus Traffic contracts: ROUTES, socket events, error codes, enums, ingest schemas, DTOs. The single source of truth shared by api, web and the SDKs.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@nexus/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./routes": {
+      "@nexus/source": "./src/routes.ts",
+      "types": "./dist/routes.d.ts",
+      "default": "./dist/routes.js"
+    },
+    "./events": {
+      "@nexus/source": "./src/events.ts",
+      "types": "./dist/events.d.ts",
+      "default": "./dist/events.js"
+    },
+    "./errors": {
+      "@nexus/source": "./src/errors.ts",
+      "types": "./dist/errors.d.ts",
+      "default": "./dist/errors.js"
+    },
+    "./constants": {
+      "@nexus/source": "./src/constants/index.ts",
+      "types": "./dist/constants/index.d.ts",
+      "default": "./dist/constants/index.js"
+    },
+    "./ingest": {
+      "@nexus/source": "./src/ingest/index.ts",
+      "types": "./dist/ingest/index.d.ts",
+      "default": "./dist/ingest/index.js"
+    },
+    "./ingest/client-ip": {
+      "@nexus/source": "./src/ingest/client-ip.ts",
+      "types": "./dist/ingest/client-ip.d.ts",
+      "default": "./dist/ingest/client-ip.js"
+    },
+    "./ingest/build-ingest-url": {
+      "@nexus/source": "./src/ingest/build-ingest-url.ts",
+      "types": "./dist/ingest/build-ingest-url.d.ts",
+      "default": "./dist/ingest/build-ingest-url.js"
+    },
+    "./endpoint-id": {
+      "@nexus/source": "./src/endpoint-id.ts",
+      "types": "./dist/endpoint-id.d.ts",
+      "default": "./dist/endpoint-id.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  }
+}
