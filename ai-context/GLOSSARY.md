@@ -24,3 +24,5 @@
 | **scope** | What a live subscription covers: `all` or `app:<slug>`. | `liveScopeKey()` |
 | **viewer / admin** | Dashboard roles. Admins manage apps/keys and see IPs. | `DASHBOARD_ADMIN_EMAILS` |
 | **dry run** | `?dryRun=1` on server ingest: validate everything, write nothing. | |
+| **role mode** | `DB_APP_ROLE_MODE`: `owner` = the api uses the migrate login (production, external server); `separate` = the api runs as `nexus_app`, DML only (localdb). ADR 0002. | `apps/api/src/db/migrate-config.ts` |
+| **localdb** | The compose profile that starts a local `postgres:18-alpine` container (laptops, CI, rehearsals). Production uses the external server 10.150.0.5 instead. | `docker-compose.yml` |

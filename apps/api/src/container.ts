@@ -176,7 +176,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
   // ─── Jobs ─────────────────────────────────────────────────────────────────
   const jobs = {
     partitionMaintenance: new PartitionMaintenanceJob(pools.write, services.partitions),
-    retention: new RetentionJob(services.partitions, clock, logger),
+    retention: new RetentionJob(pools.write, services.partitions, clock, logger),
   };
 
   return { config, logger, clock, pools, repositories, schemaGuard, services, controllers, middleware, jobs, liveFeed };

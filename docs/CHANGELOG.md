@@ -30,3 +30,10 @@ Format: newest first. Dates are IST.
   `{error: {code, message, details?, requestId?}}`; event time window −7 days / +5 minutes.
 - Public guide (chapters 00–11 + per-app appendix), OpenAPI 3.1 document, example batches and
   reference snippets (Express CJS/ESM, NestJS, FastAPI ASGI, curl).
+
+**Fixed (before release)**
+
+- Envelope problems on `POST /v1/ingest/server` — empty body, `events` missing/empty or too many —
+  now answer `400 INVALID_ENVELOPE`, as chapters 4 and 11 already documented. The first S1 build
+  answered `415` for an empty body sent with `Content-Type: application/json`, and `VALIDATION_ERROR`
+  for a malformed envelope. Senders that treat every `400` the same (the guide's advice) are unaffected.

@@ -3,28 +3,42 @@
 # Data Nexus Traffic — nightly Postgres backup (compose service `pg-backup`).
 #
 # Runs forever: sleeps until 01:30 IST, writes /backups/nexus-traffic-<IST date>.dump (pg_dump custom
-# format), keeps the newest 14 dumps, repeats. POSIX sh (busybox in postgres:17-alpine), no tzdata
-# needed: IST is a fixed UTC+05:30 offset (India has no daylight saving).
+# format) of BACKUP_DATABASE_URL, keeps the newest 14 dumps, repeats. POSIX sh (busybox in
+# postgres:18-alpine), no tzdata needed: IST is a fixed UTC+05:30 offset (India has no daylight saving).
+#
+# Target: BACKUP_DATABASE_URL (compose defaults it to MIGRATION_DATABASE_URL) — production: the
+# nexus_traffic database on the external server 10.150.0.5 (ADR 0002); localdb: the postgres service.
+# pg_dump must be >= the server's major version (18), hence the postgres:18-alpine image.
 #
 #   manual backup now:  docker compose exec pg-backup sh /ops/backup/run.sh --once
-#   restore:            docker compose exec -T postgres pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-#                         --clean --if-exists < backups/nexus-traffic-YYYY-MM-DD.dump
+#   restore (DANGER: drops and recreates the dumped objects in that database; ./backups is mounted
+#   at /backups in this container):
+#     docker compose exec pg-backup sh -c \
+#       'pg_restore -d "$BACKUP_DATABASE_URL" --clean --if-exists /backups/nexus-traffic-YYYY-MM-DD.dump'
 #
-# Env (from docker-compose.yml): POSTGRES_USER, POSTGRES_DB, PGPASSWORD.
-# Optional: BACKUP_AT_IST (HH:MM, default 01:30), BACKUP_KEEP (default 14), PGHOST (default postgres).
+# Env (from docker-compose.yml): BACKUP_DATABASE_URL (postgres://user:url-encoded-password@host:port/db).
+# Optional: BACKUP_AT_IST (HH:MM, default 01:30), BACKUP_KEEP (default 14).
+# The connection string is NEVER printed (it holds the password); logs show host:port/db only.
 # ─────────────────────────────────────────────────────────────────────────────
 set -eu
 
 BACKUP_DIR=/backups
 BACKUP_AT_IST="${BACKUP_AT_IST:-01:30}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
-PGHOST="${PGHOST:-postgres}"
+: "${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL is not set (compose defaults it to MIGRATION_DATABASE_URL)}"
 IST_OFFSET_SECONDS=19800 # +05:30
 DAY_SECONDS=86400
 IST_TZ='IST-5:30' # POSIX TZ string: works without /usr/share/zoneinfo
 
 log() {
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pg-backup: $*"
+}
+
+# host:port/db of BACKUP_DATABASE_URL — never the user or the password.
+describe_target() {
+  rest="${BACKUP_DATABASE_URL#*://}"
+  rest="${rest##*@}"
+  echo "${rest%%\?*}"
 }
 
 # Seconds from now until the next BACKUP_AT_IST (0 < result <= 1 day).
@@ -44,8 +58,8 @@ run_backup() {
   stamp=$(TZ="$IST_TZ" date +%Y-%m-%d)
   target="$BACKUP_DIR/nexus-traffic-$stamp.dump"
   tmp="$target.partial"
-  log "dumping $POSTGRES_DB to $target"
-  if pg_dump -h "$PGHOST" -U "$POSTGRES_USER" -Fc "$POSTGRES_DB" > "$tmp"; then
+  log "dumping $(describe_target) to $target"
+  if pg_dump "$BACKUP_DATABASE_URL" -Fc > "$tmp"; then
     mv -f "$tmp" "$target"
     log "done ($(du -h "$target" | cut -f1))"
   else

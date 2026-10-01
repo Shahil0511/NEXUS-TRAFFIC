@@ -1,6 +1,6 @@
 /**
- * Orchestrates one `migrate` run: load files → (bootstrap) → read ledger → plan → apply → ensure
- * partitions. Each step lives in its own module; this file only decides the ORDER and the EXIT CODE.
+ * Orchestrates one `migrate` run: load files → (bootstrap) → read ledger → plan → apply →
+ * ('separate' mode) re-apply the nexus_app grants → ensure partitions. Each step lives in its own module; this file only decides the ORDER and the EXIT CODE.
  *
  * WHY separate from the CLI (../migrate.ts): the integration tests drive exactly the same code with
  * a test database and a trimmed/edited migrations directory, without spawning processes.
@@ -16,7 +16,8 @@ import type { Logger } from '../../lib/logger';
 import { PartitionRepository } from '../../repositories/partition.repository';
 import { PARTITION_MONTHS_AHEAD, PARTITION_MONTHS_BACK } from '../../services/partition.service';
 import { applyMigration } from './applier';
-import { bootstrapDatabase } from './bootstrap';
+import { bootstrapDatabase, type AppRole } from './bootstrap';
+import { applyAppRoleGrantsLocked } from './grants';
 import { readLedger } from './ledger';
 import { loadMigrations, migrationLabel } from './loader';
 import { planMigrations, type MigrationPlan } from './plan';
@@ -43,10 +44,11 @@ export function parseMigrateMode(argv: readonly string[]): MigrateMode {
 }
 
 export interface RunMigrationsOptions {
-  /** Owner pool (POSTGRES_USER) — NEVER the nexus_app pool. */
+  /** Owner pool (the MIGRATION_DATABASE_URL login) — NEVER the nexus_app pool. */
   pool: Pool;
   migrationsDir: string;
-  appPassword: string;
+  /** DB_APP_ROLE_MODE: 'separate' manages nexus_app (password + grants); 'owner' touches no role. */
+  appRole: AppRole;
   mode: MigrateMode;
   logger: Logger;
 }
@@ -160,10 +162,10 @@ async function applyPending(
 
 /** One full run; see the exit rules in the header. Unexpected errors (connection, bootstrap) throw. */
 export async function runMigrations(options: RunMigrationsOptions): Promise<MigrationRunResult> {
-  const { pool, migrationsDir, appPassword, mode, logger } = options;
+  const { pool, migrationsDir, appRole, mode, logger } = options;
   const files = await loadMigrations(migrationsDir);
 
-  if (mode === 'apply') await bootstrapDatabase(pool, appPassword);
+  if (mode === 'apply') await bootstrapDatabase(pool, appRole);
 
   const plan = planMigrations(files, await readLedger(pool));
   logPlan(plan, logger);
@@ -179,7 +181,17 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<Migr
   const { applied, failed } = await applyPending(pool, plan, logger);
   if (failed) return { ...result, applied, exitCode: MIGRATE_EXIT_CODES.failed };
 
+  // BEFORE the partitions, so the default privileges already cover partitions created below.
+  if (appRole.mode === 'separate') {
+    await applyAppRoleGrantsLocked(pool);
+    logger.info('app role grants applied', { role: 'nexus_app' });
+  }
+
   const partitions = await new PartitionRepository(pool).ensure(PARTITION_MONTHS_BACK, PARTITION_MONTHS_AHEAD);
-  logger.info('migrations complete', { appliedCount: applied.length, partitionCount: partitions.length });
+  logger.info('migrations complete', {
+    appliedCount: applied.length,
+    partitionCount: partitions.length,
+    appRoleMode: appRole.mode,
+  });
   return { ...result, applied, partitions };
 }

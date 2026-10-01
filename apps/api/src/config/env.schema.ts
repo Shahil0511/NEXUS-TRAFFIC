@@ -23,8 +23,11 @@ export const apiEnvSchema = z.object({
   /** debug | info | warn | error */
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
-  // ─── Database (runtime role nexus_app) ────────────────────────────────────
-  /** postgres://nexus_app:<NEXUS_APP_DB_PASSWORD>@postgres:5432/<POSTGRES_DB> */
+  // ─── Database (see ADR 0002 and src/db/migrate-config.ts) ─────────────────
+  /**
+   * DB_APP_ROLE_MODE=owner (production, external server): IDENTICAL to MIGRATION_DATABASE_URL.
+   * DB_APP_ROLE_MODE=separate (--profile localdb): postgres://nexus_app:<NEXUS_APP_DB_PASSWORD>@postgres:5432/<POSTGRES_DB>
+   */
   DATABASE_URL: z.string().url(),
   /** Connections for ingest/admin writes. */
   PG_POOL_WRITE_MAX: z.coerce.number().int().min(1).max(50).default(4),

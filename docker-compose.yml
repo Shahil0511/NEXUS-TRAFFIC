@@ -2,24 +2,39 @@ name: nexus-traffic
 # ─────────────────────────────────────────────────────────────────────────────
 # Data Nexus Traffic — the whole stack on one host.
 #
+# WHERE THE DATA LIVES (ADR 0002, ai-context/decisions/0002-external-database.md)
+#   production   the EXTERNAL company Postgres server 10.150.0.5 (PostgreSQL 18), database
+#                nexus_traffic, schema traffic. NO postgres container runs. .env sets
+#                DB_APP_ROLE_MODE=owner and DATABASE_URL = MIGRATION_DATABASE_URL (same login).
+#   localdb      profile `localdb`: a postgres:18 container for laptops / CI / rehearsals, with the
+#                strict role split (DB_APP_ROLE_MODE=separate → the api runs as nexus_app, DML only).
+#
 # Team Lead quick reference
 #   first time:   cp .env.example .env   → fill EVERY change-me value → bash scripts/preflight.sh
 #   deploy:       bash scripts/deploy.sh  (git pull --ff-only + docker compose up -d --build + checks)
-#   status:       docker compose ps        logs: docker compose logs -f api
-#   local stack:  docker compose --profile local up -d --build   → http://localhost:8080/traffic/
+#   by hand:      docker compose up -d --build
+#                 → against the EXTERNAL database (production; no postgres container)
+#   fully local:  docker compose --profile localdb --profile local up -d --build
+#                 → local postgres container + gateway copy on http://localhost:8080/traffic/
+#                 (check the .env first with: bash scripts/preflight.sh --localdb)
+#   status:       docker compose ps        logs: docker compose logs -f api migrate
 #
 # Services
-#   postgres   the database. NOT published on the host; data in the named volume nexus-traffic-pgdata.
-#   migrate    one-shot: bootstraps roles + applies SQL migrations, then exits 0. api waits for it.
+#   postgres   ONLY with --profile localdb. NOT published on the host; data in the named volume
+#              nexus-traffic-pgdata (mounted at /var/lib/postgresql — the PG18 image layout).
+#   migrate    one-shot: bootstraps the schema (+ role nexus_app and its grants in 'separate' mode),
+#              applies SQL migrations, ensures partitions, exits 0. api waits for it.
 #   api        ingest + dashboard API + Socket.io + the public guide. Host port 127.0.0.1:4005 only;
 #              the gateway nginx proxies https://nexus.libas.in/traffic/api/ → here
 #              (ops/nginx/nexus-traffic.conf).
-#   pg-backup  nightly pg_dump at 01:30 IST into ./backups, keeps the newest 14.
+#   pg-backup  nightly pg_dump of BACKUP_DATABASE_URL (default: MIGRATION_DATABASE_URL) at 01:30 IST
+#              into ./backups, keeps the newest 14.
 #   edge       ONLY with --profile local: a local copy of the gateway on 127.0.0.1:8080.
 #   web        the dashboard — arrives in S2 (placeholder block below).
 #
-# Requires Docker Compose v2.20+ (`docker compose`, not the old `docker-compose` v1).
-# There is deliberately NO `version:` key (obsolete in Compose v2).
+# Requires Docker Compose v2.20+ (`docker compose`, not the old `docker-compose` v1). v2.20 is the
+# first with `depends_on: … required: false`, which lets migrate/pg-backup run without the postgres
+# service. There is deliberately NO `version:` key (obsolete in Compose v2).
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Every service logs to json-file with rotation, so logs can never fill the disk (10 MB × 5 files).
@@ -29,16 +44,25 @@ x-logging: &logging
     max-size: 10m
     max-file: '5'
 
-# One Postgres image for the database AND the backup job (pg_dump must match the server version).
-x-pg-image: &pg-image ${PG_IMAGE:-postgres:17-alpine}
+# One Postgres image for the local database AND the backup job. pg_dump must be >= the SERVER's
+# major version, and the production server is PostgreSQL 18 → postgres:18-alpine (ADR 0002).
+x-pg-image: &pg-image ${PG_IMAGE:-postgres:18-alpine}
 
 services:
-  # ─── Database ───────────────────────────────────────────────────────────────
+  # ─── Local database (profile `localdb` only — production uses 10.150.0.5) ───
+  # Production does NOT run this: the data lives on the external server (10.150.0.5, database
+  # nexus_traffic, see ADR 0002). For laptops / CI / rehearsals:
+  #   docker compose --profile localdb --profile local up -d --build
   postgres:
+    profiles: ['localdb']
     image: *pg-image
     env_file: .env # reads POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB (first start creates them)
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # The PG18 image keeps PGDATA at /var/lib/postgresql/18/docker and declares its VOLUME at
+      # /var/lib/postgresql; its entrypoint REFUSES a mount at the old /var/lib/postgresql/data.
+      # A volume initialised by postgres:17 cannot be reused as is: dump/restore it, or on a dev
+      # machine run `docker compose --profile localdb --profile local down -v` and start fresh.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       # -h 127.0.0.1 forces TCP: during first-time initdb Postgres listens on the unix socket only,
       # so the check stays red until the real server is up.
@@ -56,12 +80,18 @@ services:
     pull_policy: never
     command: ['node', 'dist/db/migrate.js']
     environment:
-      # Connects as the OWNER (POSTGRES_USER); sets the nexus_app password on every run.
+      # Connects as the OWNER: the shared login on 10.150.0.5/nexus_traffic (production) or
+      # POSTGRES_USER on the localdb postgres service.
       MIGRATION_DATABASE_URL: ${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}
-      NEXUS_APP_DB_PASSWORD: ${NEXUS_APP_DB_PASSWORD:?set NEXUS_APP_DB_PASSWORD in .env}
+      # owner    = external server: no role is created or altered; the api uses the SAME login.
+      # separate = localdb: creates nexus_app, sets its password and its DML-only grants every run.
+      DB_APP_ROLE_MODE: ${DB_APP_ROLE_MODE:-separate}
+      # Required (>= 16 chars) ONLY when DB_APP_ROLE_MODE=separate; ignored in owner mode.
+      NEXUS_APP_DB_PASSWORD: ${NEXUS_APP_DB_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
+        required: false # waits for the local postgres with --profile localdb; else the external DB
     restart: 'no'
     logging: *logging
 
@@ -127,19 +157,20 @@ services:
   #   logging: *logging
 
   # ─── Nightly backup ─────────────────────────────────────────────────────────
+  # The shared server may already be backed up by its owners; this is a Nexus-only dump (ADR 0002).
   pg-backup:
-    image: *pg-image
+    image: *pg-image # pg_dump 18: must be >= the server's major version
     entrypoint: ['/bin/sh', '/ops/backup/run.sh']
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
-      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Connection string to dump (owner login); defaults to MIGRATION_DATABASE_URL.
+      BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:-${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}}
     volumes:
       - ./ops/backup:/ops/backup:ro
       - ./backups:/backups # host folder; copy it off the machine regularly
     depends_on:
       postgres:
         condition: service_healthy
+        required: false # only with --profile localdb
     restart: unless-stopped
     logging: *logging
 
@@ -158,5 +189,7 @@ services:
     logging: *logging
 
 volumes:
+  # Used only by the localdb postgres. Fixed name: survives renaming the folder.
+  # `down -v` deletes it: fine for a laptop rehearsal, NEVER for data you need.
   pgdata:
-    name: nexus-traffic-pgdata # fixed name: survives renaming the folder; NEVER `down -v` in production
+    name: nexus-traffic-pgdata

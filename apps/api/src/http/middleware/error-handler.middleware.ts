@@ -2,6 +2,10 @@
  * The ONLY place errors become HTTP responses: `{ error: { code, message, details?, requestId } }`.
  * AppErrors render as-is; body-parser and DB-availability errors are translated; anything else is
  * a 500 with the details logged (never sent to the client).
+ *
+ * If the response has ALREADY started (headers sent, e.g. a stream failed half-way), no envelope can
+ * be written: the error is logged and handed to Express's default handler via next(err), which
+ * closes the connection so the client sees a truncated response instead of a hung one.
  */
 import { ERROR_CODES, type ApiErrorBody } from '@nexus/shared';
 import type { ErrorRequestHandler, RequestHandler } from 'express';
@@ -37,7 +41,7 @@ export function notFoundMiddleware(): RequestHandler {
 }
 
 export function errorHandlerMiddleware(logger: Logger): ErrorRequestHandler {
-  return (err, req, res, _next) => {
+  return (err, req, res, next) => {
     const appError = toAppError(err);
     const requestId = res.locals.requestId;
     if (!appError) {
@@ -54,7 +58,10 @@ export function errorHandlerMiddleware(logger: Logger): ErrorRequestHandler {
         ...(requestId ? { requestId } : {}),
       },
     };
-    if (res.headersSent) return;
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
     for (const [name, value] of Object.entries(appError?.headers ?? {})) res.setHeader(name, value);
     res.status(status).json(body);
   };

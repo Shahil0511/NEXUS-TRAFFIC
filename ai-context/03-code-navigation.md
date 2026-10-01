@@ -15,8 +15,9 @@ for status.
 | `apps/api/src/container.ts` | THE composition root; every class is built here once. |
 | `apps/api/src/app.ts` | Express wiring (helmet, request id, access log, `/api` router, 404, errors). |
 | `apps/api/src/http/routes/index.ts` | THE route table: path → middleware chain → controller method. |
-| `apps/api/src/db/migrate.ts` | The `migrate` CLI (compose `migrate` service), see `apps/api/migrations/README.md`. |
-| `docker-compose.yml`, `apps/api/Dockerfile` | postgres → migrate → api → edge (`--profile local`), pg-backup. |
+| `apps/api/src/db/migrate.ts` | The `migrate` CLI (compose `migrate` service), see `apps/api/migrations/README.md`. Config + `DB_APP_ROLE_MODE`: `apps/api/src/db/migrate-config.ts`. |
+| `apps/api/src/db/migration-runner/runner.ts` | One migrate run: bootstrap (`bootstrap.ts`) → plan → apply → `nexus_app` grants (`grants.ts`, separate mode only) → partitions. |
+| `docker-compose.yml`, `apps/api/Dockerfile` | (postgres, `--profile localdb` only) → migrate → api → edge (`--profile local`), pg-backup. Production DB: external server (ADR 0002). |
 
 ## 2. Folder → layer map (`apps/api/src`)
 

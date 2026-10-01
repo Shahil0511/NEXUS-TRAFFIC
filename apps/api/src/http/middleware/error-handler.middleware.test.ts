@@ -1,7 +1,7 @@
 import { ERROR_CODES, INGEST_HEADERS } from '@nexus/shared';
-import express, { type Express } from 'express';
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { recordingLogger, type LogCall } from '../../../test/fixtures/recording-logger';
 import { ConflictError, RateLimitedError, ValidationError } from '../../errors/app-error';
@@ -26,6 +26,11 @@ function buildApp(): { app: Express; calls: LogCall[] } {
   });
   app.get('/db-down', async () => {
     throw Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:5432'), { code: '08006' });
+  });
+  app.get('/half-sent', (_req, res, next) => {
+    res.status(200).setHeader('Content-Type', 'text/plain');
+    res.write('partial');
+    next(new Error('stream broke'));
   });
   app.post('/json', express.json({ limit: '10b' }), (_req, res) => {
     res.json({ ok: true });
@@ -116,5 +121,33 @@ describe('errorHandlerMiddleware', () => {
     const res = await request(app).get('/nope');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe(ERROR_CODES.NOT_FOUND);
+  });
+
+  it('delegates to the Express default handler (next(err)) once headers were sent', () => {
+    const { logger, calls } = recordingLogger();
+    const handler = errorHandlerMiddleware(logger);
+    const err = new Error('stream broke');
+    const res = { headersSent: true, locals: {}, status: vi.fn(), json: vi.fn(), setHeader: vi.fn() };
+    const next = vi.fn();
+    handler(err, { method: 'GET', originalUrl: '/x?q=1' } as Request, res as unknown as Response, next as NextFunction);
+    expect(next).toHaveBeenCalledWith(err);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).not.toHaveBeenCalled();
+    expect(calls.map((c) => c.msg)).toEqual(['unhandled error']);
+  });
+
+  it('a failure after the response started ends the connection instead of hanging it', async () => {
+    const { app } = buildApp();
+    const outcome = await request(app)
+      .get('/half-sent')
+      .timeout(5000)
+      .then(
+        (res) => ({ text: res.text, error: null as Error | null }),
+        (error: Error) => ({ text: '', error }),
+      );
+    // Express's default handler destroys the socket: either a hang-up error or a truncated body,
+    // NEVER a JSON envelope glued after the partial content.
+    expect(outcome.error?.message ?? '').not.toMatch(/timeout/i);
+    expect(outcome.text).not.toContain('"error"');
   });
 });

@@ -7,6 +7,7 @@ import {
   appSlugParamsSchema,
   createAppBodySchema,
   createKeyBodySchema,
+  ERROR_CODES,
   expireKeyBodySchema,
   ROUTES,
   serverIngestEnvelopeSchema,
@@ -40,7 +41,7 @@ export function buildRouter(c: Container): Router {
     mw.serverIngestJsonBody,
     mw.serverKeyAuth,
     mw.serverKeyRateLimit,
-    validateBody(serverIngestEnvelopeSchema),
+    validateBody(serverIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
     ctl.ingest.server,
   );
   r.get(ROUTES.ingest.verify.path, mw.ipFailureLimit, mw.anyKeyAuth, ctl.ingest.verify);

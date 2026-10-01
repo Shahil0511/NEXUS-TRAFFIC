@@ -1,7 +1,11 @@
 /**
  * Partition maintenance use cases, called by jobs and at boot.
+ *
+ * Every method takes an optional trailing `exec` (the Executor convention): the jobs pass the
+ * transaction client that HOLDS their advisory lock, so the work really runs under that lock.
  * @see ../repositories/partition.repository.ts
  */
+import type { Executor } from '../db/executor';
 import { PARTITIONED_TABLES } from '../db/schema';
 import type { Logger } from '../lib/logger';
 import type { PartitionRepository } from '../repositories/partition.repository';
@@ -17,15 +21,17 @@ export class PartitionService {
     private readonly logger: Logger,
   ) {}
 
-  async ensureAhead(): Promise<void> {
-    const names = await this.partitions.ensure(PARTITION_MONTHS_BACK, PARTITION_MONTHS_AHEAD);
+  /** @see PartitionRepository.ensure */
+  async ensureAhead(exec?: Executor): Promise<void> {
+    const names = await this.partitions.ensure(PARTITION_MONTHS_BACK, PARTITION_MONTHS_AHEAD, exec);
     this.logger.debug('partitions ensured', { count: names.length });
   }
 
-  async dropExpired(): Promise<string[]> {
+  /** @see PartitionRepository.dropExpired */
+  async dropExpired(exec?: Executor): Promise<string[]> {
     const dropped: string[] = [];
     for (const table of PARTITIONED_TABLES) {
-      dropped.push(...(await this.partitions.dropExpired(table, this.retentionMonths)));
+      dropped.push(...(await this.partitions.dropExpired(table, this.retentionMonths, exec)));
     }
     if (dropped.length > 0) this.logger.info('expired partitions dropped', { dropped });
     return dropped;

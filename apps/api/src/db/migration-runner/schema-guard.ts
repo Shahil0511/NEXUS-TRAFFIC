@@ -3,9 +3,10 @@
  * Used at api boot (refuse to start on pending/drifted migrations) and by /health/ready.
  * Unknown-applied versions (DB ahead of code, e.g. after a rollback) only WARN.
  *
- * Runs as nexus_app (SELECT on schema_migrations is granted in 0007_grants.sql).
+ * Runs as the api's login: nexus_app in DB_APP_ROLE_MODE=separate (SELECT on schema_migrations is
+ * granted by ./grants.ts), or the owner itself in 'owner' mode.
  * @see ./plan.ts
- * @see ../../../migrations/0007_grants.sql
+ * @see ./grants.ts
  */
 import type { Pool } from 'pg';
 

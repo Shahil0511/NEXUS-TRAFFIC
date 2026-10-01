@@ -41,7 +41,7 @@ function setup(withAuth = true) {
   const controller = new IngestController(fake<IngestService>({ ingestServerEvents, verify }), new FixedClock(FIXED_NOW));
   const auth = withAuth ? [authenticated] : [];
   const app = express();
-  app.post(ROUTES.ingest.server.path, express.json(), ...auth, validateBody(serverIngestEnvelopeSchema), controller.server);
+  app.post(ROUTES.ingest.server.path, express.json(), ...auth, validateBody(serverIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE), controller.server);
   app.get(ROUTES.ingest.verify.path, ...auth, controller.verify);
   app.use(errorHandlerMiddleware(silentLogger()));
   return { app, ingestServerEvents, verify };
@@ -93,7 +93,7 @@ describe('IngestController.server', () => {
     const { app, ingestServerEvents } = setup();
     const res = await request(app).post(ROUTES.ingest.server.path).send({ events: [] });
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
+    expect(res.body.error.code).toBe(ERROR_CODES.INVALID_ENVELOPE);
     expect(ingestServerEvents).not.toHaveBeenCalled();
   });
 

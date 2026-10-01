@@ -64,7 +64,7 @@ describe.skipIf(!RUN_DB_TESTS)('nexus_app privileges and error classification (d
     const audit = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.admin_audit_log');
     const ledger = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.schema_migrations');
     expect(audit.rows[0].n).toBe(1);
-    expect(ledger.rows[0].n).toBe(7);
+    expect(ledger.rows[0].n).toBe(6);
   });
 
   // ─── partitions created later by the SECURITY DEFINER function ────────────

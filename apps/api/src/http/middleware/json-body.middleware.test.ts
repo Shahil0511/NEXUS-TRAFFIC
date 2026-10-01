@@ -1,16 +1,51 @@
-import { ERROR_CODES, INGEST_LIMITS } from '@nexus/shared';
+import type { AddressInfo } from 'node:net';
+import net from 'node:net';
+
+import { ERROR_CODES, INGEST_LIMITS, serverIngestEnvelopeSchema } from '@nexus/shared';
 import express, { type Express, type RequestHandler } from 'express';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { recordingLogger } from '../../../test/fixtures/recording-logger';
 import { errorHandlerMiddleware } from './error-handler.middleware';
-import { dashboardJsonBody, serverIngestJsonBody } from './json-body.middleware';
+import { dashboardJsonBody, mediaTypeOf, serverIngestJsonBody } from './json-body.middleware';
+import { validateBody } from './validate.middleware';
+
+/**
+ * Sends a POST with NO body framing at all (no Content-Length, no Transfer-Encoding) — what
+ * `curl -X POST -H 'Content-Type: application/json' URL` sends. supertest always adds a length.
+ */
+async function rawPostWithoutBody(app: Express, path: string, contentType: string): Promise<string> {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  const { port } = server.address() as AddressInfo;
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.write(
+          [`POST ${path} HTTP/1.1`, 'Host: 127.0.0.1', `Content-Type: ${contentType}`, 'Connection: close', '', ''].join(
+            '\r\n',
+          ),
+        );
+      });
+      let response = '';
+      socket.on('data', (chunk) => (response += chunk.toString('utf8')));
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+    });
+  } finally {
+    server.close();
+  }
+}
 
 function buildApp(parser: RequestHandler): Express {
   const app = express();
   app.post('/probe', parser, (req, res) => {
-    res.json({ body: req.body });
+    res.json({ body: req.body ?? null });
+  });
+  // Same order as the real route: body parser → … → envelope validation (INVALID_ENVELOPE).
+  app.post('/envelope', parser, validateBody(serverIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE), (_req, res) => {
+    res.json({ ok: true });
   });
   app.use(errorHandlerMiddleware(recordingLogger().logger));
   return app;
@@ -34,6 +69,38 @@ describe('serverIngestJsonBody', () => {
     expect(res.body.error.code).toBe(ERROR_CODES.UNSUPPORTED_MEDIA_TYPE);
   });
 
+  it('415 when the Content-Type header is missing', async () => {
+    const res = await request(app).post('/probe');
+    expect(res.status).toBe(415);
+    expect(res.body.error.code).toBe(ERROR_CODES.UNSUPPORTED_MEDIA_TYPE);
+  });
+
+  it('415 for a non-JSON content type even with an empty body', async () => {
+    const res = await request(app).post('/probe').set('Content-Type', 'text/plain');
+    expect(res.status).toBe(415);
+  });
+
+  it('an EMPTY body with Content-Type application/json is not a 415 (no envelope inside)', async () => {
+    const res = await request(app).post('/probe').set('Content-Type', 'application/json');
+    expect(res.status).toBe(200);
+    // body-parser yields {} (Content-Length: 0) or nothing (no length) — never an events array.
+    expect([null, {}]).toContainEqual(res.body.body);
+  });
+
+  it('…and the envelope validation then answers 400 INVALID_ENVELOPE', async () => {
+    const res = await request(app).post('/envelope').set('Content-Type', 'application/json');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe(ERROR_CODES.INVALID_ENVELOPE);
+  });
+
+  it('…also when the request has no Content-Length at all (req.is() would say "no body" → 415)', async () => {
+    const response = await rawPostWithoutBody(app, '/envelope', 'application/json');
+    expect(response).toMatch(/^HTTP\/1\.1 400 /);
+    expect(response).toContain(ERROR_CODES.INVALID_ENVELOPE);
+    const text = await rawPostWithoutBody(app, '/envelope', 'text/plain');
+    expect(text).toMatch(/^HTTP\/1\.1 415 /);
+  });
+
   it('400 INVALID_ENVELOPE for malformed JSON', async () => {
     const res = await request(app)
       .post('/probe')
@@ -51,6 +118,17 @@ describe('serverIngestJsonBody', () => {
   });
 });
 
+describe('mediaTypeOf', () => {
+  it.each([
+    ['application/json', 'application/json'],
+    ['Application/JSON; charset=utf-8', 'application/json'],
+    ['text/plain;charset=UTF-8', 'text/plain'],
+    [undefined, ''],
+  ])('%j → %j', (header, expected) => {
+    expect(mediaTypeOf(header)).toBe(expected);
+  });
+});
+
 describe('dashboardJsonBody', () => {
   const app = buildApp(dashboardJsonBody());
 
@@ -59,7 +137,7 @@ describe('dashboardJsonBody', () => {
     expect(ok.body).toEqual({ body: { a: 1 } });
     const text = await request(app).post('/probe').set('Content-Type', 'text/plain').send('hi');
     expect(text.status).toBe(200);
-    expect(text.body.body).toBeUndefined();
+    expect(text.body.body).toBeNull();
   });
 
   it('400 BAD_REQUEST for malformed JSON', async () => {

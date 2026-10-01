@@ -23,7 +23,14 @@ const IPV6_ZONE = /%.*$/;
 /** truncated mode keeps a /48 = the first 3 hextets. */
 const IPV6_TRUNCATED_HEXTETS = 3;
 
-/** IPv4 private/link-local/CGNAT ranges as [first octet, second octet, prefix bits]. */
+/**
+ * IPv4 private/link-local/CGNAT ranges as [first octet, second octet, prefix bits].
+ *
+ * DELIBERATELY NOT LISTED: the documentation ranges 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+ * (and 2001:db8::/32 for IPv6). They never appear on real traffic; our own examples use them, so
+ * they classify as 'public' — harmless: the geo lookup simply finds nothing, and treating them as
+ * 'private' would make the examples behave differently from a real public address.
+ */
 const IPV4_PRIVATE_RANGES: ReadonlyArray<readonly [number, number, number]> = [
   [10, 0, 8],
   [172, 16, 12],

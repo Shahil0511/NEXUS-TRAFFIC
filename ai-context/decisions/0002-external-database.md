@@ -1,6 +1,9 @@
 # ADR 0002 — Use a dedicated database on the shared Postgres server
 
-- **Status:** accepted (2026-10-01)
+- **Status:** accepted (2026-10-01); implemented 2026-10-01 (see [PROGRESS.md](../PROGRESS.md)):
+  `apps/api/src/db/migrate-config.ts` (`DB_APP_ROLE_MODE`), `apps/api/src/db/migration-runner/bootstrap.ts`,
+  `apps/api/src/db/migration-runner/grants.ts` (the former migration `0007_grants.sql`), `docker-compose.yml`
+  (profile `localdb`, `postgres:18-alpine`, `BACKUP_DATABASE_URL`), `scripts/preflight.sh` (`--localdb`).
 - **Context:** the user asked to store Nexus Traffic data on the company Postgres server
   (10.150.0.5, PostgreSQL 18.1 on Windows, TimescaleDB installed) instead of a Postgres container,
   without touching any other app's tables (Unicorn, agreementvault, audit…).

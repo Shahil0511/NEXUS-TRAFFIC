@@ -76,7 +76,7 @@ describe('loadMigrations', () => {
 
   it('loads the real migrations: contiguous versions, each with an intent comment', async () => {
     const files = await loadMigrations(MIGRATIONS_DIR);
-    expect(files.length).toBeGreaterThanOrEqual(7);
+    expect(files.length).toBeGreaterThanOrEqual(6);
     files.forEach((file, index) => {
       expect(file.version).toBe(String(index + 1).padStart(4, '0'));
       expect(file.sql.startsWith('-- intent:')).toBe(true);

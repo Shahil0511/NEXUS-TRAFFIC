@@ -1,6 +1,8 @@
 # 07 — Data model
 
-Everything lives in one PostgreSQL 17 schema, `traffic`. The SQL is in
+Everything lives in one schema, `traffic`, of our own database `nexus_traffic` — in production on the
+company PostgreSQL 18 server 10.150.0.5, locally in the `postgres:18-alpine` container of
+`--profile localdb` ([ADR 0002](decisions/0002-external-database.md); the suites also pass on 17). The SQL is in
 [`apps/api/migrations/`](../apps/api/migrations/README.md) (that README has the table catalogue,
 the function list and the privilege list). This page explains every table and column in plain
 words, how partitions and retention work, the identity levels, and how personal data is protected.
@@ -9,14 +11,18 @@ Row types in code: [`apps/api/src/domain/rows.ts`](../apps/api/src/domain/rows.t
 snake_case) and [`apps/api/src/domain/inserts.ts`](../apps/api/src/domain/inserts.ts) (what we
 INSERT, camelCase — the repositories map one to the other).
 
-## The two database roles
+## Database roles (`DB_APP_ROLE_MODE`)
 
 | Role | Used by | Can do |
 |---|---|---|
-| owner (`POSTGRES_USER`) | the `migrate` service only | everything: runs the bootstrap and the migrations |
-| `nexus_app` | the api container | read/write rows only. No `CREATE`, `ALTER`, `DROP` or `TRUNCATE`. The audit log is append-only. Partitions are created/dropped only through three whitelisted functions. |
+| owner (the `MIGRATION_DATABASE_URL` login: `POSTGRES_USER` locally, the shared login on 10.150.0.5) | the `migrate` service; **also the api in `owner` mode** | everything in our database: runs the bootstrap and the migrations |
+| `nexus_app` (`separate` mode only) | the api container | read/write rows only. No `CREATE`, `ALTER`, `DROP` or `TRUNCATE`. The audit log is append-only. Partitions are created/dropped only through three whitelisted functions. Grants: `apps/api/src/db/migration-runner/grants.ts`, re-applied by every migrate run. |
 
-Why: if the api ever had an SQL-injection bug, it still could not drop or alter tables.
+Why `separate` exists: if the api ever had an SQL-injection bug, it still could not drop or alter
+tables. Why `owner` exists: the shared server's login has no `CREATEROLE`, so production cannot have
+a second role; an injection bug could then run DDL on *our* database only — the login has no rights on
+the other apps' databases (ADR 0002). Raw SQL stays parameterised and partition DDL still goes
+through the whitelisted functions.
 
 ## Tables at a glance
 

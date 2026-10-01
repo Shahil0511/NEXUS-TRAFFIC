@@ -6,8 +6,11 @@
  * the migrations themselves are exercised on every run. Two pools come back:
  * - ownerPool: the owner (superuser on the test cluster), as the `migrate` service connects;
  * - appPool:   role nexus_app with EXACTLY the runtime write-pool options (src/db/pool.ts).
+ * Suites run in DB_APP_ROLE_MODE=separate (the strictest mode, so the privilege tests mean
+ * something); the owner-mode run is covered by migration-runner.integration.test.ts.
  *
- * Cluster URL: TEST_PG_ADMIN_URL, default = the disposable local Postgres 17 used in development.
+ * Cluster URL: TEST_PG_ADMIN_URL, default = the disposable local Postgres used in development
+ * (production is PostgreSQL 18, so run the suites against 18 too — see ai-context/06-process.md).
  * Roles are cluster-wide, so every suite uses the same TEST_APP_PASSWORD for nexus_app.
  */
 import { randomBytes } from 'node:crypto';
@@ -15,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { Client, Pool } from 'pg';
 
 import { createWritePool } from '../../src/db/pool';
+import type { AppRole } from '../../src/db/migration-runner/bootstrap';
 import { MIGRATE_EXIT_CODES, runMigrations } from '../../src/db/migration-runner/runner';
 import { APP_ROLE, MIGRATIONS_DIR } from '../../src/db/schema';
 import { createLogger, type Logger } from '../../src/lib/logger';
@@ -27,6 +31,9 @@ export const TEST_ADMIN_URL =
 
 /** nexus_app password on the TEST cluster only (≥ 16 chars, like production). */
 export const TEST_APP_PASSWORD = 'nexus-app-test-password-0001';
+
+/** DB_APP_ROLE_MODE=separate with the test password — what every suite migrates with. */
+export const TEST_APP_ROLE: AppRole = { mode: 'separate', password: TEST_APP_PASSWORD };
 
 /** Errors only — migration progress lines would drown the test output. */
 export const quietLogger: Logger = createLogger('error');
@@ -95,7 +102,7 @@ export async function createTestDatabase(
       const result = await runMigrations({
         pool: ownerPool,
         migrationsDir: MIGRATIONS_DIR,
-        appPassword: TEST_APP_PASSWORD,
+        appRole: TEST_APP_ROLE,
         mode: 'apply',
         logger: quietLogger,
       });

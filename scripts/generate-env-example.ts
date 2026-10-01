@@ -21,15 +21,16 @@ import { apiEnvSchema } from '../apps/api/src/config/env.schema';
 
 // ─── Key lists (the test imports these) ─────────────────────────────────────
 
-/** Read ONLY by the `migrate` service (docker-compose.yml → environment). */
-export const MIGRATE_KEYS = ['MIGRATION_DATABASE_URL', 'NEXUS_APP_DB_PASSWORD'] as const;
+/** Read ONLY by the `migrate` service (docker-compose.yml → environment, apps/api/src/db/migrate-config.ts). */
+export const MIGRATE_KEYS = ['MIGRATION_DATABASE_URL', 'DB_APP_ROLE_MODE', 'NEXUS_APP_DB_PASSWORD'] as const;
 
-/** Read ONLY by docker compose itself / the postgres + pg-backup containers. */
+/** Read ONLY by docker compose itself / the postgres (profile localdb) + pg-backup containers. */
 export const COMPOSE_ONLY_KEYS = [
   'POSTGRES_USER',
   'POSTGRES_PASSWORD',
   'POSTGRES_DB',
   'PG_IMAGE',
+  'BACKUP_DATABASE_URL',
 ] as const;
 
 /** Read by the web container, which arrives in S2 (listed now so the TL fills .env once). */
@@ -51,10 +52,20 @@ const WEB_NOTE = '(used by the web container from S2)';
 /** Obviously-invalid placeholder; preflight.sh rejects anything that is not ≥ 64 hex chars. */
 const SECRET_PLACEHOLDER = 'change-me-<openssl rand -hex 32>';
 
+/**
+ * Shape of a connection string to the external server — PLACEHOLDERS ONLY. Real logins and
+ * passwords live ONLY in the git-ignored .env on the deploy host (ADR 0002).
+ */
+const EXTERNAL_URL_PLACEHOLDER =
+  'postgres://change-me-login:change-me-url-encoded-password@change-me-host:5432/change-me-database';
+
+const LOCALDB_NOTE = 'ONLY for --profile localdb';
+
 // ─── Sections and descriptions ──────────────────────────────────────────────
 
 interface KeySpec {
   key: string;
+  /** One or more lines (split on \n); each becomes a `# …` comment above the key. */
   description: string;
   /** Placeholder written to the file; defaults to the schema default (or empty). */
   value?: string;
@@ -62,50 +73,103 @@ interface KeySpec {
 
 interface Section {
   title: string;
+  /** Comment lines printed under the section banner. */
+  notes?: string[];
   keys: KeySpec[];
 }
 
 /** Every key, grouped. A key in apiEnvSchema without an entry here fails the script. */
 export const SECTIONS: readonly Section[] = [
   {
-    title: 'Postgres and migrations',
+    title: 'Database (ADR 0002)',
+    notes: [
+      'Production: the EXTERNAL company Postgres server 10.150.0.5 (PostgreSQL 18), database',
+      'nexus_traffic, schema traffic — no postgres container (plain `docker compose up -d --build`).',
+      'Local laptop / CI: `docker compose --profile localdb --profile local up -d --build` and the',
+      'localdb values shown in each description below.',
+      'Connection strings: postgres://<login>:<password>@<host>:<port>/<database>',
+      'URL-ENCODE the password inside a URL: @ → %40, : → %3A, / → %2F, # → %23, % → %25',
+      '(a raw @ in the password makes the host part wrong). Docker Compose also expands $ in .env',
+      'values: write a literal $ as $$.',
+      'NEVER commit real logins/passwords: they belong ONLY in the git-ignored .env on the host.',
+    ],
+    keys: [
+      {
+        key: 'DB_APP_ROLE_MODE',
+        description: [
+          'How the api connects (read by migrate). One of:',
+          '  owner    → production on the shared server, whose login cannot create roles: migrate creates',
+          '             NO role; the api uses the SAME login, so DATABASE_URL = MIGRATION_DATABASE_URL.',
+          '  separate → --profile localdb: migrate creates role nexus_app (DML only, grants re-applied on',
+          '             every run) with NEXUS_APP_DB_PASSWORD; the api connects as nexus_app.',
+          'Compose defaults to separate when this is empty.',
+        ].join('\n'),
+        value: 'owner',
+      },
+      {
+        key: 'MIGRATION_DATABASE_URL',
+        description: [
+          'migrate connects with this OWNER login (it runs the DDL).',
+          '  owner mode (production): the shared login, e.g. …@10.150.0.5:5432/nexus_traffic',
+          '  localdb: postgres://<POSTGRES_USER>:<POSTGRES_PASSWORD>@postgres:5432/<POSTGRES_DB>',
+        ].join('\n'),
+        value: EXTERNAL_URL_PLACEHOLDER,
+      },
+      {
+        key: 'DATABASE_URL',
+        description: [
+          'The api connects with this login.',
+          '  owner mode: MUST be IDENTICAL to MIGRATION_DATABASE_URL (preflight.sh checks it).',
+          '  separate mode: postgres://nexus_app:<NEXUS_APP_DB_PASSWORD>@postgres:5432/<POSTGRES_DB>',
+        ].join('\n'),
+        value: EXTERNAL_URL_PLACEHOLDER,
+      },
+      {
+        key: 'NEXUS_APP_DB_PASSWORD',
+        description: [
+          'ONLY for DB_APP_ROLE_MODE=separate (leave empty in owner mode): the password migrate sets on',
+          'role nexus_app on EVERY run (rotate = change it + DATABASE_URL, redeploy). Hex: openssl rand -hex 32.',
+        ].join('\n'),
+        value: '',
+      },
+      {
+        key: 'BACKUP_DATABASE_URL',
+        description:
+          'What pg-backup dumps nightly. Empty = MIGRATION_DATABASE_URL (the usual choice).',
+        value: '',
+      },
+      { key: 'PG_POOL_WRITE_MAX', description: 'api connections for ingest/admin writes.' },
+      { key: 'PG_POOL_QUERY_MAX', description: 'api connections for dashboard reads.' },
+    ],
+  },
+  {
+    title: `Local Postgres container (${LOCALDB_NOTE})`,
+    notes: [
+      'Read only by the postgres service of profile localdb (and its first-start initdb).',
+      'Production on the external server ignores them (preflight.sh checks them only with --localdb).',
+    ],
     keys: [
       {
         key: 'PG_IMAGE',
-        description: 'Postgres image for postgres + pg-backup (compose only).',
-        value: 'postgres:17-alpine',
+        description:
+          'Image for the localdb postgres AND pg-backup. pg_dump must be >= the server major (18).',
+        value: 'postgres:18-alpine',
       },
       {
         key: 'POSTGRES_USER',
-        description: 'Database OWNER role, used by migrate and pg-backup (never by the api).',
+        description: `Database OWNER role of the local container (${LOCALDB_NOTE}).`,
         value: 'nexus_owner',
       },
       {
         key: 'POSTGRES_PASSWORD',
-        description: 'Owner password. Hex only: openssl rand -hex 32.',
-        value: SECRET_PLACEHOLDER,
-      },
-      { key: 'POSTGRES_DB', description: 'Database name.', value: 'nexus_traffic' },
-      {
-        key: 'MIGRATION_DATABASE_URL',
-        description:
-          'migrate connects as the owner. MUST repeat POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB.',
-        value: 'postgres://nexus_owner:change-me-POSTGRES_PASSWORD@postgres:5432/nexus_traffic',
-      },
-      {
-        key: 'NEXUS_APP_DB_PASSWORD',
-        description:
-          'Password migrate sets on the runtime role nexus_app on EVERY run (rotate = change + redeploy).',
+        description: `Owner password (${LOCALDB_NOTE}). Hex only: openssl rand -hex 32.`,
         value: SECRET_PLACEHOLDER,
       },
       {
-        key: 'DATABASE_URL',
-        description:
-          'The api connects as nexus_app (DML only). Password MUST equal NEXUS_APP_DB_PASSWORD.',
-        value: 'postgres://nexus_app:change-me-NEXUS_APP_DB_PASSWORD@postgres:5432/nexus_traffic',
+        key: 'POSTGRES_DB',
+        description: `Database name of the local container (${LOCALDB_NOTE}).`,
+        value: 'nexus_traffic',
       },
-      { key: 'PG_POOL_WRITE_MAX', description: 'api connections for ingest/admin writes.' },
-      { key: 'PG_POOL_QUERY_MAX', description: 'api connections for dashboard reads.' },
     ],
   },
   {
@@ -261,7 +325,8 @@ const HEADER = [
   '# GENERATED by `npm run env:example` (scripts/generate-env-example.ts). Do not edit by hand.',
   '#',
   '# Server setup:  cp .env.example .env  → replace EVERY change-me value → bash scripts/preflight.sh',
-  '# Secrets must be hex (openssl rand -hex 32) so they never need escaping inside URLs.',
+  '# Local stack:   same, but DB_APP_ROLE_MODE=separate + the localdb values → preflight.sh --localdb',
+  '# Generated secrets must be hex (openssl rand -hex 32) so they never need escaping inside URLs.',
   '# NEVER commit .env.',
   '# ─────────────────────────────────────────────────────────────────────────────',
 ];
@@ -292,10 +357,15 @@ function formatValue(value: string): string {
   return /\s|#/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value;
 }
 
+/** `# line` per line of text (WHY: multi-line descriptions stay readable in the file). */
+function commentLines(text: string): string[] {
+  return text.split('\n').map((line) => `# ${line}`.trimEnd());
+}
+
 function renderKey(spec: KeySpec, defaults: Map<string, string | undefined>): string[] {
   const value = formatValue(spec.value ?? defaults.get(spec.key) ?? '');
   const commented = (IMAGE_MANAGED_KEYS as readonly string[]).includes(spec.key);
-  return [`# ${spec.description}`, `${commented ? '# ' : ''}${spec.key}=${value}`];
+  return [...commentLines(spec.description), `${commented ? '# ' : ''}${spec.key}=${value}`];
 }
 
 function renderSection(section: Section, defaults: Map<string, string | undefined>): string[] {
@@ -303,6 +373,8 @@ function renderSection(section: Section, defaults: Map<string, string | undefine
   return [
     '',
     banner.padEnd(79, '─'),
+    ...(section.notes ?? []).flatMap((note) => commentLines(note)),
+    ...(section.notes?.length ? ['#'] : []),
     ...section.keys.flatMap((spec, i) => [...(i > 0 ? [''] : []), ...renderKey(spec, defaults)]),
   ];
 }

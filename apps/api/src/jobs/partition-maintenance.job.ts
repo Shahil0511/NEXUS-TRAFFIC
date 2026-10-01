@@ -1,5 +1,8 @@
 /**
  * Every 6 h: make sure this month's ±window partitions exist (cross-replica safe via advisory lock).
+ *
+ * The work runs on the SAME transaction client that holds the lock (passed down as `exec`), so two
+ * replicas can never run it at the same time.
  */
 import type { Pool } from 'pg';
 
@@ -16,6 +19,6 @@ export class PartitionMaintenanceJob {
   ) {}
 
   async run(): Promise<void> {
-    await withAdvisoryXactLock(this.db, ADVISORY_LOCKS.partitions, () => this.partitions.ensureAhead());
+    await withAdvisoryXactLock(this.db, ADVISORY_LOCKS.partitions, (client) => this.partitions.ensureAhead(client));
   }
 }

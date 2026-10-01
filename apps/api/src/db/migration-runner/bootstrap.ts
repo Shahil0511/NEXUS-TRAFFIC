@@ -1,11 +1,17 @@
 /**
- * Idempotent database bootstrap, run by `migrate` as the owner (POSTGRES_USER) on EVERY run,
- * before any migration:
+ * Idempotent database bootstrap, run by `migrate` as the owner (the MIGRATION_DATABASE_URL login)
+ * on EVERY run, before any migration:
  *   1. CREATE SCHEMA IF NOT EXISTS traffic
- *   2. create the runtime role nexus_app (LOGIN) if it is missing
- *   3. set its password from NEXUS_APP_DB_PASSWORD (so rotating the env var + re-running migrate
- *      rotates the password)
+ *   2. ('separate' mode only) create the runtime role nexus_app (LOGIN) if it is missing
+ *   3. ('separate' mode only) set its password from NEXUS_APP_DB_PASSWORD (so rotating the env var
+ *      + re-running migrate rotates the password)
  *   4. create the ledger table traffic.schema_migrations
+ *
+ * DB_APP_ROLE_MODE (ADR 0002):
+ * - 'separate' (local Docker Postgres, `--profile localdb`): the api runs as nexus_app, DML only;
+ *   its grants are re-applied after the migrations by ./grants.ts.
+ * - 'owner' (the shared server 10.150.0.5, whose login has NO CREATEROLE): no role is created or
+ *   altered — the api connects with the SAME login as migrate. Only steps 1 and 4 run.
  *
  * WHY here and not in initdb scripts: initdb scripts run only on an EMPTY volume and cannot read
  * env passwords later (ADR 0001, "Postgres / roles").
@@ -26,6 +32,16 @@ const PASSWORD_SETTING = 'nexus.app_password';
 
 /** WHY a guard: an empty/short password must never reach ALTER ROLE (same rule as migrate-config). */
 export const MIN_APP_PASSWORD_LENGTH = 16;
+
+/** How the api connects (DB_APP_ROLE_MODE, ADR 0002). */
+export const APP_ROLE_MODE_VALUES = ['separate', 'owner'] as const;
+export type AppRoleMode = (typeof APP_ROLE_MODE_VALUES)[number];
+
+/**
+ * - separate: the bootstrap manages role nexus_app with `password`; ./grants.ts gives it DML only.
+ * - owner:    no runtime role at all; the api uses the migrate login (DATABASE_URL = MIGRATION_DATABASE_URL).
+ */
+export type AppRole = { mode: 'separate'; password: string } | { mode: 'owner' };
 
 /** Step 1. */
 export async function ensureSchema(exec: Executor): Promise<void> {
@@ -69,13 +85,18 @@ export async function setAppRolePassword(exec: Executor, password: string): Prom
   await exec.query(`SELECT set_config($1, '', true)`, [PASSWORD_SETTING]);
 }
 
-/** Runs steps 1–4 in one transaction, serialised with other migrate runs on this database. */
-export async function bootstrapDatabase(pool: Pool, appPassword: string): Promise<void> {
+/**
+ * Runs the steps for `appRole.mode` in one transaction, serialised with other migrate runs on this
+ * database. Owner mode NEVER touches a role (the shared server's login cannot, and must not).
+ */
+export async function bootstrapDatabase(pool: Pool, appRole: AppRole): Promise<void> {
   await withTransaction(pool, async (client) => {
     await client.query('SELECT pg_advisory_xact_lock($1)', [ADVISORY_LOCKS.migrate]);
     await ensureSchema(client);
-    await ensureAppRole(client);
-    await setAppRolePassword(client, appPassword);
+    if (appRole.mode === 'separate') {
+      await ensureAppRole(client);
+      await setAppRolePassword(client, appRole.password);
+    }
     await ensureLedger(client);
   });
 }

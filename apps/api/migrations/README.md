@@ -19,19 +19,31 @@ Plain SQL, applied in version order by the `migrate` service
 6. Enum `CHECK`s mirror the `*_VALUES` arrays of `packages/shared/src/constants/`; limits mirror
    `INGEST_LIMITS`. `test/db/schema-parity.integration.test.ts` fails when they drift.
 7. Index names are `idx_<table>_<cols>`; constraint names are `<table>_<column>_check`.
-8. No seed data. Roles and the schema are created by the **bootstrap**, not by a migration.
+8. No seed data. Roles and the schema are created by the **bootstrap**, not by a migration, and the
+   runtime role's privileges live in [`../src/db/migration-runner/grants.ts`](../src/db/migration-runner/grants.ts)
+   — a migration must NEVER mention `nexus_app` (it does not exist in `DB_APP_ROLE_MODE=owner`).
 9. Additive changes only between deploys, so `git checkout <old> && docker compose up` stays safe
    (the runner treats "applied but unknown to this code" as a warning, exit 0).
+
+## Role modes (`DB_APP_ROLE_MODE`, [ADR 0002](../../../ai-context/decisions/0002-external-database.md))
+
+| Mode | Where | Runtime login of the api | What migrate does with roles |
+|---|---|---|---|
+| `owner` | production: the external server 10.150.0.5, database `nexus_traffic` (its login has no `CREATEROLE`) | the SAME login as `MIGRATION_DATABASE_URL` (`DATABASE_URL` is identical) | nothing — no role is created, altered or granted to |
+| `separate` (default) | `--profile localdb` (local Docker Postgres), CI, the DB test suites | `nexus_app` (DML only) | creates `nexus_app`, sets its password from `NEXUS_APP_DB_PASSWORD` (≥ 16 chars), re-applies its grants |
 
 ## Every run of `migrate`
 
 1. Connect as the owner (`MIGRATION_DATABASE_URL`), retrying 10 × 2 s.
-2. **Bootstrap** (idempotent): `CREATE SCHEMA IF NOT EXISTS traffic`; create role `nexus_app` if
-   missing; `ALTER ROLE nexus_app PASSWORD` from `NEXUS_APP_DB_PASSWORD`; create the ledger
-   `traffic.schema_migrations`.
+2. **Bootstrap** (idempotent): `CREATE SCHEMA IF NOT EXISTS traffic`; in `separate` mode only,
+   create role `nexus_app` if missing and `ALTER ROLE nexus_app PASSWORD` from
+   `NEXUS_APP_DB_PASSWORD`; create the ledger `traffic.schema_migrations`.
 3. Compare files with the ledger: pending / drifted / unknown-applied.
 4. Apply pending files, one transaction each.
-5. `SELECT traffic.ensure_partitions(1, 2)` (last month … two months ahead).
+5. `separate` mode only: re-apply the `nexus_app` grants
+   ([`grants.ts`](../src/db/migration-runner/grants.ts), one transaction under the migrate advisory
+   lock; idempotent, so a revoked grant is repaired and new tables are covered).
+6. `SELECT traffic.ensure_partitions(1, 2)` (last month … two months ahead).
 
 Flags: `--status` (report only), `--dry` (show what would be applied). Exit codes: `0` ok,
 `1` failed apply or error, `2` checksum drift.
@@ -40,7 +52,7 @@ Flags: `--status` (report only), `--dry` (show what would be applied). Exit code
 
 | Table | Created in | Partitioned | Written by (role) | Purpose |
 |---|---|---|---|---|
-| `traffic.schema_migrations` | bootstrap | no | migrate (owner); read by nexus_app | ledger: version, name, checksum, applied_at, execution_ms |
+| `traffic.schema_migrations` | bootstrap | no | migrate (owner); read by the api | ledger: version, name, checksum, applied_at, execution_ms |
 | `traffic.apps` | [0002](0002_apps_and_api_keys.sql) | no | nexus_app (admin API) | registered apps; `slug` is the public id |
 | `traffic.api_keys` | [0002](0002_apps_and_api_keys.sql) | no | nexus_app (admin API, key auth) | secret/publishable keys, stored as HMAC hashes |
 | `traffic.admin_audit_log` | [0003](0003_admin_audit_log.sql) | no | nexus_app, **append-only** | who changed which app/key, when |
@@ -59,15 +71,24 @@ Flags: `--status` (report only), `--dry` (show what would be applied). Exit code
 
 The partition functions accept only `api_requests` / `web_events` (anything else raises `22023`),
 pin `search_path = traffic, pg_catalog, pg_temp`, quote identifiers with `format('%I')`, and are
-revoked from `PUBLIC`; `EXECUTE` for nexus_app is granted in [0007](0007_grants.sql).
+revoked from `PUBLIC`; `EXECUTE` for nexus_app is granted by
+[`grants.ts`](../src/db/migration-runner/grants.ts) (separate mode).
 
-## Privileges ([0007](0007_grants.sql))
+## Privileges ([`grants.ts`](../src/db/migration-runner/grants.ts), `DB_APP_ROLE_MODE=separate` only)
 
 `nexus_app`: `USAGE` on schema `traffic`; `SELECT, INSERT, UPDATE, DELETE` on `apps`, `api_keys`,
 `api_requests`, `web_events`, `ingest_counters`; `SELECT, INSERT` on `admin_audit_log`; `SELECT` on
 `schema_migrations`; sequences `USAGE, SELECT`; `EXECUTE` on the three partition functions; default
 privileges for tables/sequences the owner creates later (monthly partitions included). **No DDL,
-no TRUNCATE** — verified by `test/db/privileges.integration.test.ts`.
+no TRUNCATE** — verified by `test/db/privileges.integration.test.ts`. In `owner` mode there is no
+`nexus_app`; the api runs as the owner (see ADR 0002, "Consequences").
+
+**History:** until 2026-10-01 these grants were migration `0007_grants.sql`. It was moved into code
+before the first production deploy, because a migration cannot GRANT to a role that `owner` mode never
+creates. A database migrated by an S1 rehearsal still lists `0007_grants` in its ledger; the runner and
+the api report it as *unknown-applied* (a warning only). The comments of `0001`/`0003` still mention
+`0007_grants.sql`: they are left untouched on purpose, because editing an applied file is checksum
+drift (rule 3).
 
 ## Adding a migration
 
