@@ -2,15 +2,15 @@
  * Opaque user id for URLs: HMAC-SHA256(USER_KEY_SECRET, lower-cased email).
  * Stored as bytea; rendered as 64-char hex in DTOs and routes.
  */
-import { notImplemented } from '../lib/not-implemented';
+import { createHmac } from 'node:crypto';
 
+/** WHY: URLs and gateway logs must never carry emails, and the id cannot be derived later. */
 export class UserKeyHasher {
   constructor(private readonly secret: string) {}
 
   hash(email: string | null): Buffer | null {
-    void email;
-    void this.secret;
-    throw notImplemented('UserKeyHasher.hash');
+    if (!email) return null;
+    return createHmac('sha256', this.secret).update(email.toLowerCase(), 'utf8').digest();
   }
 }
 

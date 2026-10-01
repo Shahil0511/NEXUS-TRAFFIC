@@ -16,7 +16,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:db": "npm run test:db -w @nexus/api",
-    "docs:build": "tsx scripts/build-docs.ts",
+    "docs:build": "tsx --conditions=@nexus/source scripts/build-docs.ts",
     "openapi:emit": "tsx --conditions=@nexus/source scripts/emit-openapi.ts",
     "env:example": "tsx --conditions=@nexus/source scripts/generate-env-example.ts",
     "sdk:pack": "tsx scripts/sdk-pack.ts",
@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "marked": "^15.0.12",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

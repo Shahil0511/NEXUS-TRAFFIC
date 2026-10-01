@@ -87,7 +87,14 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
   const keyHasher = new ApiKeyHasher(env.API_KEY_PEPPER);
   const keyGenerator = new ApiKeyGenerator(keyHasher);
   const keyCache = new AppKeyCache(clock);
-  const keyAuthenticator = new AppKeyAuthenticator(repositories.apiKeys, repositories.apps, keyHasher, keyCache, clock);
+  const keyAuthenticator = new AppKeyAuthenticator(
+    repositories.apiKeys,
+    repositories.apps,
+    keyHasher,
+    keyCache,
+    clock,
+    logger,
+  );
 
   // ─── Enrichment ───────────────────────────────────────────────────────────
   const enrichment = {
@@ -127,7 +134,15 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
       logger,
     ),
     appQuery: new AppQueryService(repositories.apps, repositories.apiKeys),
-    appAdmin: new AppAdminService(pools.write, repositories.apps, repositories.apiKeys, repositories.audit, keyGenerator, keyCache),
+    appAdmin: new AppAdminService(
+      pools.write,
+      repositories.apps,
+      repositories.apiKeys,
+      repositories.audit,
+      keyGenerator,
+      keyCache,
+      clock,
+    ),
     appSlugs: new AppSlugResolver(repositories.apps),
   };
 

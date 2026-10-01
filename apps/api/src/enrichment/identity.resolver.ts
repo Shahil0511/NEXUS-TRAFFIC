@@ -5,10 +5,10 @@
  *   client_claimed (claimed_email only, user_email stays null); else anonymous.
  * `dropped` = a value was supplied but was not a plausible email (→ FIELD_DROPPED warning).
  */
+import { plausibleEmail } from '@nexus/auth';
 import type { IdentitySource } from '@nexus/shared';
 
 import type { SsoIdentityReader } from '../auth/sso-identity.reader';
-import { notImplemented } from '../lib/not-implemented';
 
 export interface ResolvedIdentity {
   userEmail: string | null;
@@ -17,18 +17,30 @@ export interface ResolvedIdentity {
   dropped: boolean;
 }
 
+function anonymous(dropped: boolean): ResolvedIdentity {
+  return { userEmail: null, claimedEmail: null, identitySource: 'anonymous', dropped };
+}
+
+/** WHY: ONLY verified sources may fill user_email — forged browser hints must never count. */
 export class IdentityResolver {
   constructor(private readonly sso: SsoIdentityReader) {}
 
   forServer(userEmail: string | undefined): ResolvedIdentity {
-    void userEmail;
-    throw notImplemented('IdentityResolver.forServer');
+    if (userEmail === undefined) return anonymous(false);
+    const email = plausibleEmail(userEmail);
+    if (!email) return anonymous(true);
+    return { userEmail: email, claimedEmail: null, identitySource: 'app_attested', dropped: false };
   }
 
   forBrowser(cookieHeader: string | undefined, hintedEmail: string | undefined): ResolvedIdentity {
-    void cookieHeader;
-    void hintedEmail;
-    void this.sso;
-    throw notImplemented('IdentityResolver.forBrowser');
+    const sso = this.sso.read(cookieHeader);
+    const ssoEmail = sso.ok ? plausibleEmail(sso.email) : null;
+    if (ssoEmail) {
+      return { userEmail: ssoEmail, claimedEmail: null, identitySource: 'sso_cookie', dropped: false };
+    }
+    if (hintedEmail === undefined) return anonymous(false);
+    const claimed = plausibleEmail(hintedEmail);
+    if (!claimed) return anonymous(true);
+    return { userEmail: null, claimedEmail: claimed, identitySource: 'client_claimed', dropped: false };
   }
 }

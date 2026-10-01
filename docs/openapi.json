@@ -1,0 +1,1237 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Data Nexus Traffic — ingest API",
+    "version": "1.0.0",
+    "description": "Ingest contract v1. Additive changes only within v1; a breaking change ships as /v2. Human guide: https://nexus.libas.in/traffic/api/docs/"
+  },
+  "servers": [
+    {
+      "url": "https://nexus.libas.in/traffic/api",
+      "description": "Production (nexus.libas.in)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Ingest",
+      "description": "What other teams call from their apps."
+    },
+    {
+      "name": "Docs",
+      "description": "The public guide and downloads."
+    }
+  ],
+  "paths": {
+    "/v1/ingest/server": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "operationId": "ingestServerEvents",
+        "summary": "Send a batch of backend API-call events (secret key).",
+        "description": "Up to 500 events and 524288 bytes per request. Synchronous: a 202 means the rows are committed. `eventId` makes resends idempotent (they are counted in `duplicates`).",
+        "security": [
+          {
+            "NexusSecretKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "description": "Set to `1` to validate and enrich without writing anything.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIngestBatch"
+              },
+              "examples": {
+                "twoRequests": {
+                  "value": {
+                    "sentAt": "2026-10-01T09:30:05.120+05:30",
+                    "sdk": {
+                      "name": "@nexus/express",
+                      "version": "1.0.0"
+                    },
+                    "events": [
+                      {
+                        "eventId": "0b8f6c1e-5a2d-4c4f-9a51-2f0f3d7f6a11",
+                        "kind": "http",
+                        "occurredAt": "2026-10-01T09:30:04.870+05:30",
+                        "method": "GET",
+                        "path": "/ebo-sales/api/v1/stores/1042",
+                        "routeTemplate": "/ebo-sales/api/v1/stores/:id",
+                        "status": 200,
+                        "durationMs": 41.7,
+                        "ip": "203.0.113.24",
+                        "userEmail": "someone@libas.in",
+                        "requestId": "9f2c0c1e-77aa-4a51-b1d2-1c9e5a0e1b44",
+                        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0",
+                        "responseBytes": 5821
+                      },
+                      {
+                        "eventId": "6a1d3f58-0c1b-4e7e-8d0e-3b9a5c2f7e90",
+                        "kind": "http",
+                        "occurredAt": "2026-10-01T09:30:04.990+05:30",
+                        "method": "POST",
+                        "path": "/ebo-sales/api/v1/reports/export",
+                        "routeTemplate": "/ebo-sales/api/v1/reports/export",
+                        "status": 500,
+                        "durationMs": 1290.4,
+                        "ip": "203.0.113.24",
+                        "userEmail": "someone@libas.in",
+                        "errorCode": "REPORT_TIMEOUT"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Batch processed and committed. NEVER retry a 202 — per-event problems are listed in `rejected[]` (fix the sender) and `warnings[]` (event stored, a field was dropped/truncated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/ingest/browser": {
+      "post": {
+        "tags": [
+          "Ingest"
+        ],
+        "operationId": "ingestBrowserEvents",
+        "summary": "Send a batch of frontend usage events (publishable key IN THE BODY).",
+        "description": "Up to 50 events and 61440 bytes. Sent with `navigator.sendBeacon` as `text/plain` (no CORS preflight). The request Origin must be in the app's allowed origins and every `path` must start with the app's base path. A SECRET key here is rejected with 403 SECRET_KEY_EXPOSED and flagged for rotation.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/plain": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserIngestBatch"
+              },
+              "examples": {
+                "journey": {
+                  "value": {
+                    "key": "nx_pk_00000000000000000000000000000000",
+                    "sentAt": "2026-10-01T04:01:10.002Z",
+                    "sessionId": "5b0d6f7e-2a3c-4d1e-9f8a-7b6c5d4e3f21",
+                    "anonymousId": "2c9a8b7d-6e5f-4a3b-9c1d-0e2f3a4b5c6d",
+                    "client": {
+                      "sdk": "@nexus/react",
+                      "version": "1.0.0",
+                      "tz": "Asia/Kolkata",
+                      "lang": "en-IN"
+                    },
+                    "events": [
+                      {
+                        "eventId": "a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                        "type": "page_view",
+                        "occurredAt": "2026-10-01T04:00:12.000Z",
+                        "seq": 0,
+                        "path": "/ebo-audit/audits",
+                        "nav": "load"
+                      },
+                      {
+                        "eventId": "b4e2d3c5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                        "type": "tool_use",
+                        "occurredAt": "2026-10-01T04:00:40.500Z",
+                        "seq": 1,
+                        "path": "/ebo-audit/audits",
+                        "tool": "audits.export-csv",
+                        "action": "export",
+                        "label": "Export CSV"
+                      },
+                      {
+                        "eventId": "c5f3e4d6-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
+                        "type": "page_time",
+                        "occurredAt": "2026-10-01T04:01:10.000Z",
+                        "seq": 2,
+                        "path": "/ebo-audit/audits",
+                        "pageViewId": "a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                        "visibleMs": 57400,
+                        "final": true,
+                        "reason": "route"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserIngestBatch"
+              },
+              "examples": {
+                "journey": {
+                  "value": {
+                    "key": "nx_pk_00000000000000000000000000000000",
+                    "sentAt": "2026-10-01T04:01:10.002Z",
+                    "sessionId": "5b0d6f7e-2a3c-4d1e-9f8a-7b6c5d4e3f21",
+                    "anonymousId": "2c9a8b7d-6e5f-4a3b-9c1d-0e2f3a4b5c6d",
+                    "client": {
+                      "sdk": "@nexus/react",
+                      "version": "1.0.0",
+                      "tz": "Asia/Kolkata",
+                      "lang": "en-IN"
+                    },
+                    "events": [
+                      {
+                        "eventId": "a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                        "type": "page_view",
+                        "occurredAt": "2026-10-01T04:00:12.000Z",
+                        "seq": 0,
+                        "path": "/ebo-audit/audits",
+                        "nav": "load"
+                      },
+                      {
+                        "eventId": "b4e2d3c5-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+                        "type": "tool_use",
+                        "occurredAt": "2026-10-01T04:00:40.500Z",
+                        "seq": 1,
+                        "path": "/ebo-audit/audits",
+                        "tool": "audits.export-csv",
+                        "action": "export",
+                        "label": "Export CSV"
+                      },
+                      {
+                        "eventId": "c5f3e4d6-7a8b-4c9d-8e1f-2a3b4c5d6e7f",
+                        "type": "page_time",
+                        "occurredAt": "2026-10-01T04:01:10.000Z",
+                        "seq": 2,
+                        "path": "/ebo-audit/audits",
+                        "pageViewId": "a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                        "visibleMs": 57400,
+                        "final": true,
+                        "reason": "route"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Batch processed and committed. NEVER retry a 202 — per-event problems are listed in `rejected[]` (fix the sender) and `warnings[]` (event stored, a field was dropped/truncated).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/v1/ingest/verify": {
+      "get": {
+        "tags": [
+          "Ingest"
+        ],
+        "operationId": "verifyKey",
+        "summary": "Check a key (either kind) and read the server clock.",
+        "security": [
+          {
+            "NexusAnyKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key is valid and active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The app is disabled. Codes: APP_DISABLED.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/docs/": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "operationId": "getGuide",
+        "summary": "The integration guide (HTML).",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "404": {
+            "description": "Not found (or docs not built). Codes: NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/openapi.json": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "operationId": "getOpenApi",
+        "summary": "This document.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "description": "Not found (or docs not built). Codes: NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs/files/{filePath}": {
+      "get": {
+        "tags": [
+          "Docs"
+        ],
+        "operationId": "getDocsFile",
+        "summary": "Download a snippet, example or SDK tarball.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "404": {
+            "description": "Not found (or docs not built). Codes: NOT_FOUND.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "filePath",
+            "in": "path",
+            "required": true,
+            "description": "Path under files/, e.g. `snippets/curl.sh`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ServerIngestBatch": {
+        "type": "object",
+        "properties": {
+          "sentAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "sdk": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              }
+            },
+            "required": [
+              "name",
+              "version"
+            ]
+          },
+          "events": {
+            "minItems": 1,
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "eventId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "kind": {
+                  "default": "http",
+                  "type": "string",
+                  "enum": [
+                    "http",
+                    "stream"
+                  ]
+                },
+                "occurredAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "format": "starts_with",
+                  "pattern": "^\\/.*"
+                },
+                "routeTemplate": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "format": "starts_with",
+                  "pattern": "^\\/.*"
+                },
+                "status": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 599
+                },
+                "durationMs": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 3600000
+                },
+                "ip": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "userEmail": {
+                  "type": "string",
+                  "maxLength": 254
+                },
+                "requestId": {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                "userAgent": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "requestBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "responseBytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "errorCode": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9_]{1,64}$"
+                },
+                "release": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "sessionId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "pageViewId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                }
+              },
+              "required": [
+                "eventId",
+                "occurredAt",
+                "method",
+                "path",
+                "status",
+                "durationMs"
+              ]
+            }
+          }
+        },
+        "required": [
+          "sentAt",
+          "events"
+        ]
+      },
+      "BrowserIngestBatch": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "sentAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "sessionId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "anonymousId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string",
+                "maxLength": 254
+              }
+            }
+          },
+          "client": {
+            "type": "object",
+            "properties": {
+              "sdk": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "version": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "tz": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "lang": {
+                "type": "string",
+                "maxLength": 16
+              }
+            },
+            "required": [
+              "sdk",
+              "version"
+            ]
+          },
+          "events": {
+            "minItems": 1,
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "routeTemplate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "page_view"
+                    },
+                    "nav": {
+                      "type": "string",
+                      "enum": [
+                        "load",
+                        "route"
+                      ]
+                    },
+                    "referrerPath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "referrerHost": {
+                      "type": "string",
+                      "maxLength": 253
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "occurredAt",
+                    "seq",
+                    "path",
+                    "type",
+                    "nav"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "routeTemplate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "page_time"
+                    },
+                    "pageViewId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "visibleMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 86400000
+                    },
+                    "final": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "hidden",
+                        "route",
+                        "pagehide",
+                        "idle"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "occurredAt",
+                    "seq",
+                    "path",
+                    "type",
+                    "pageViewId",
+                    "visibleMs",
+                    "final",
+                    "reason"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "routeTemplate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "tool_use"
+                    },
+                    "tool": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$"
+                    },
+                    "action": {
+                      "type": "string",
+                      "enum": [
+                        "click",
+                        "open",
+                        "submit",
+                        "export",
+                        "toggle",
+                        "search",
+                        "other"
+                      ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "props": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]{0,39}$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 128
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "occurredAt",
+                    "seq",
+                    "path",
+                    "type",
+                    "tool"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "eventId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "occurredAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2048,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "routeTemplate": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "type": {
+                      "type": "string",
+                      "const": "custom"
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9_.:-]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "value": {
+                      "type": "number"
+                    },
+                    "props": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]{0,39}$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "maxLength": 128
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "eventId",
+                    "occurredAt",
+                    "seq",
+                    "path",
+                    "type",
+                    "name"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "key",
+          "sentAt",
+          "sessionId",
+          "events"
+        ]
+      },
+      "IngestResult": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "INVALID_EVENT",
+                    "EVENT_TIME_OUT_OF_RANGE",
+                    "PATH_OUTSIDE_APP",
+                    "DB_CONSTRAINT"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "index",
+                "code",
+                "message"
+              ]
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "FIELD_DROPPED",
+                    "FIELD_TRUNCATED"
+                  ]
+                },
+                "field": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "index",
+                "code",
+                "field"
+              ]
+            }
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted",
+          "duplicates",
+          "rejected",
+          "warnings"
+        ]
+      },
+      "VerifyResponse": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "slug",
+              "displayName"
+            ]
+          },
+          "keyKind": {
+            "type": "string",
+            "enum": [
+              "secret",
+              "publishable"
+            ]
+          },
+          "contractVersion": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "serverTime": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          }
+        },
+        "required": [
+          "app",
+          "keyKind",
+          "contractVersion",
+          "serverTime"
+        ]
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "BAD_REQUEST",
+                  "VALIDATION_ERROR",
+                  "UNAUTHORIZED",
+                  "FORBIDDEN",
+                  "NOT_FOUND",
+                  "CONFLICT",
+                  "PAYLOAD_TOO_LARGE",
+                  "UNSUPPORTED_MEDIA_TYPE",
+                  "RATE_LIMITED",
+                  "SERVICE_UNAVAILABLE",
+                  "INTERNAL_ERROR",
+                  "INVALID_ENVELOPE",
+                  "MISSING_API_KEY",
+                  "INVALID_API_KEY",
+                  "WRONG_KEY_TYPE",
+                  "SECRET_KEY_EXPOSED",
+                  "ORIGIN_NOT_ALLOWED",
+                  "APP_DISABLED",
+                  "BROWSER_INGEST_DISABLED",
+                  "INGEST_UNAVAILABLE",
+                  "INVALID_EVENT",
+                  "EVENT_TIME_OUT_OF_RANGE",
+                  "PATH_OUTSIDE_APP",
+                  "DB_CONSTRAINT",
+                  "FIELD_DROPPED",
+                  "FIELD_TRUNCATED",
+                  "SESSION_EXPIRED",
+                  "CSRF_HEADER_MISSING",
+                  "RANGE_TOO_LARGE"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {},
+              "requestId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "NexusSecretKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Nexus-Key",
+        "description": "Secret key `nx_sk_…`. Server environments ONLY — never in a browser bundle."
+      },
+      "NexusAnyKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Nexus-Key",
+        "description": "Either a secret (`nx_sk_…`) or a publishable (`nx_pk_…`) key."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Malformed batch — fix the sender, do NOT retry. Codes: INVALID_ENVELOPE, VALIDATION_ERROR, BAD_REQUEST.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or unknown key — pause sending for 5 minutes. Codes: MISSING_API_KEY, INVALID_API_KEY.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Key is valid but not allowed here — pause sending for 5 minutes. Codes: WRONG_KEY_TYPE, SECRET_KEY_EXPOSED, ORIGIN_NOT_ALLOWED, APP_DISABLED, BROWSER_INGEST_DISABLED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "Body over the limit — split the batch in half and resend. Codes: PAYLOAD_TOO_LARGE.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Wrong Content-Type — fix the sender, do NOT retry. Codes: UNSUPPORTED_MEDIA_TYPE.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests — wait Retry-After seconds, then resend. Codes: RATE_LIMITED.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Database busy or restarting — wait Retry-After seconds, then resend the SAME events. Codes: INGEST_UNAVAILABLE, SERVICE_UNAVAILABLE.",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before retrying.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    }
+  }
+}
