@@ -1,0 +1,41 @@
+{
+  "name": "@nexus/api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Data Nexus Traffic analytics server: ingest API, dashboard REST API, Socket.io live feed, public docs.",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch --conditions=@nexus/source src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "migrate": "tsx --conditions=@nexus/source src/db/migrate.ts",
+    "migrate:status": "tsx --conditions=@nexus/source src/db/migrate.ts --status",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:db": "cross-env RUN_DB_TESTS=1 vitest run"
+  },
+  "dependencies": {
+    "@nexus/auth": "1.0.0",
+    "@nexus/shared": "1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "geoip-lite": "^1.4.10",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.1",
+    "socket.io": "^4.8.1",
+    "ua-parser-js": "^1.0.40",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/geoip-lite": "^1.4.4",
+    "@types/pg": "^8.11.10",
+    "@types/supertest": "^6.0.2",
+    "@types/ua-parser-js": "^0.7.39",
+    "cross-env": "^7.0.3",
+    "supertest": "^7.0.0"
+  }
+}
