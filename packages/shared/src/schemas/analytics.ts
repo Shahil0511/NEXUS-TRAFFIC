@@ -5,7 +5,12 @@
  */
 import { z } from 'zod';
 
-import { appSlugSchema, pageQueryShape, SORT_DIRECTION_VALUES, timeWindowQuerySchema } from './common';
+import {
+  appSlugSchema,
+  pageQueryShape,
+  SORT_DIRECTION_VALUES,
+  timeWindowQuerySchema,
+} from './common';
 
 // ─── overview ───────────────────────────────────────────────────────────────
 export const overviewSummaryQuerySchema = timeWindowQuerySchema;
@@ -73,6 +78,12 @@ export type SessionListQuery = z.infer<typeof sessionListQuerySchema>;
 
 export const sessionParamsSchema = z.object({ app: appSlugSchema, sessionId: z.uuid() });
 export type SessionParams = z.infer<typeof sessionParamsSchema>;
+/**
+ * The window the replay reads (partition pruning). The session's app comes from the PATH; an `app`
+ * query value is accepted (the global filter sends it) but ignored.
+ */
+export const sessionQuerySchema = timeWindowQuerySchema;
+export type SessionQuery = z.infer<typeof sessionQuerySchema>;
 
 export const topPathsQuerySchema = timeWindowQuerySchema.safeExtend({
   limit: z.coerce.number().int().min(1).max(100).default(20),

@@ -1,5 +1,6 @@
 /**
- * Graceful shutdown, in order: stop accepting connections → stop jobs → close DB pools.
+ * Graceful shutdown, in order: closers (Socket.io: timers, sockets) → stop accepting connections →
+ * stop jobs → close DB pools.
  * A 10 s unref'd failsafe forces exit if something hangs (matches the house pattern).
  */
 import type { Server } from 'node:http';
@@ -11,7 +12,7 @@ export interface ShutdownDeps {
   server: Server;
   jobs: JobHandle;
   container: Container;
-  /** Extra closers registered later (e.g. Socket.io in S4). */
+  /** Run first, in order (server.ts registers the Socket.io realtime close). */
   closers?: Array<() => Promise<void>>;
 }
 

@@ -92,6 +92,7 @@ export const TOKENS: Readonly<Record<string, string>> = {
   RATE_BROWSER_PER_MIN: String(
     apiEnvSchema.shape.INGEST_RATE_LIMIT_BROWSER_PER_SESSION_PER_MIN.parse(undefined),
   ),
+  RATE_BROWSER_APP_PER_MIN: String(apiEnvSchema.shape.INGEST_RATE_LIMIT_BROWSER_PER_MIN.parse(undefined)),
   RATE_IP_FAILURES_PER_MIN: String(apiEnvSchema.shape.INGEST_IP_FAILURE_PER_MIN.parse(undefined)),
   FLUSH_EVENTS: String(SDK_DEFAULTS.server.flushEvents),
   FLUSH_SECONDS: String(SDK_DEFAULTS.server.flushIntervalMs / 1000),

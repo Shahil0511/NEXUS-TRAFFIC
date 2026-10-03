@@ -160,21 +160,4 @@ export const NON_DASHBOARD_ROUTE_GROUPS = [
  * @see ../../../apps/api/test/routes-contract.test.ts
  * @see ../../../apps/web/src/lib/api.test.ts
  */
-export const PENDING_ROUTE_LEAVES = [
-  // S3: browser ingest + Users / Journeys / Pages & Tools / Geography
-  'ingest.browser',
-  'users.list',
-  'users.profile',
-  'users.timeline',
-  'journeys.sessions',
-  'journeys.session',
-  'journeys.topPaths',
-  'pages.list',
-  'tools.usage',
-  'geo.countries',
-  'geo.cities',
-  // S4: live page
-  'live.snapshot',
-  // S5: Integration Health
-  'integration.health',
-] as const satisfies readonly RouteLeafId[];
+export const PENDING_ROUTE_LEAVES: readonly RouteLeafId[] = []; // S5 registered the last one

@@ -55,7 +55,13 @@ function requestFor(pathAndSearch: string, token?: string): NextRequest {
 
 describe('proxy matcher', () => {
   it('skips the health check, the no-access page and static assets', () => {
-    for (const path of ['/healthz', '/no-access', '/_next/static/chunk.js', '/favicon.ico']) {
+    for (const path of [
+      '/healthz',
+      '/no-access',
+      '/_next/static/chunk.js',
+      '/favicon.ico',
+      '/socket.io/?EIO=4&transport=polling',
+    ]) {
       expect(
         unstable_doesMiddlewareMatch({
           config,

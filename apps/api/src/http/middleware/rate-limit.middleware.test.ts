@@ -10,6 +10,7 @@ import {
   ipFailureLimitMiddleware,
   keyRateLimitMiddleware,
   retryAfterSeconds,
+  sessionRateLimitMiddleware,
 } from './rate-limit.middleware';
 
 const KEY_HEADER = 'x-test-key-id';
@@ -88,6 +89,42 @@ describe('ipFailureLimitMiddleware', () => {
     expect((await request(app).get('/ingest').set(FAIL_HEADER, '400')).status).toBe(400);
     expect((await request(app).get('/ingest').set(FAIL_HEADER, '500')).status).toBe(500);
     expect((await request(app).get('/ingest')).status).toBe(202);
+  });
+});
+
+describe('sessionRateLimitMiddleware', () => {
+  const SESSION_HEADER = 'x-test-session';
+  /** Simulates publishableKeyAuth + envelope validation: app and session come from test headers. */
+  const fakeBrowserAuth: RequestHandler = (req, res, next) => {
+    const appId = req.get(KEY_HEADER) ?? 'app-a';
+    res.locals.ingest = { app: appRow({ id: appId }), key: apiKeyRow({ kind: 'publishable' }) };
+    res.locals.validated = { body: { sessionId: req.get(SESSION_HEADER) ?? 'SESSION-1' } };
+    next();
+  };
+
+  function sessionLimitedApp(perMinute: number, onLimited = vi.fn()) {
+    const app = express();
+    app.get('/beacon', fakeBrowserAuth, sessionRateLimitMiddleware(perMinute, onLimited), (_req, res) => {
+      res.status(202).json({ ok: true });
+    });
+    app.use(errorHandlerMiddleware(silentLogger()));
+    return { app, onLimited };
+  }
+
+  it('limits per (app, session), case-insensitively, and reports the app as a browser 429', async () => {
+    const { app, onLimited } = sessionLimitedApp(1);
+    expect((await request(app).get('/beacon')).status).toBe(202);
+    const limited = await request(app).get('/beacon').set(SESSION_HEADER, 'session-1');
+    expect(limited.status).toBe(429);
+    expect(limited.body.error.code).toBe(ERROR_CODES.RATE_LIMITED);
+    expect(onLimited).toHaveBeenCalledWith('app-a', 'browser');
+  });
+
+  it('other sessions, and the same session id in another app, have their own budget', async () => {
+    const { app } = sessionLimitedApp(1);
+    expect((await request(app).get('/beacon')).status).toBe(202);
+    expect((await request(app).get('/beacon').set(SESSION_HEADER, 'session-2')).status).toBe(202);
+    expect((await request(app).get('/beacon').set(KEY_HEADER, 'app-b')).status).toBe(202);
   });
 });
 

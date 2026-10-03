@@ -4,7 +4,11 @@ import { fake, silentLogger } from '../../test/ingest-fixtures';
 import type { Executor } from '../db/executor';
 import type { PartitionedTable } from '../db/schema';
 import type { PartitionRepository } from '../repositories/partition.repository';
-import { PARTITION_MONTHS_AHEAD, PARTITION_MONTHS_BACK, PartitionService } from './partition.service';
+import {
+  PARTITION_MONTHS_AHEAD,
+  PARTITION_MONTHS_BACK,
+  PartitionService,
+} from './partition.service';
 
 const exec: Executor = { query: async () => ({ rows: [] }) } as unknown as Executor;
 

@@ -42,6 +42,22 @@ export class AppRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * True when an active app with browser ingest enabled lists `origin` in allowed_origins.
+   * Used ONLY by the browser-ingest CORS preflight, which cannot know the app (no body yet).
+   */
+  async anyAllowsOrigin(origin: string, exec: Executor = this.db): Promise<boolean> {
+    const { rows } = await exec.query<{ allowed: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM traffic.apps
+          WHERE is_active AND browser_ingest_enabled
+            AND lower($1) IN (SELECT lower(o) FROM unnest(allowed_origins) AS o)
+       ) AS allowed`,
+      [origin],
+    );
+    return rows[0]?.allowed ?? false;
+  }
+
   /** All apps ordered by slug. */
   async list(exec: Executor = this.db): Promise<AppRow[]> {
     const { rows } = await exec.query<AppRow>(`SELECT ${APP_COLUMNS} FROM traffic.apps ORDER BY slug`);

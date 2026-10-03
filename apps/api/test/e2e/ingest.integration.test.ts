@@ -1,16 +1,20 @@
 /**
- * S1 end to end, in process: the REAL container (createContainer) and app (createApp) against a
+ * S1 + S3 end to end, in process: the REAL container (createContainer) and app (createApp) against a
  * fresh, migrated database, connected as nexus_app exactly like production.
  *
  * WHY: unit tests prove each piece; this proves the wiring. An admin creates an app and keys through
  * the dashboard routes (SSO cookie + X-Nexus-Dashboard), then the public ingest contract is driven
  * over HTTP the way other teams' middleware will call it: accept, dedupe on resend, dry run, the
  * key error branches, verify, health, and the stored row shape (endpoint_id, user_key, geo).
+ * S3 drives the browser beacon the way @nexus/react sends it (text/plain, key in the body, Origin):
+ * CORS, origin guard, base-path rule, SSO-cookie vs claimed identity, SECRET_KEY_EXPOSED (+ exposed_at),
+ * BROWSER_INGEST_DISABLED and APP_DISABLED.
  */
 import { randomUUID } from 'node:crypto';
 
 import { ACCESS_TOKEN_COOKIE } from '@nexus/auth';
 import {
+  BROWSER_BATCH_EXAMPLE,
   buildPath,
   ERROR_CODES,
   INGEST_HEADERS,
@@ -221,5 +225,238 @@ describe.skipIf(!RUN_DB_TESTS)('S1 e2e: admin → server ingest over HTTP (db)',
     for (const row of testNetRows) {
       if (row.geo_country !== null) expect(row.geo_country).toMatch(/^[A-Z]{2}$/);
     }
+  });
+});
+
+// ─── S3: browser ingest ─────────────────────────────────────────────────────
+
+const BROWSER_APP_SLUG = 'ebo-audit';
+const BROWSER_ORIGIN = 'https://audit.libas.in';
+const SSO_USER_EMAIL = 'saurabh@libas.in';
+
+/** BROWSER_BATCH_EXAMPLE with a real key, fresh ids and timestamps inside the accepted window. */
+function freshBrowserBatch(key: string, extra: Record<string, unknown> = {}) {
+  const now = Date.now();
+  const pageViewId = randomUUID();
+  const ids = [pageViewId, randomUUID(), randomUUID()];
+  return {
+    ...BROWSER_BATCH_EXAMPLE,
+    key,
+    sentAt: new Date(now).toISOString(),
+    sessionId: randomUUID(),
+    events: BROWSER_BATCH_EXAMPLE.events.map((event, i) => ({
+      ...event,
+      eventId: ids[i],
+      occurredAt: new Date(now - 1000 + i).toISOString(),
+      ...(event.type === 'page_time' ? { pageViewId } : {}),
+    })),
+    ...extra,
+  };
+}
+
+describe.skipIf(!RUN_DB_TESTS)('S3 e2e: browser ingest over HTTP (db)', () => {
+  let db: TestDatabase;
+  let container: Container;
+  let app: Express;
+  let publishableKey: string;
+  let secretKey: string;
+
+  function admin(req: request.Test): request.Test {
+    return req.set('Cookie', adminCookie()).set(INGEST_HEADERS.dashboard, '1');
+  }
+
+  async function registerApp(slug: string, extra: Record<string, unknown> = {}): Promise<void> {
+    const res = await admin(request(app).post(url(ROUTES.apps.create.path))).send({
+      slug,
+      displayName: slug,
+      basePath: `/${slug}`,
+      allowedOrigins: [BROWSER_ORIGIN],
+      browserIngestEnabled: true,
+      ...extra,
+    });
+    expect(res.status).toBe(201);
+  }
+
+  async function createKey(slug: string, kind: KeyKind): Promise<string> {
+    const res = await admin(request(app).post(url(buildPath(ROUTES.apps.createKey, { slug })))).send({
+      kind,
+      label: `e2e ${kind}`,
+    });
+    expect(res.status).toBe(201);
+    return (res.body as KeyCreatedDto).plaintextKey;
+  }
+
+  async function patchApp(slug: string, body: Record<string, unknown>): Promise<void> {
+    const res = await admin(request(app).patch(url(buildPath(ROUTES.apps.update, { slug })))).send(body);
+    expect(res.status).toBe(200);
+  }
+
+  /** What @nexus/react sends: sendBeacon → text/plain, key in the body, page Origin. */
+  function beacon(body: unknown, origin: string | null = BROWSER_ORIGIN) {
+    const req = request(app)
+      .post(url(ROUTES.ingest.browser.path))
+      .set('Content-Type', 'text/plain;charset=UTF-8')
+      .set('User-Agent', 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36');
+    if (origin) req.set('Origin', origin);
+    return req.send(JSON.stringify(body));
+  }
+
+  beforeAll(async () => {
+    db = await createTestDatabase('e2e_browser_ingest');
+    container = createContainer(testConfig(db.appUrl), { logger: silentLogger() });
+    app = createApp(container);
+    await registerApp(BROWSER_APP_SLUG);
+    publishableKey = await createKey(BROWSER_APP_SLUG, 'publishable');
+    secretKey = await createKey(BROWSER_APP_SLUG, 'secret');
+  });
+
+  afterAll(async () => {
+    if (container)
+      await Promise.allSettled([container.pools.write.end(), container.pools.query.end()]);
+    await db?.drop();
+  });
+
+  it('accepts a text/plain beacon (202 + CORS for the allowed origin), then dedupes the resend', async () => {
+    const batch = freshBrowserBatch(publishableKey);
+    const first = await beacon(batch);
+    expect(first.status).toBe(202);
+    expect(first.body as IngestResultDto).toMatchObject({ accepted: 3, duplicates: 0, rejected: [] });
+    expect(first.headers['access-control-allow-origin']).toBe(BROWSER_ORIGIN);
+    expect(first.headers['access-control-allow-credentials']).toBe('true');
+
+    const resend = await beacon({ ...batch, sentAt: new Date().toISOString() });
+    expect(resend.body).toMatchObject({ accepted: 0, duplicates: 3 });
+  });
+
+  it('stores the rows: event types, anonymous identity, UA and the page_time fields', async () => {
+    const batch = freshBrowserBatch(publishableKey);
+    expect((await beacon(batch)).body).toMatchObject({ accepted: 3 });
+    const { rows } = await db.ownerPool.query<{
+      event_type: string;
+      identity_source: string;
+      user_email: string | null;
+      ua_browser: string | null;
+      visible_ms: number | null;
+      sdk: string | null;
+    }>(
+      `SELECT event_type, identity_source, user_email, ua_browser, visible_ms, sdk
+         FROM traffic.web_events WHERE session_id = $1 ORDER BY seq`,
+      [batch.sessionId],
+    );
+    expect(rows.map((r) => r.event_type)).toEqual(['page_view', 'tool_use', 'page_time']);
+    expect(rows[2]?.visible_ms).toBe(57400);
+    for (const row of rows) {
+      expect(row).toMatchObject({ identity_source: 'anonymous', user_email: null, sdk: '@nexus/react@1.0.0' });
+      expect(row.ua_browser).toMatch(/Chrome/);
+    }
+  });
+
+  it('a valid SSO cookie → sso_cookie with user_email + user_key; a hint alone → client_claimed', async () => {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const cookie = `${ACCESS_TOKEN_COOKIE}=${signAccessToken({ email: SSO_USER_EMAIL, type: 'access', exp }, JWT_SECRET)}`;
+    const verified = freshBrowserBatch(publishableKey, { user: { email: 'forged@libas.in' } });
+    expect((await beacon(verified).set('Cookie', cookie)).body).toMatchObject({ accepted: 3 });
+    const claimed = freshBrowserBatch(publishableKey, { user: { email: 'hint@libas.in' } });
+    expect((await beacon(claimed)).body).toMatchObject({ accepted: 3 });
+
+    const { rows } = await db.ownerPool.query<{
+      session_id: string;
+      identity_source: string;
+      user_email: string | null;
+      user_key: Buffer | null;
+      claimed_email: string | null;
+    }>(
+      `SELECT DISTINCT session_id::text, identity_source, user_email, user_key, claimed_email
+         FROM traffic.web_events WHERE session_id = ANY($1::uuid[])`,
+      [[verified.sessionId, claimed.sessionId]],
+    );
+    const bySession = new Map(rows.map((row) => [row.session_id, row]));
+    expect(bySession.get(verified.sessionId)).toMatchObject({
+      identity_source: 'sso_cookie',
+      user_email: SSO_USER_EMAIL,
+      claimed_email: null,
+    });
+    expect(bySession.get(verified.sessionId)?.user_key).toHaveLength(32);
+    expect(bySession.get(claimed.sessionId)).toMatchObject({
+      identity_source: 'client_claimed',
+      user_email: null,
+      user_key: null,
+      claimed_email: 'hint@libas.in',
+    });
+  });
+
+  it('a path outside the base path is rejected per event (PATH_OUTSIDE_APP)', async () => {
+    const batch = freshBrowserBatch(publishableKey);
+    batch.events[1] = { ...batch.events[1]!, path: '/ebo-sales/audits' };
+    const res = await beacon(batch);
+    expect(res.status).toBe(202);
+    expect(res.body.rejected).toEqual([{ index: 1, code: ERROR_CODES.PATH_OUTSIDE_APP, message: expect.any(String) }]);
+  });
+
+  it('a foreign Origin, Origin: null and a missing Origin/Referer → 403 ORIGIN_NOT_ALLOWED', async () => {
+    for (const origin of ['https://evil.example', 'null', null]) {
+      const res = await beacon(freshBrowserBatch(publishableKey), origin);
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe(ERROR_CODES.ORIGIN_NOT_ALLOWED);
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    }
+  });
+
+  it('OPTIONS preflight reflects only a registered origin', async () => {
+    const ok = await request(app).options(url(ROUTES.ingest.browser.path)).set('Origin', BROWSER_ORIGIN);
+    expect(ok.status).toBe(204);
+    expect(ok.headers['access-control-allow-origin']).toBe(BROWSER_ORIGIN);
+    const foreign = await request(app).options(url(ROUTES.ingest.browser.path)).set('Origin', 'https://evil.example');
+    expect(foreign.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('a secret key on the browser endpoint → 403 SECRET_KEY_EXPOSED and api_keys.exposed_at is set', async () => {
+    const res = await beacon(freshBrowserBatch(secretKey));
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe(ERROR_CODES.SECRET_KEY_EXPOSED);
+    const { rows } = await db.ownerPool.query<{ exposed: number }>(
+      `SELECT count(*)::int AS exposed FROM traffic.api_keys WHERE kind = 'secret' AND exposed_at IS NOT NULL`,
+    );
+    expect(rows[0]?.exposed).toBe(1);
+  });
+
+  it('GET ingest/verify accepts the publishable key too', async () => {
+    const res = await request(app).get(url(ROUTES.ingest.verify.path)).set(INGEST_HEADERS.key, publishableKey);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ app: { slug: BROWSER_APP_SLUG }, keyKind: 'publishable' });
+  });
+
+  it('a malformed beacon → 400 INVALID_ENVELOPE; a form post → 415', async () => {
+    const bad = await request(app)
+      .post(url(ROUTES.ingest.browser.path))
+      .set('Content-Type', 'text/plain')
+      .set('Origin', BROWSER_ORIGIN)
+      .send('{"key":');
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe(ERROR_CODES.INVALID_ENVELOPE);
+    const form = await request(app)
+      .post(url(ROUTES.ingest.browser.path))
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .send('a=1');
+    expect(form.status).toBe(415);
+  });
+
+  it('browser ingest disabled → 403 BROWSER_INGEST_DISABLED; app disabled → 403 APP_DISABLED', async () => {
+    await patchApp(BROWSER_APP_SLUG, { browserIngestEnabled: false });
+    const off = await beacon(freshBrowserBatch(publishableKey));
+    expect(off.status).toBe(403);
+    expect(off.body.error.code).toBe(ERROR_CODES.BROWSER_INGEST_DISABLED);
+
+    await patchApp(BROWSER_APP_SLUG, { browserIngestEnabled: true, isActive: false });
+    const disabled = await beacon(freshBrowserBatch(publishableKey));
+    expect(disabled.status).toBe(403);
+    expect(disabled.body.error.code).toBe(ERROR_CODES.APP_DISABLED);
+  });
+
+  it('counted the accepted beacons under source browser', async () => {
+    const { rows } = await db.ownerPool.query<{ accepted: number }>(
+      `SELECT sum(accepted)::int AS accepted FROM traffic.ingest_counters WHERE source = 'browser'`,
+    );
+    expect(rows[0]?.accepted).toBeGreaterThanOrEqual(12);
   });
 });

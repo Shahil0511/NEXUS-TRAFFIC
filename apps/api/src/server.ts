@@ -1,6 +1,7 @@
 /**
  * PROCESS ENTRY. Boot order:
- * config → container → schema must be current → partitions exist → listen → jobs → signal handlers.
+ * config → container → schema must be current → partitions exist → listen → realtime (Socket.io)
+ * → jobs → signal handlers.
  * The `migrate` compose service has already run; if the schema is behind, we refuse to start.
  */
 import { createServer } from 'node:http';
@@ -10,6 +11,7 @@ import { loadConfig } from './config';
 import { createContainer } from './container';
 import { startJobs } from './jobs/scheduler';
 import { createShutdown } from './lifecycle/shutdown';
+import { createRealtime } from './socket';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -23,8 +25,9 @@ async function main(): Promise<void> {
   await new Promise<void>((resolve) => server.listen(config.env.PORT, resolve));
   logger.info('api listening', { port: config.env.PORT, nodeEnv: config.env.NODE_ENV });
 
+  const realtime = createRealtime(server, container);
   const jobs = startJobs(container);
-  const shutdown = createShutdown({ server, jobs, container });
+  const shutdown = createShutdown({ server, jobs, container, closers: [realtime.close] });
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }

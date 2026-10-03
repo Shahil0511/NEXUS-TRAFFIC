@@ -87,4 +87,4 @@ the same rule. `true` trusts every hop — i.e. the forged leftmost entry.
   `ip` you send.
 - Invalid values are dropped with a `FIELD_DROPPED` warning; the event is still stored.
 - If more than 90 % of your events carry private addresses (`10.x`, `172.16–31.x`, `192.168.x`,
-  loopback), the Integration Health view flags *"set trustProxyHops"*.
+  loopback), the dashboard's Integration page flags *"set trustProxyHops"*.

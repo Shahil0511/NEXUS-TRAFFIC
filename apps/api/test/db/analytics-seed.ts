@@ -1,6 +1,9 @@
 /**
- * One deterministic traffic dataset for the S2 read-side suites
- * (test/db/analytics-queries.integration.test.ts and test/e2e/dashboard.integration.test.ts).
+ * Deterministic traffic datasets for the read-side suites
+ * (test/db/analytics-queries.integration.test.ts and test/e2e/dashboard.integration.test.ts):
+ * `seedAnalytics` (S2: API traffic + a few page views, described below) and `seedJourneys`
+ * (S3: browser sessions, described above it). Each suite seeds ONE of them into its own database,
+ * so the S2 numbers never move when S3 rows are added.
  *
  * WHY ONE MODULE: both suites assert the same numbers (counts, error rate, percentiles, buckets),
  * so the rows and the expected values live side by side and cannot drift apart.
@@ -25,6 +28,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
+import type { BrowserEventType } from '@nexus/shared';
 import { toEndpointId } from '@nexus/shared/endpoint-id';
 
 import type { ApiRequestInsert } from '../../src/domain/inserts';
@@ -183,13 +187,9 @@ async function insertPageView(
   );
 }
 
-/** Seeds the dataset described in the header (apps, api_requests, web_events). */
-export async function seedAnalytics(
-  db: TestDatabase,
-  now: Date = seedNow(),
-): Promise<AnalyticsSeed> {
+/** The two seed apps (ebo-sales, hr-portal), registered like the admin API does. */
+async function createSeedApps(db: TestDatabase): Promise<AnalyticsSeed['appIds']> {
   const apps = new AppRepository(db.appPool);
-  const ingest = new ApiRequestIngestRepository(db.appPool);
   const newApp = (slug: string, displayName: string) =>
     apps.insert({
       slug,
@@ -199,10 +199,19 @@ export async function seedAnalytics(
       browserIngestEnabled: true,
       createdBy: 'seed@libas.in',
     });
-  const appIds = {
+  return {
     sales: (await newApp(SALES_SLUG, 'EBO Sales')).id,
     hr: (await newApp(HR_SLUG, 'HR')).id,
   };
+}
+
+/** Seeds the dataset described in the header (apps, api_requests, web_events). */
+export async function seedAnalytics(
+  db: TestDatabase,
+  now: Date = seedNow(),
+): Promise<AnalyticsSeed> {
+  const ingest = new ApiRequestIngestRepository(db.appPool);
+  const appIds = await createSeedApps(db);
   const ago = (ms: number) => new Date(now.getTime() - ms);
   const anonSession = randomUUID();
   const webSession = randomUUID();
@@ -303,3 +312,349 @@ async function seedMicrosecondBlock(
     .sort((a, b) => b.us - a.us || (a.id < b.id ? 1 : -1))
     .map((entry) => entry.id);
 }
+
+// ─── S3: browser sessions (Users, Journeys, Pages & Tools, Geography) ───────
+//
+// DATASET of `seedJourneys` (minutes before now; range=24h window; pv = page view):
+// - J1 ebo-sales, user a (sso_cookie), IP 8.8.8.8, Mumbai (IN/MH):
+//     seq0 pv /home −60 · seq1 page_time 4000 ms (pv /home) −59 · seq2 pv /stores/42 −58 ·
+//     seq3 tool export-csv −57 · seq4/5 page_time 3000 + 3000 ms (pv /stores/42) −56/−55 ·
+//     seq6 pv /reports −54  + API call GET /ebo-sales/api/stores/:id (session J1, user a, no geo) −57.5
+// - J2 ebo-sales, client_claimed (claimed@example.com, NOT a user), IP 8.8.4.4, Bengaluru (IN/KA):
+//     seq0 pv /home −40 · seq1 pv /home (reload) −39 · seq2 pv /stores/7 −38 ·
+//     seq3 page_time 1000 ms (pv /stores/7) −37 · seq4 tool export-csv −36.5 · seq5 pv /reports −36
+// - J3 hr-portal, user b (sso_cookie), no IP / geo:
+//     seq0 pv /leaves −20 · seq1 tool apply-leave −19 · seq2 custom leave_submitted −18
+// - OUTSIDE the window: ebo-sales anonymous pv /home at now − 30 h
+
+const SECOND = 1000;
+
+export const MUMBAI = { country: 'IN', region: 'MH', city: 'Mumbai', lat: 19.076, lon: 72.8777 };
+export const BENGALURU = {
+  country: 'IN',
+  region: 'KA',
+  city: 'Bengaluru',
+  lat: 12.9716,
+  lon: 77.5946,
+};
+export const CLAIMED_EMAIL = 'claimed@example.com';
+
+/** 64-char hex user keys of the seeded users (how the API addresses them). */
+export const userKeyHex = (email: string): string => sha256(email).toString('hex');
+
+export interface JourneySeed {
+  now: Date;
+  appIds: AnalyticsSeed['appIds'];
+  sessions: { j1: string; j2: string; j3: string };
+  /** Event ids of J1 in replay order (pv /home, pv /stores/42, API call, tool, pv /reports). */
+  j1ReplayIds: string[];
+  /** Event ids of user a's timeline, newest first (page_time rows are folded away). */
+  userATimelineIds: string[];
+}
+
+interface WebEventSpec {
+  appId: string;
+  at: Date;
+  sessionId: string;
+  seq: number;
+  type: BrowserEventType;
+  path: string;
+  pathTemplate?: string;
+  pageViewId?: string;
+  visibleMs?: number;
+  tool?: string;
+  name?: string;
+  user?: string;
+  claimedEmail?: string;
+  ip?: string;
+  geo?: typeof MUMBAI;
+}
+
+/** Inserts one browser event as the owner (plain SQL, independent of the ingest code). */
+async function insertWebEvent(db: TestDatabase, spec: WebEventSpec): Promise<string> {
+  const eventId = randomUUID();
+  const identity = spec.user ? 'sso_cookie' : spec.claimedEmail ? 'client_claimed' : 'anonymous';
+  const isPageTime = spec.type === 'page_time';
+  await db.ownerPool.query(
+    `INSERT INTO traffic.web_events
+       (occurred_at, event_id, app_id, session_id, seq, event_type, path, path_template,
+        page_view_id, visible_ms, is_final, time_reason, tool, name,
+        user_email, user_key, claimed_email, identity_source, ip, ip_class,
+        geo_country, geo_region, geo_city, geo_lat, geo_lon)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+             $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+    [
+      spec.at,
+      eventId,
+      spec.appId,
+      spec.sessionId,
+      spec.seq,
+      spec.type,
+      spec.path,
+      spec.pathTemplate ?? spec.path,
+      spec.pageViewId ?? null,
+      spec.visibleMs ?? null,
+      isPageTime ? false : null,
+      isPageTime ? 'route' : null,
+      spec.tool ?? null,
+      spec.name ?? null,
+      spec.user ?? null,
+      spec.user ? sha256(spec.user) : null,
+      spec.claimedEmail ?? null,
+      identity,
+      spec.ip ?? null,
+      spec.ip ? 'public' : 'unknown',
+      spec.geo?.country ?? null,
+      spec.geo?.region ?? null,
+      spec.geo?.city ?? null,
+      spec.geo?.lat ?? null,
+      spec.geo?.lon ?? null,
+    ],
+  );
+  return eventId;
+}
+
+/** Seeds the S3 dataset described above (apps, web_events, one correlated API call). */
+export async function seedJourneys(db: TestDatabase, now: Date = seedNow()): Promise<JourneySeed> {
+  const appIds = await createSeedApps(db);
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  const sessions = { j1: randomUUID(), j2: randomUUID(), j3: randomUUID() };
+
+  // ─── J1 ───────────────────────────────────────────────────────────────────
+  const j1 = {
+    appId: appIds.sales,
+    sessionId: sessions.j1,
+    user: USER_A,
+    ip: SEEDED_IP,
+    geo: MUMBAI,
+  };
+  const pv1 = await insertWebEvent(db, {
+    ...j1,
+    at: ago(60 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+  await insertWebEvent(db, {
+    ...j1,
+    at: ago(59 * MINUTE),
+    seq: 1,
+    type: 'page_time',
+    path: '/home',
+    pageViewId: pv1,
+    visibleMs: 4000,
+  });
+  const pv2 = await insertWebEvent(db, {
+    ...j1,
+    at: ago(58 * MINUTE),
+    seq: 2,
+    type: 'page_view',
+    path: '/stores/42',
+    pathTemplate: '/stores/:id',
+  });
+  const tool1 = await insertWebEvent(db, {
+    ...j1,
+    at: ago(57 * MINUTE),
+    seq: 3,
+    type: 'tool_use',
+    path: '/stores/42',
+    pathTemplate: '/stores/:id',
+    tool: 'export-csv',
+  });
+  await insertWebEvent(db, {
+    ...j1,
+    at: ago(56 * MINUTE),
+    seq: 4,
+    type: 'page_time',
+    path: '/stores/42',
+    pathTemplate: '/stores/:id',
+    pageViewId: pv2,
+    visibleMs: 3000,
+  });
+  await insertWebEvent(db, {
+    ...j1,
+    at: ago(55 * MINUTE),
+    seq: 5,
+    type: 'page_time',
+    path: '/stores/42',
+    pathTemplate: '/stores/:id',
+    pageViewId: pv2,
+    visibleMs: 3000,
+  });
+  const pv3 = await insertWebEvent(db, {
+    ...j1,
+    at: ago(54 * MINUTE),
+    seq: 6,
+    type: 'page_view',
+    path: '/reports',
+  });
+  const call = apiRequestRow(appIds.sales, {
+    occurredAt: ago(57 * MINUTE + 30 * SECOND),
+    endpointId: ENDPOINT_IDS.storeLookup,
+    routeTemplate: ROUTE.storeLookup.template,
+    path: '/ebo-sales/api/stores/42',
+    sessionId: sessions.j1,
+    userEmail: USER_A,
+    userKey: sha256(USER_A),
+    identitySource: 'app_attested',
+    geoCountry: null,
+    geoRegion: null,
+    geoCity: null,
+    geoLat: null,
+    geoLon: null,
+  });
+  await new ApiRequestIngestRepository(db.appPool).insertBatch([call]);
+
+  // ─── J2 ───────────────────────────────────────────────────────────────────
+  const j2 = {
+    appId: appIds.sales,
+    sessionId: sessions.j2,
+    claimedEmail: CLAIMED_EMAIL,
+    ip: '8.8.4.4',
+    geo: BENGALURU,
+  };
+  await insertWebEvent(db, {
+    ...j2,
+    at: ago(40 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+  await insertWebEvent(db, {
+    ...j2,
+    at: ago(39 * MINUTE),
+    seq: 1,
+    type: 'page_view',
+    path: '/home',
+  });
+  const pv6 = await insertWebEvent(db, {
+    ...j2,
+    at: ago(38 * MINUTE),
+    seq: 2,
+    type: 'page_view',
+    path: '/stores/7',
+    pathTemplate: '/stores/:id',
+  });
+  await insertWebEvent(db, {
+    ...j2,
+    at: ago(37 * MINUTE),
+    seq: 3,
+    type: 'page_time',
+    path: '/stores/7',
+    pathTemplate: '/stores/:id',
+    pageViewId: pv6,
+    visibleMs: 1000,
+  });
+  await insertWebEvent(db, {
+    ...j2,
+    at: ago(36 * MINUTE + 30 * SECOND),
+    seq: 4,
+    type: 'tool_use',
+    path: '/stores/7',
+    pathTemplate: '/stores/:id',
+    tool: 'export-csv',
+  });
+  await insertWebEvent(db, {
+    ...j2,
+    at: ago(36 * MINUTE),
+    seq: 5,
+    type: 'page_view',
+    path: '/reports',
+  });
+
+  // ─── J3 ───────────────────────────────────────────────────────────────────
+  const j3 = { appId: appIds.hr, sessionId: sessions.j3, user: USER_B };
+  await insertWebEvent(db, {
+    ...j3,
+    at: ago(20 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/leaves',
+  });
+  await insertWebEvent(db, {
+    ...j3,
+    at: ago(19 * MINUTE),
+    seq: 1,
+    type: 'tool_use',
+    path: '/leaves',
+    tool: 'apply-leave',
+  });
+  await insertWebEvent(db, {
+    ...j3,
+    at: ago(18 * MINUTE),
+    seq: 2,
+    type: 'custom',
+    path: '/leaves',
+    name: 'leave_submitted',
+  });
+
+  // ─── outside the window ───────────────────────────────────────────────────
+  await insertWebEvent(db, {
+    appId: appIds.sales,
+    sessionId: randomUUID(),
+    at: ago(30 * HOUR),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+
+  return {
+    now,
+    appIds,
+    sessions,
+    j1ReplayIds: [pv1, pv2, call.eventId, tool1, pv3],
+    userATimelineIds: [pv3, tool1, call.eventId, pv2, pv1],
+  };
+}
+
+/** What the S3 suites assert for `seedJourneys` at range=24h. */
+export const JOURNEY_EXPECTED = {
+  /** Most recently seen first: b (−18 min), then a (−54 min). */
+  users: [
+    { email: USER_B, requests: 0, pageViews: 1, sessions: 1, apps: [HR_SLUG] },
+    { email: USER_A, requests: 1, pageViews: 3, sessions: 1, apps: [SALES_SLUG] },
+  ],
+  pages: [
+    {
+      app: SALES_SLUG,
+      pathTemplate: '/home',
+      views: 3,
+      uniqueSessions: 2,
+      avgVisibleMs: 4000,
+      p50VisibleMs: 4000,
+      exits: 0,
+    },
+    {
+      app: SALES_SLUG,
+      pathTemplate: '/reports',
+      views: 2,
+      uniqueSessions: 2,
+      avgVisibleMs: null,
+      p50VisibleMs: null,
+      exits: 2,
+    },
+    {
+      app: SALES_SLUG,
+      pathTemplate: '/stores/:id',
+      views: 2,
+      uniqueSessions: 2,
+      avgVisibleMs: 3500,
+      p50VisibleMs: 3500,
+      exits: 0,
+    },
+    {
+      app: HR_SLUG,
+      pathTemplate: '/leaves',
+      views: 1,
+      uniqueSessions: 1,
+      avgVisibleMs: null,
+      p50VisibleMs: null,
+      exits: 1,
+    },
+  ],
+  topPaths: [{ app: SALES_SLUG, steps: ['/home', '/stores/:id', '/reports'], sessions: 2 }],
+  countries: [
+    { country: 'IN', requests: 0, pageViews: 7, users: 1 },
+    { country: null, requests: 1, pageViews: 1, users: 2 },
+  ],
+} as const;

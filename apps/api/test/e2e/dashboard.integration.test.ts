@@ -1,5 +1,5 @@
 /**
- * S2 end to end, in process: the REAL container (createContainer) and app (createApp) against a
+ * S2 + S3 end to end, in process: the REAL container (createContainer) and app (createApp) against a
  * fresh, migrated, seeded database, connected as nexus_app exactly like production, with a
  * FixedClock at the seed instant (see ../db/analytics-seed.ts).
  *
@@ -19,9 +19,14 @@ import {
   type EndpointStatsDto,
   type ErrorSummaryDto,
   type FailedRequestDto,
+  type GeoCountryDto,
   type OverviewSummaryDto,
   type OverviewTimeseriesDto,
+  type PageStatsDto,
   type RouteDescriptor,
+  type TimelineItemDto,
+  type UserSummaryDto,
+  type WindowedListDto,
 } from '@nexus/shared';
 import type { Express } from 'express';
 import request from 'supertest';
@@ -36,8 +41,12 @@ import {
   ENDPOINT_IDS,
   EXPECTED,
   HR_SLUG,
+  SALES_SLUG,
   seedAnalytics,
   SEEDED_IP,
+  USER_A,
+  USER_B,
+  userKeyHex,
   type AnalyticsSeed,
 } from '../db/analytics-seed';
 import { createTestDatabase, RUN_DB_TESTS, type TestDatabase } from '../db/test-database';
@@ -248,5 +257,75 @@ describe.skipIf(!RUN_DB_TESTS)('S2 e2e: dashboard analytics over HTTP (db)', () 
   it('errors.list: a tampered cursor → 400', async () => {
     const res = await get(ROUTES.errors.list, VIEWER_EMAIL, { cursor: 'tampered' });
     expect(res.status).toBe(400);
+  });
+
+  // ─── S3: Users / Journeys / Pages & Tools / Geography ─────────────────────
+
+  it('users.list: verified users over API calls + page views, most recently seen first', async () => {
+    const res = await get(ROUTES.users.list, VIEWER_EMAIL);
+    expect(res.status).toBe(200);
+    expect(res.headers[CACHE_CONTROL_HEADER.toLowerCase()]).toBe(DASHBOARD_ANALYTICS_CACHE);
+    const page = res.body as CursorPage<UserSummaryDto>;
+    expect(page.items).toMatchObject([
+      { email: USER_A, userKey: userKeyHex(USER_A), requests: 10, pageViews: 1 },
+      { email: USER_B, userKey: userKeyHex(USER_B), requests: 5, pageViews: 0 },
+    ]);
+  });
+
+  it('users.profile / users.timeline: malformed key → 400, unknown user → 404', async () => {
+    const malformed = buildPath(ROUTES.users.profile, { userKey: 'not-a-key' });
+    expect((await get(ROUTES.users.profile, VIEWER_EMAIL, {}, malformed)).status).toBe(400);
+    const unknown = buildPath(ROUTES.users.profile, { userKey: '0'.repeat(64) });
+    expect((await get(ROUTES.users.profile, VIEWER_EMAIL, {}, unknown)).status).toBe(404);
+  });
+
+  it('users.timeline: admins see the IP, a non-admin NEVER does', async () => {
+    const path = buildPath(ROUTES.users.timeline, { userKey: userKeyHex(USER_B) });
+    const viewer = await get(ROUTES.users.timeline, VIEWER_EMAIL, { limit: '50' }, path);
+    expect(viewer.status).toBe(200);
+    const items = (viewer.body as CursorPage<TimelineItemDto>).items;
+    expect(items).toHaveLength(EXPECTED.calls.reportExport);
+    expect(items.every((item) => item.kind === 'api' && item.ip === null)).toBe(true);
+    expect(JSON.stringify(viewer.body)).not.toContain(SEEDED_IP);
+
+    const admin = await get(ROUTES.users.timeline, ADMIN_EMAIL, { limit: '50' }, path);
+    const adminIps = (admin.body as CursorPage<TimelineItemDto>).items.map((item) => item.ip);
+    expect(adminIps).toContain(SEEDED_IP);
+  });
+
+  it('journeys: sessions list for a viewer; malformed session id → 400, unknown → 404', async () => {
+    const sessions = await get(ROUTES.journeys.sessions, VIEWER_EMAIL);
+    expect(sessions.status).toBe(200);
+    expect(JSON.stringify(sessions.body)).not.toContain(SEEDED_IP);
+
+    const bad = buildPath(ROUTES.journeys.session, { app: SALES_SLUG, sessionId: 'nope' });
+    expect((await get(ROUTES.journeys.session, VIEWER_EMAIL, {}, bad)).status).toBe(400);
+    const unknown = buildPath(ROUTES.journeys.session, {
+      app: SALES_SLUG,
+      sessionId: '00000000-0000-4000-8000-000000000000',
+    });
+    expect((await get(ROUTES.journeys.session, VIEWER_EMAIL, {}, unknown)).status).toBe(404);
+    expect((await get(ROUTES.journeys.topPaths, VIEWER_EMAIL)).status).toBe(200);
+  });
+
+  it('pages.list + tools.usage: page views per template; no tools yet → empty list', async () => {
+    const pages = await get(ROUTES.pages.list, VIEWER_EMAIL);
+    expect(pages.status).toBe(200);
+    expect((pages.body as WindowedListDto<PageStatsDto>).items).toMatchObject([
+      { app: SALES_SLUG, pathTemplate: '/home', views: 2 },
+      { app: HR_SLUG, pathTemplate: '/home', views: 1 },
+    ]);
+    const tools = await get(ROUTES.tools.usage, VIEWER_EMAIL);
+    expect(tools.status).toBe(200);
+    expect(tools.body).toMatchObject({ items: [], window: { grain: 'hour' } });
+  });
+
+  it('geo.countries: every request and page view of the window is counted once', async () => {
+    const res = await get(ROUTES.geo.countries, VIEWER_EMAIL);
+    expect(res.status).toBe(200);
+    const items = (res.body as WindowedListDto<GeoCountryDto>).items;
+    expect(items.reduce((sum, c) => sum + c.requests, 0)).toBe(EXPECTED.requests);
+    expect(items.reduce((sum, c) => sum + c.pageViews, 0)).toBe(EXPECTED.pageViews);
+    expect((await get(ROUTES.geo.cities, VIEWER_EMAIL, { limit: '1000' })).status).toBe(400);
   });
 });

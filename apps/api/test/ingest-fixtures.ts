@@ -4,11 +4,12 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import type { ServerEventInput } from '@nexus/shared';
+import type { BrowserIngestBatchInput, ServerEventInput } from '@nexus/shared';
 
 import type { SsoIdentityReader } from '../src/auth/sso-identity.reader';
 import type { ApiKeyRow, AppRow } from '../src/domain/rows';
-import type { IngestContext } from '../src/domain/viewer';
+import type { BrowserIngestContext, IngestContext } from '../src/domain/viewer';
+import { BrowserEventEnricher } from '../src/enrichment/browser-event.enricher';
 import { GeoIpEnricher } from '../src/enrichment/geo-ip.enricher';
 import { IdentityResolver } from '../src/enrichment/identity.resolver';
 import { IpAnonymizer } from '../src/enrichment/ip.anonymizer';
@@ -74,6 +75,33 @@ export function serverEvent(overrides: Partial<ServerEventInput> = {}): ServerEv
   };
 }
 
+/** A beacon context: publishable key, app with browser ingest enabled for https://ebo.libas.in. */
+export function browserIngestContext(overrides: Partial<BrowserIngestContext> = {}): BrowserIngestContext {
+  return {
+    app: appRow({ browser_ingest_enabled: true, allowed_origins: ['https://ebo.libas.in'] }),
+    key: apiKeyRow({ kind: 'publishable', key_prefix: 'nx_pk_00000000' }),
+    receivedAt: FIXED_NOW,
+    sdk: null,
+    request: { ip: null, userAgent: null, cookieHeader: undefined },
+    ...overrides,
+  };
+}
+
+type BrowserEventInput = BrowserIngestBatchInput['events'][number];
+
+/** A valid page_view (override `type` + its fields for the other event types). */
+export function browserEvent(overrides: Record<string, unknown> = {}): BrowserEventInput {
+  return {
+    eventId: randomUUID(),
+    occurredAt: '2026-10-01T09:59:58.000Z',
+    seq: 0,
+    type: 'page_view',
+    nav: 'load',
+    path: '/ebo-sales/stores',
+    ...overrides,
+  } as BrowserEventInput;
+}
+
 /** A logger that writes nothing (spy on its methods to assert calls). */
 export function silentLogger(): Logger {
   const logger = new Logger('error');
@@ -90,6 +118,19 @@ export function fake<T>(implementation: Partial<T>): T {
 /** A real enricher wired with an empty geo database and no SSO (for service/route tests). */
 export function testServerEventEnricher(): ServerEventEnricher {
   return new ServerEventEnricher(
+    new PathSanitizer(),
+    new RouteNormalizer(),
+    new IpAnonymizer('full', 'i'.repeat(64)),
+    new GeoIpEnricher(() => ({ lookup: () => null })),
+    new UserAgentParser(),
+    new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) })),
+    new UserKeyHasher('u'.repeat(64)),
+  );
+}
+
+/** The browser twin of testServerEventEnricher (empty geo database, no SSO cookie). */
+export function testBrowserEventEnricher(): BrowserEventEnricher {
+  return new BrowserEventEnricher(
     new PathSanitizer(),
     new RouteNormalizer(),
     new IpAnonymizer('full', 'i'.repeat(64)),

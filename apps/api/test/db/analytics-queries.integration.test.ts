@@ -1,7 +1,9 @@
 /**
- * S2 read side against a real, migrated database: ApiRequestQueryRepository and
- * WebEventQueryRepository through the Overview / Endpoint / Error services, connected as nexus_app on
- * a READ-ONLY query pool (exactly the runtime options of src/db/pool.ts createQueryPool).
+ * S2 + S3 read side against a real, migrated database: ApiRequestQueryRepository and
+ * WebEventQueryRepository through the Overview / Endpoint / Error services (S2, `seedAnalytics`) and
+ * the User / Journey / Page / Tool / Geo services (S3, `seedJourneys`, its own database), connected
+ * as nexus_app on a READ-ONLY query pool (exactly the runtime options of src/db/pool.ts
+ * createQueryPool).
  *
  * WHY: the unit suites prove SQL shape and service orchestration with fakes; only PostgreSQL can
  * prove the numbers — counts, error rate, percentile_cont, IST bucket alignment, window bounds,
@@ -10,7 +12,12 @@
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { ERROR_CODES, type EndpointStatsDto, type FailedRequestDto } from '@nexus/shared';
+import {
+  ERROR_CODES,
+  type EndpointStatsDto,
+  type FailedRequestDto,
+  type TimelineItemDto,
+} from '@nexus/shared';
 
 import { createQueryPool } from '../../src/db/pool';
 import type { Viewer } from '../../src/domain/viewer';
@@ -21,18 +28,32 @@ import { WebEventQueryRepository } from '../../src/repositories/web-event-query.
 import { AppSlugResolver } from '../../src/services/app-slug.resolver';
 import { EndpointService } from '../../src/services/endpoint.service';
 import { ErrorService } from '../../src/services/error.service';
+import { GeoService } from '../../src/services/geo.service';
+import { JourneyService } from '../../src/services/journey.service';
 import { OverviewService } from '../../src/services/overview.service';
+import { PageService } from '../../src/services/page.service';
+import { ToolService } from '../../src/services/tool.service';
+import { UserService } from '../../src/services/user.service';
 import {
+  BENGALURU,
+  CLAIMED_EMAIL,
   ENDPOINT_IDS,
   EXPECTED,
   HR_SLUG,
   HTTP_DURATIONS,
+  JOURNEY_EXPECTED,
   microsecondBlockAt,
+  MUMBAI,
   percentileCont,
   SALES_SLUG,
   seedAnalytics,
   SEEDED_IP,
+  seedJourneys,
+  USER_A,
+  USER_B,
+  userKeyHex,
   type AnalyticsSeed,
+  type JourneySeed,
 } from './analytics-seed';
 import { createTestDatabase, quietLogger, RUN_DB_TESTS, type TestDatabase } from './test-database';
 
@@ -360,5 +381,222 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     await expect(queryPool.query('DELETE FROM traffic.api_requests')).rejects.toMatchObject({
       code: '25006',
     });
+  });
+});
+
+describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query pool (db)', () => {
+  let db: TestDatabase;
+  let queryPool: Pool;
+  let seed: JourneySeed;
+  let users: UserService;
+  let journeys: JourneyService;
+  let pages: PageService;
+  let tools: ToolService;
+  let geo: GeoService;
+
+  beforeAll(async () => {
+    db = await createTestDatabase('journeys');
+    seed = await seedJourneys(db);
+    queryPool = createQueryPool(db.appUrl, 4, quietLogger);
+    const webEvents = new WebEventQueryRepository(queryPool);
+    const appSlugs = new AppSlugResolver(new AppRepository(queryPool));
+    const clock = new FixedClock(seed.now);
+    users = new UserService(webEvents, appSlugs, clock);
+    journeys = new JourneyService(webEvents, appSlugs, clock);
+    pages = new PageService(webEvents, appSlugs, clock);
+    tools = new ToolService(webEvents, appSlugs, clock);
+    geo = new GeoService(webEvents, appSlugs, clock);
+  });
+
+  afterAll(async () => {
+    await queryPool?.end();
+    await db?.drop();
+  });
+
+  // ─── Users ────────────────────────────────────────────────────────────────
+
+  describe('UserService', () => {
+    it('lists ONLY verified users over both tables, most recently seen first', async () => {
+      const page = await users.list({ range: '24h', limit: 50 });
+      expect(page.items).toMatchObject(JOURNEY_EXPECTED.users);
+      expect(page.items.map((u) => u.userKey)).toEqual([userKeyHex(USER_B), userKeyHex(USER_A)]);
+      expect(JSON.stringify(page)).not.toContain(CLAIMED_EMAIL);
+    });
+
+    it('searches by email and offset-pages', async () => {
+      const found = await users.list({ range: '24h', limit: 50, search: 'A@LIBAS' });
+      expect(found.items.map((u) => u.email)).toEqual([USER_A]);
+      const first = await users.list({ range: '24h', limit: 1 });
+      const second = await users.list({ range: '24h', limit: 1, cursor: first.nextCursor ?? '' });
+      expect([...first.items, ...second.items].map((u) => u.email)).toEqual([USER_B, USER_A]);
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it('profile: header numbers, top tools/pages and countries; unknown user → 404', async () => {
+      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' });
+      expect(dto).toMatchObject({
+        summary: { email: USER_A, requests: 1, pageViews: 3 },
+        firstSeenAt: new Date(seed.now.getTime() - 60 * 60_000).toISOString(),
+        failedRequests: 0,
+        topTools: [{ app: SALES_SLUG, tool: 'export-csv', uses: 1 }],
+        topPages: [
+          { app: SALES_SLUG, pathTemplate: '/home', views: 1 },
+          { app: SALES_SLUG, pathTemplate: '/reports', views: 1 },
+          { app: SALES_SLUG, pathTemplate: '/stores/:id', views: 1 },
+        ],
+        countries: [MUMBAI.country],
+      });
+      await expect(users.profile('0'.repeat(64), { range: '24h' })).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    });
+
+    it('timeline: pages + tools + API calls newest first, keyset-paged, page_time folded in', async () => {
+      const items: TimelineItemDto[] = [];
+      let cursor: string | undefined;
+      let pagesRead = 0;
+      do {
+        const page = await users.timeline(
+          userKeyHex(USER_A),
+          { range: '24h', limit: 2, cursor },
+          ADMIN,
+        );
+        items.push(...page.items);
+        cursor = page.nextCursor ?? undefined;
+        pagesRead += 1;
+      } while (cursor && pagesRead < 10);
+      expect(pagesRead).toBe(3);
+      expect(items.map((i) => i.eventId)).toEqual(seed.userATimelineIds);
+      expect(items.map((i) => i.kind)).toEqual([
+        'page_view',
+        'tool_use',
+        'api',
+        'page_view',
+        'page_view',
+      ]);
+      expect(items.map((i) => i.visibleMs)).toEqual([null, null, null, 6000, 4000]);
+      expect(items[2]).toMatchObject({ method: 'GET', status: 200 });
+      expect(items[0]?.ip).toBe(SEEDED_IP);
+    });
+
+    it('timeline: non-admins never receive an IP', async () => {
+      const page = await users.timeline(userKeyHex(USER_A), { range: '24h', limit: 50 }, VIEWER);
+      expect(page.items).toHaveLength(5);
+      expect(JSON.stringify(page)).not.toContain(SEEDED_IP);
+    });
+  });
+
+  // ─── Journeys ─────────────────────────────────────────────────────────────
+
+  describe('JourneyService', () => {
+    it('sessions: most recent first, strongest identity, entry/exit, visible time', async () => {
+      const page = await journeys.sessions({ range: '24h', limit: 50 }, ADMIN);
+      expect(page.items.map((s) => s.sessionId)).toEqual([
+        seed.sessions.j3,
+        seed.sessions.j2,
+        seed.sessions.j1,
+      ]);
+      const [j3, j2, j1] = page.items;
+      expect(j1).toMatchObject({
+        app: SALES_SLUG,
+        durationMs: 6 * 60_000,
+        pageViews: 3,
+        toolUses: 1,
+        visibleMs: 10_000,
+        userKey: userKeyHex(USER_A),
+        userEmail: USER_A,
+        identitySource: 'sso_cookie',
+        entryPath: '/home',
+        exitPath: '/reports',
+        country: 'IN',
+        ip: SEEDED_IP,
+      });
+      expect(j2).toMatchObject({
+        userKey: null,
+        userEmail: null,
+        claimedEmail: CLAIMED_EMAIL,
+        identitySource: 'client_claimed',
+        visibleMs: 1000,
+      });
+      expect(j3).toMatchObject({ app: HR_SLUG, ip: null, country: null, exitPath: '/leaves' });
+    });
+
+    it('sessions: scoped to one user; IP masked for non-admins', async () => {
+      const mine = await journeys.sessions(
+        { range: '24h', limit: 50, userKey: userKeyHex(USER_A) },
+        VIEWER,
+      );
+      expect(mine.items.map((s) => s.sessionId)).toEqual([seed.sessions.j1]);
+      expect(JSON.stringify(mine)).not.toContain(SEEDED_IP);
+    });
+
+    it('session: replay in seq order with the correlated API call interleaved by time', async () => {
+      const dto = await journeys.session(SALES_SLUG, seed.sessions.j1, { range: '24h' }, ADMIN);
+      expect(dto.summary.sessionId).toBe(seed.sessions.j1);
+      expect(dto.events.map((e) => e.eventId)).toEqual(seed.j1ReplayIds);
+      expect(dto.events.map((e) => e.kind)).toEqual([
+        'page_view',
+        'page_view',
+        'api',
+        'tool_use',
+        'page_view',
+      ]);
+      expect(dto.events.map((e) => e.visibleMs)).toEqual([4000, 6000, null, null, null]);
+    });
+
+    it('session: wrong app, unknown session or outside the window → 404', async () => {
+      const missing = (app: string, sessionId: string, range: '24h' | '15m' = '24h') =>
+        journeys.session(app, sessionId, { range }, ADMIN);
+      await expect(missing(HR_SLUG, seed.sessions.j1)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(missing(SALES_SLUG, seed.sessions.j3)).rejects.toMatchObject({ statusCode: 404 });
+      // J1 ended 54 minutes before now: nothing of it falls in the last 15 minutes.
+      await expect(missing(SALES_SLUG, seed.sessions.j1, '15m')).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    });
+
+    it('topPaths: reloads collapse, so both sales sessions share one 3-step path', async () => {
+      const dto = await journeys.topPaths({ range: '24h', limit: 20 });
+      expect(dto.items).toEqual(JOURNEY_EXPECTED.topPaths);
+    });
+  });
+
+  // ─── Pages & Tools ────────────────────────────────────────────────────────
+
+  it('PageService.list: views, sessions, avg/p50 visible time and exits per template', async () => {
+    const dto = await pages.list({ range: '24h', limit: 50 });
+    expect(dto.items).toEqual(JOURNEY_EXPECTED.pages);
+    const hrOnly = await pages.list({ range: '24h', limit: 50, app: HR_SLUG });
+    expect(hrOnly.items.map((p) => p.pathTemplate)).toEqual(['/leaves']);
+  });
+
+  it('ToolService.usage: uses, verified users, sessions and a 24-point trend', async () => {
+    const dto = await tools.usage({ range: '24h', limit: 50 });
+    expect(dto.items).toMatchObject([
+      { app: SALES_SLUG, tool: 'export-csv', uses: 2, distinctUsers: 1, distinctSessions: 2 },
+      { app: HR_SLUG, tool: 'apply-leave', uses: 1, distinctUsers: 1, distinctSessions: 1 },
+    ]);
+    const trend = dto.items[0]?.trend ?? [];
+    expect(trend).toHaveLength(24);
+    expect(trend.reduce((sum, p) => sum + p.uses, 0)).toBe(2);
+  });
+
+  // ─── Geography ────────────────────────────────────────────────────────────
+
+  it('GeoService: countries and cities over API calls + page views, busiest first', async () => {
+    const countries = await geo.countries({ range: '24h', limit: 100 });
+    expect(countries.items).toEqual(JOURNEY_EXPECTED.countries);
+
+    const cities = await geo.cities({ range: '24h', limit: 100 });
+    expect(cities.items.map((c) => c.city)).toEqual([BENGALURU.city, MUMBAI.city, null]);
+    expect(cities.items[1]).toMatchObject({
+      region: MUMBAI.region,
+      lat: MUMBAI.lat,
+      lon: MUMBAI.lon,
+      requests: 0,
+      pageViews: 3,
+      users: 1,
+    });
+    expect(cities.items[2]).toMatchObject({ requests: 1, pageViews: 1, users: 2 });
   });
 });

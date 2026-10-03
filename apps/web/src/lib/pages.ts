@@ -5,6 +5,8 @@
  * builder has an @see to its page file). Paths are relative to the Next basePath; <Link> adds
  * `/traffic` itself. Dynamic segments take OPAQUE ids only (endpointId uuid, userKey hash) —
  * never an ingested string such as a path or route template (ai-context/05-conventions.md §5).
+ * A session is addressed by its registered app slug + uuid sessionId, both validated by the page
+ * with the API's own params schema.
  */
 
 export const PAGES = {
@@ -20,8 +22,13 @@ export const PAGES = {
   errors: () => '/errors',
   /** @see ../app/(dashboard)/users/page.tsx */
   users: () => '/users',
+  /** @see ../app/(dashboard)/users/[userKey]/page.tsx */
+  userDetail: (userKey: string) => `/users/${encodeURIComponent(userKey)}`,
   /** @see ../app/(dashboard)/journeys/page.tsx */
   journeys: () => '/journeys',
+  /** @see ../app/(dashboard)/journeys/[app]/[sessionId]/page.tsx */
+  sessionDetail: (app: string, sessionId: string) =>
+    `/journeys/${encodeURIComponent(app)}/${encodeURIComponent(sessionId)}`,
   /** @see ../app/(dashboard)/pages/page.tsx */
   pages: () => '/pages',
   /** @see ../app/(dashboard)/tools/page.tsx */

@@ -7,22 +7,53 @@ import type {
   ApiKeyDto,
   AppDto,
   EndpointStatsDto,
+  ExposedKeyDto,
+  GeoCityDto,
+  GeoCountryDto,
   GeoDto,
   HttpMethod,
+  IngestCounterDto,
+  LiveEventDto,
+  PageStatsDto,
   RequestSampleDto,
+  SdkHealthDto,
+  SessionEventDto,
+  SessionSummaryDto,
   StatusCountDto,
+  TimelineItemDto,
   TimeseriesPointDto,
+  ToolTrendPointDto,
+  ToolUsageDto,
+  TopPathDto,
+  UserProfileDto,
+  UserSummaryDto,
 } from '@nexus/shared';
 
 import { userKeyToHex } from '../enrichment/user-key.hasher';
+import type { ApiRequestInsert, WebEventInsert } from './inserts';
 import { percentOf, roundOrNull, roundTo } from './numbers';
 import type {
   ApiKeyRow,
   ApiRequestRow,
   AppRow,
   EndpointStatsRow,
+  ExposedKeyRow,
+  GeoCityRow,
+  GeoCountryRow,
+  IngestCounterSumRow,
+  LiveEventRow,
+  PageStatsRow,
+  SdkHealthRow,
+  SessionEventRow,
+  SessionSummaryRow,
   StatusCountRow,
+  TimelineEventRow,
+  ToolTrendRow,
+  ToolUsageRow,
+  TopPathRow,
   TrafficBucketRow,
+  UserProfileRows,
+  UserSummaryRow,
 } from './rows';
 import type { Viewer } from './viewer';
 
@@ -167,5 +198,277 @@ export function mapRequestSample(row: ApiRequestRow, viewer: Viewer): RequestSam
     errorCode: row.error_code,
     requestId: row.request_id,
     actor: mapActor(row, viewer),
+  };
+}
+
+// ─── Browser analytics (S3: Users, Journeys, Pages & Tools, Geography) ──────
+
+/** WHY: the IP leaves the API for ADMINS ONLY (ADR 0001, "IP / PII"). */
+function ipFor(ip: string | null, viewer: Viewer): string | null {
+  return viewer.isAdmin ? ip : null;
+}
+
+/**
+ * WHY: one row of the Users table. `user_key` leaves the API as 64-char hex — the opaque id used
+ * in Users URLs. ONLY verified identities reach this mapper (user_key IS NOT NULL in SQL).
+ * @see ../../migrations/0005_web_events.sql
+ */
+export function mapUserSummary(row: UserSummaryRow): UserSummaryDto {
+  return {
+    userKey: row.user_key.toString('hex'),
+    email: row.user_email,
+    lastSeenAt: row.last_seen_at.toISOString(),
+    requests: row.requests,
+    pageViews: row.page_views,
+    sessions: row.sessions,
+    apps: [...row.apps],
+  };
+}
+
+/** WHY: the profile header + its top lists, from the rows of getUserProfile. */
+export function mapUserProfile(rows: UserProfileRows): UserProfileDto {
+  return {
+    summary: mapUserSummary(rows.summary),
+    firstSeenAt: rows.summary.first_seen_at.toISOString(),
+    failedRequests: rows.summary.failed_requests,
+    topTools: rows.topTools.map((row) => ({ app: row.app_slug, tool: row.tool, uses: row.uses })),
+    topPages: rows.topPages.map((row) => ({
+      app: row.app_slug,
+      pathTemplate: row.path_template,
+      views: row.views,
+    })),
+    countries: [...rows.countries],
+  };
+}
+
+/**
+ * WHY: one item of a user's combined timeline (API call or browser event), role-masked: the IP
+ * is shown to admins only.
+ */
+export function mapTimelineItem(row: TimelineEventRow, viewer: Viewer): TimelineItemDto {
+  return {
+    eventId: row.event_id,
+    occurredAt: row.occurred_at.toISOString(),
+    kind: row.kind,
+    app: row.app_slug,
+    path: row.path,
+    sessionId: row.session_id,
+    identitySource: row.identity_source,
+    method: row.method,
+    status: row.status_code,
+    durationMs: roundOrNull(row.duration_ms),
+    tool: row.tool,
+    visibleMs: row.visible_ms,
+    name: row.name,
+    ip: ipFor(row.ip, viewer),
+  };
+}
+
+/** WHY: one Journeys session row, role-masked (first IP of the session for admins only). */
+export function mapSessionSummary(row: SessionSummaryRow, viewer: Viewer): SessionSummaryDto {
+  return {
+    app: row.app_slug,
+    sessionId: row.session_id,
+    startedAt: row.started_at.toISOString(),
+    lastSeenAt: row.last_seen_at.toISOString(),
+    durationMs: Math.round(row.duration_ms),
+    pageViews: row.page_views,
+    toolUses: row.tool_uses,
+    visibleMs: row.visible_ms,
+    userKey: userKeyToHex(row.user_key),
+    userEmail: row.user_email,
+    claimedEmail: row.claimed_email,
+    identitySource: row.identity_source,
+    entryPath: row.entry_path,
+    exitPath: row.exit_path,
+    country: row.country,
+    ip: ipFor(row.ip, viewer),
+  };
+}
+
+/** WHY: one replay step (browser event or correlated API call). Carries no IP or identity. */
+export function mapSessionEvent(row: SessionEventRow): SessionEventDto {
+  return {
+    eventId: row.event_id,
+    occurredAt: row.occurred_at.toISOString(),
+    seq: row.seq,
+    kind: row.kind,
+    path: row.path,
+    tool: row.tool,
+    visibleMs: row.visible_ms,
+    name: row.name,
+    method: row.method,
+    status: row.status_code,
+    durationMs: roundOrNull(row.duration_ms),
+  };
+}
+
+export function mapTopPath(row: TopPathRow): TopPathDto {
+  return { app: row.app_slug, steps: [row.step1, row.step2, row.step3], sessions: row.sessions };
+}
+
+/** WHY: time on page — avg/p50 are rounded to whole milliseconds (visible time is integral). */
+export function mapPageStats(row: PageStatsRow): PageStatsDto {
+  return {
+    app: row.app_slug,
+    pathTemplate: row.path_template,
+    views: row.views,
+    uniqueSessions: row.unique_sessions,
+    avgVisibleMs: roundOrNull(row.avg_visible_ms, 0),
+    p50VisibleMs: roundOrNull(row.p50_visible_ms, 0),
+    exits: row.exits,
+  };
+}
+
+export function mapToolTrendPoint(row: ToolTrendRow): ToolTrendPointDto {
+  return { bucket: row.bucket.toISOString(), uses: row.uses };
+}
+
+/**
+ * WHY: one Tools table row. `trend` is already gap-filled by the service (ToolService.usage);
+ * the internal `app_id` is NEVER copied.
+ */
+export function mapToolUsage(row: ToolUsageRow, trend: ToolTrendPointDto[]): ToolUsageDto {
+  return {
+    app: row.app_slug,
+    tool: row.tool,
+    uses: row.uses,
+    distinctUsers: row.distinct_users,
+    distinctSessions: row.distinct_sessions,
+    lastUsedAt: row.last_used_at.toISOString(),
+    trend,
+  };
+}
+
+export function mapGeoCountry(row: GeoCountryRow): GeoCountryDto {
+  return {
+    country: row.country,
+    requests: row.requests,
+    pageViews: row.page_views,
+    users: row.users,
+  };
+}
+
+/** WHY: city centroids are approximate; 4 decimals (~11 m) is more than GeoLite2 knows. */
+export function mapGeoCity(row: GeoCityRow): GeoCityDto {
+  return {
+    country: row.country,
+    region: row.region,
+    city: row.city,
+    lat: roundOrNull(row.lat, 4),
+    lon: roundOrNull(row.lon, 4),
+    requests: row.requests,
+    pageViews: row.page_views,
+    users: row.users,
+  };
+}
+
+// ─── Live (S4) ──────────────────────────────────────────────────────────────
+
+/**
+ * WHY: one row of the Live backfill (GET ROUTES.live.snapshot), role-masked: the IP is shown to
+ * admins only. `userEmail` is the VERIFIED email (claims are never shown as identity).
+ * @see ../../migrations/0004_api_requests.sql
+ * @see ../../migrations/0005_web_events.sql
+ */
+export function mapLiveEvent(row: LiveEventRow, viewer: Viewer): LiveEventDto {
+  return {
+    eventId: row.event_id,
+    occurredAt: row.occurred_at.toISOString(),
+    app: row.app_slug,
+    kind: row.kind,
+    path: row.path,
+    method: row.method,
+    status: row.status_code,
+    durationMs: roundOrNull(row.duration_ms),
+    tool: row.tool,
+    userEmail: row.user_email,
+    ip: ipFor(row.ip, viewer),
+    country: row.geo_country,
+    city: row.geo_city,
+  };
+}
+
+/**
+ * WHY: a just-committed API call as a Live event, in its ADMIN form (with the stored IP). The
+ * broadcaster derives the viewer form with `withoutIp` — NEVER send this to a viewer room.
+ */
+export function liveEventOfApiRequest(appSlug: string, row: ApiRequestInsert): LiveEventDto {
+  return {
+    eventId: row.eventId,
+    occurredAt: row.occurredAt.toISOString(),
+    app: appSlug,
+    kind: 'api',
+    path: row.path,
+    method: row.method,
+    status: row.statusCode,
+    durationMs: roundTo(row.durationMs),
+    tool: null,
+    userEmail: row.userEmail,
+    ip: row.ip,
+    country: row.geoCountry,
+    city: row.geoCity,
+  };
+}
+
+/** WHY: a just-committed browser event as a Live event, ADMIN form (see liveEventOfApiRequest). */
+export function liveEventOfWebEvent(appSlug: string, row: WebEventInsert): LiveEventDto {
+  return {
+    eventId: row.eventId,
+    occurredAt: row.occurredAt.toISOString(),
+    app: appSlug,
+    kind: row.eventType,
+    path: row.path,
+    method: null,
+    status: null,
+    durationMs: null,
+    tool: row.tool,
+    userEmail: row.userEmail,
+    ip: row.ip,
+    country: row.geoCountry,
+    city: row.geoCity,
+  };
+}
+
+/** WHY: the viewer form of a Live event — identical except that the IP is gone (ADR 0001). */
+export function withoutIp(event: LiveEventDto): LiveEventDto {
+  return { ...event, ip: null };
+}
+
+// ─── Integration Health (S5) ────────────────────────────────────────────────
+
+/**
+ * WHY: the window's counters of one source (the service adds a zero row for a source with none).
+ * @see ../../migrations/0006_ingest_counters.sql
+ */
+export function mapIngestCounter(row: IngestCounterSumRow): IngestCounterDto {
+  return {
+    source: row.source,
+    accepted: row.accepted,
+    duplicates: row.duplicates,
+    rejected: row.rejected,
+    rateLimited: row.rate_limited,
+  };
+}
+
+/** WHY: one SDK seen on one source; skew in whole ms (sub-ms precision is noise). */
+export function mapSdkHealth(row: SdkHealthRow): SdkHealthDto {
+  return {
+    source: row.source,
+    sdk: row.sdk,
+    events: row.events,
+    lastSeenAt: row.last_seen_at.toISOString(),
+    medianClockSkewMs: roundOrNull(row.median_skew_ms, 0),
+    maxAbsClockSkewMs: row.max_abs_skew_ms,
+  };
+}
+
+/** WHY: an exposed secret is identified by its PREFIX only — the key itself is never stored in clear. */
+export function mapExposedKey(row: ExposedKeyRow): ExposedKeyDto {
+  return {
+    id: row.id,
+    keyPrefix: row.key_prefix,
+    label: row.label,
+    exposedAt: row.exposed_at.toISOString(),
   };
 }

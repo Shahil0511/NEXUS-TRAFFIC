@@ -35,7 +35,9 @@ describe('toApiRequestInsert', () => {
   };
 
   it('maps wire `status` to `statusCode` and the ISO time to a Date (same instant)', () => {
-    const event = serverEventSchema.parse(serverEvent({ status: 503, occurredAt: '2026-10-01T15:29:58.123+05:30' }));
+    const event = serverEventSchema.parse(
+      serverEvent({ status: 503, occurredAt: '2026-10-01T15:29:58.123+05:30' }),
+    );
     const row = toApiRequestInsert(event, enrichment);
     expect(row.statusCode).toBe(503);
     expect(row.occurredAt.toISOString()).toBe('2026-10-01T09:59:58.123Z');

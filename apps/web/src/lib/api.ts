@@ -34,15 +34,38 @@ import {
   type ErrorSummaryQuery,
   type ExpireKeyBody,
   type FailedRequestDto,
+  type GeoCityDto,
+  type GeoCountryDto,
+  type GeoQuery,
+  type IntegrationHealthDto,
   type KeyCreatedDto,
+  type LiveSnapshotDto,
+  type LiveSnapshotQuery,
   type MeDto,
   type OverviewSummaryDto,
   type OverviewSummaryQuery,
   type OverviewTimeseriesDto,
   type OverviewTimeseriesQuery,
+  type PageListQuery,
+  type PageStatsDto,
   type PathParams,
   type RouteDescriptor,
+  type SessionDetailDto,
+  type SessionListQuery,
+  type SessionQuery,
+  type SessionSummaryDto,
+  type TimelineItemDto,
+  type ToolUsageDto,
+  type ToolUsageQuery,
+  type TopPathDto,
+  type TopPathsQuery,
   type UpdateAppBody,
+  type UserListQuery,
+  type UserProfileDto,
+  type UserProfileQuery,
+  type UserSummaryDto,
+  type UserTimelineQuery,
+  type WindowedListDto,
 } from '@nexus/shared';
 
 import { toApiError, toNetworkError } from './apiError';
@@ -130,8 +153,7 @@ type CallOptions = Pick<RequestOptions, 'signal'>;
 
 /**
  * One function per implemented leaf; key names mirror ROUTES exactly (group.leaf).
- * S3–S5 add users/journeys/pages/tools/geo/live/integration (the Apps admin UI arrives in S5,
- * its mutations are already here because the API serves them since S1).
+ * The `apps.*` mutations back the admin Apps page (features/apps/useAppMutations.ts).
  */
 export const api = {
   me: {
@@ -185,5 +207,52 @@ export const api = {
       request<ErrorSummaryDto>(ROUTES.errors.summary, q, o),
     list: (q: ErrorListQuery, o?: CallOptions) =>
       request<CursorPage<FailedRequestDto>>(ROUTES.errors.list, q, o),
+  },
+  users: {
+    list: (q: UserListQuery, o?: CallOptions) =>
+      request<CursorPage<UserSummaryDto>>(ROUTES.users.list, q, o),
+    profile: (userKey: string, q: UserProfileQuery, o?: CallOptions) =>
+      request<UserProfileDto, typeof ROUTES.users.profile>(ROUTES.users.profile, q, {
+        ...o,
+        params: { userKey },
+      }),
+    timeline: (userKey: string, q: UserTimelineQuery, o?: CallOptions) =>
+      request<CursorPage<TimelineItemDto>, typeof ROUTES.users.timeline>(ROUTES.users.timeline, q, {
+        ...o,
+        params: { userKey },
+      }),
+  },
+  journeys: {
+    sessions: (q: SessionListQuery, o?: CallOptions) =>
+      request<CursorPage<SessionSummaryDto>>(ROUTES.journeys.sessions, q, o),
+    session: (app: string, sessionId: string, q: SessionQuery, o?: CallOptions) =>
+      request<SessionDetailDto, typeof ROUTES.journeys.session>(ROUTES.journeys.session, q, {
+        ...o,
+        params: { app, sessionId },
+      }),
+    topPaths: (q: TopPathsQuery, o?: CallOptions) =>
+      request<WindowedListDto<TopPathDto>>(ROUTES.journeys.topPaths, q, o),
+  },
+  pages: {
+    list: (q: PageListQuery, o?: CallOptions) =>
+      request<WindowedListDto<PageStatsDto>>(ROUTES.pages.list, q, o),
+  },
+  tools: {
+    usage: (q: ToolUsageQuery, o?: CallOptions) =>
+      request<WindowedListDto<ToolUsageDto>>(ROUTES.tools.usage, q, o),
+  },
+  geo: {
+    countries: (q: GeoQuery, o?: CallOptions) =>
+      request<WindowedListDto<GeoCountryDto>>(ROUTES.geo.countries, q, o),
+    cities: (q: GeoQuery, o?: CallOptions) =>
+      request<WindowedListDto<GeoCityDto>>(ROUTES.geo.cities, q, o),
+  },
+  live: {
+    snapshot: (q: LiveSnapshotQuery, o?: CallOptions) =>
+      request<LiveSnapshotDto>(ROUTES.live.snapshot, q, o),
+  },
+  integration: {
+    health: (o?: CallOptions) =>
+      request<IntegrationHealthDto>(ROUTES.integration.health, undefined, o),
   },
 } as const;

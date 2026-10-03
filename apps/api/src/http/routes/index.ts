@@ -5,6 +5,7 @@
 import {
   appKeyParamsSchema,
   appSlugParamsSchema,
+  browserIngestEnvelopeSchema,
   createAppBodySchema,
   createKeyBodySchema,
   endpointDetailParamsSchema,
@@ -14,11 +15,23 @@ import {
   errorListQuerySchema,
   errorSummaryQuerySchema,
   expireKeyBodySchema,
+  geoQuerySchema,
+  liveSnapshotQuerySchema,
   overviewSummaryQuerySchema,
   overviewTimeseriesQuerySchema,
+  pageListQuerySchema,
   ROUTES,
   serverIngestEnvelopeSchema,
+  sessionListQuerySchema,
+  sessionParamsSchema,
+  sessionQuerySchema,
+  toolUsageQuerySchema,
+  topPathsQuerySchema,
   updateAppBodySchema,
+  userKeyParamsSchema,
+  userListQuerySchema,
+  userProfileQuerySchema,
+  userTimelineQuerySchema,
 } from '@nexus/shared';
 import { Router } from 'express';
 
@@ -50,6 +63,22 @@ export function buildRouter(c: Container): Router {
     mw.serverKeyRateLimit,
     validateBody(serverIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
     ctl.ingest.server,
+  );
+  // Browser: key in the BODY (sendBeacon, text/plain), so auth runs after parsing + envelope validation.
+  // router.use (not r.options) keeps the route table to ROUTES leaves; it answers ONLY OPTIONS.
+  r.use(ROUTES.ingest.browser.path, mw.browserIngestPreflight);
+  r.post(
+    ROUTES.ingest.browser.path,
+    mw.browserIpFailureLimit,
+    mw.beaconBody,
+    mw.parseBeaconJson,
+    validateBody(browserIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
+    mw.publishableKeyAuth,
+    mw.browserIngestCors,
+    mw.originGuard,
+    mw.browserKeyRateLimit,
+    mw.browserSessionRateLimit,
+    ctl.ingest.browser,
   );
   r.get(ROUTES.ingest.verify.path, mw.ipFailureLimit, mw.anyKeyAuth, ctl.ingest.verify);
 
@@ -127,6 +156,63 @@ export function buildRouter(c: Container): Router {
     validateQuery(errorListQuerySchema),
     ctl.errors.list,
   );
+
+  // ─── Dashboard: users ─────────────────────────────────────────────────────
+  r.get(ROUTES.users.list.path, ...dashboard, validateQuery(userListQuerySchema), ctl.users.list);
+  r.get(
+    ROUTES.users.profile.path,
+    ...dashboard,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userProfileQuerySchema),
+    ctl.users.profile,
+  );
+  r.get(
+    ROUTES.users.timeline.path,
+    ...dashboard,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userTimelineQuerySchema),
+    ctl.users.timeline,
+  );
+
+  // ─── Dashboard: journeys ──────────────────────────────────────────────────
+  r.get(
+    ROUTES.journeys.sessions.path,
+    ...dashboard,
+    validateQuery(sessionListQuerySchema),
+    ctl.journeys.sessions,
+  );
+  r.get(
+    ROUTES.journeys.session.path,
+    ...dashboard,
+    validateParams(sessionParamsSchema),
+    validateQuery(sessionQuerySchema),
+    ctl.journeys.session,
+  );
+  r.get(
+    ROUTES.journeys.topPaths.path,
+    ...dashboard,
+    validateQuery(topPathsQuerySchema),
+    ctl.journeys.topPaths,
+  );
+
+  // ─── Dashboard: pages & tools ─────────────────────────────────────────────
+  r.get(ROUTES.pages.list.path, ...dashboard, validateQuery(pageListQuerySchema), ctl.pages.list);
+  r.get(ROUTES.tools.usage.path, ...dashboard, validateQuery(toolUsageQuerySchema), ctl.tools.usage);
+
+  // ─── Dashboard: geography ─────────────────────────────────────────────────
+  r.get(ROUTES.geo.countries.path, ...dashboard, validateQuery(geoQuerySchema), ctl.geo.countries);
+  r.get(ROUTES.geo.cities.path, ...dashboard, validateQuery(geoQuerySchema), ctl.geo.cities);
+
+  // ─── Dashboard: live (REST backfill; the stream is Socket.io — src/socket.ts) ─
+  r.get(
+    ROUTES.live.snapshot.path,
+    ...dashboard,
+    validateQuery(liveSnapshotQuerySchema),
+    ctl.live.snapshot,
+  );
+
+  // ─── Dashboard: integration health ────────────────────────────────────────
+  r.get(ROUTES.integration.health.path, ...dashboard, ctl.integration.health);
 
   return r;
 }

@@ -6,6 +6,7 @@ import {
   bucketStarts,
   emptyPoint,
   fillTimeseriesGaps,
+  fillToolTrendGaps,
   withPageViews,
 } from './timeseries-gaps';
 
@@ -95,5 +96,21 @@ describe('withPageViews', () => {
     const merged = withPageViews(points, new Map([['2026-10-01T06:30:00.000Z', 9]]));
     expect(merged.map((p) => p.pageViews)).toEqual([0, 9]);
     expect(merged.map((p) => p.requests)).toEqual([1, 2]);
+  });
+});
+
+describe('fillToolTrendGaps', () => {
+  it('one point per IST-aligned bucket, zeros for missing ones, existing points kept', () => {
+    const window = {
+      from: new Date('2026-10-01T06:00:00Z'),
+      to: new Date('2026-10-01T09:00:00Z'),
+      grain: 'hour' as const,
+    };
+    expect(fillToolTrendGaps([{ bucket: '2026-10-01T06:30:00.000Z', uses: 4 }], window)).toEqual([
+      { bucket: '2026-10-01T05:30:00.000Z', uses: 0 },
+      { bucket: '2026-10-01T06:30:00.000Z', uses: 4 },
+      { bucket: '2026-10-01T07:30:00.000Z', uses: 0 },
+      { bucket: '2026-10-01T08:30:00.000Z', uses: 0 },
+    ]);
   });
 });

@@ -1,7 +1,7 @@
 # 08 — integration contract (one-page summary)
 
-> Filled in S1 (server contract live, browser contract specified). Completed in S5 with the SDK
-> packages, the React tracker and the Integration Health page.
+> Filled in S1 (server contract live, browser contract specified). Completed in S5: SDK packages,
+> snippet contract tests, the Integration page and the Apps admin page.
 
 **The link to send other teams:** `https://nexus.libas.in/traffic/api/docs/` (public, no SSO).
 It is built from `docs/integration/*.md` by `scripts/build-docs.ts` (`npm run docs:build`) and served
@@ -19,7 +19,7 @@ when stale). Contract changes are logged in `docs/CHANGELOG.md`.
 | ROUTES key | Request | Auth | Answer |
 |---|---|---|---|
 | `ingest.server` | `POST /v1/ingest/server` (`?dryRun=1`), JSON, ≤ 500 events / 512 KiB | secret key `nx_sk_…` in `X-Nexus-Key` | `202 {accepted, duplicates, rejected[], warnings[], dryRun?}` |
-| `ingest.browser` | `POST /v1/ingest/browser`, `text/plain` beacon, ≤ 50 events / 60 KiB | publishable key `nx_pk_…` in the body + Origin allowlist + base-path rule | same `202` body (endpoint goes live in S3) |
+| `ingest.browser` | `POST /v1/ingest/browser`, `text/plain` beacon, ≤ 50 events / 60 KiB | publishable key `nx_pk_…` in the body + Origin allowlist + base-path rule | same `202` body (live since S3; chain in [03-code-navigation.md](03-code-navigation.md) §3b) |
 | `ingest.verify` | `GET /v1/ingest/verify` | either key in `X-Nexus-Key` | `200 {app, keyKind, contractVersion, serverTime}` |
 
 Errors use `{ error: { code, message, details?, requestId? } }`. Sender rules: 202 never retry ·
@@ -46,7 +46,34 @@ Event types `page_view` (nav), `page_time` (`pageViewId`, `visibleMs` **delta**,
 `express-cjs.js` (plain JS), `express-esm.ts` (TS ESM/NodeNext, also used by NestJS),
 `nestjs.main.ts`, `fastapi_nexus_asgi.py` (pure ASGI + httpx, explicit `trust_proxy_hops`), `curl.sh`
 (verify → dry run → send → resend = duplicates). All batch (5 s / 100 events / ≤ 500 per request),
-follow the retry rules and never throw into the host app. The React tracker arrives in S5.
+follow the retry rules and never throw into the host app. Browser: `next-tracker.tsx` / `vite-react-tracker.tsx`
+(`@nexus/react`). SDK tarballs: `npm run sdk:pack` (after `docs:build`, which wipes `docs/dist`).
+
+**Snippet contract tests** keep snippets, SDKs and the guide on the contract:
+`packages/node/src/snippets.contract.test.ts` (URLs = `buildIngestUrl`),
+`packages/node/src/snippets-payload.contract.test.ts` (runs both Express snippets against a fake fetch and
+validates the POSTed batch with `serverIngestBatchSchema`; curl/Python payloads, header names, limits and
+React imports/tool ids checked against `@nexus/shared`), `apps/api/test/docs-build.test.ts` (every chapter
+renders, no leftover `{{…}}`, absolute links).
+
+## Keys and rotation (Apps page, admins)
+
+Admins register apps and issue keys on the dashboard's **Apps** page (`ROUTES.apps.*`, audited). A new
+key's plaintext is shown ONCE in a reveal dialog (copy button; never cached, logged or stored client-side).
+Rotation = create a new key → team deploys it → **expire** the old key with a grace period (now / 1 h /
+24 h / 7 d); **revoke** is immediate (leaked key). Both confirm in-page.
+
+## Integration Health (`ROUTES.integration.health`, any dashboard user)
+
+The dashboard's **Integration** page is where teams check their wiring (guide chapter 10 §4). Per app,
+over the last 24 h (`INTEGRATION_HEALTH_WINDOW_MS`): status `healthy | stale | never` (newest event of
+either source vs `INTEGRATION_STALE_AFTER_MS`), last server / browser event, accepted / duplicates /
+rejected / rate-limited (`ingest_counters`), SDKs (`name@version`) with median and worst clock skew,
+private-IP share of server events, exposed secret keys that still authenticate, and warnings
+(`INTEGRATION_WARNING_VALUES`: exposed_key, app_disabled, never_received, stale, private_ips > 90 %
+→ trustProxyHops, clock_skew > 60 s, rejected_events, rate_limited). Thresholds:
+`packages/shared/src/constants/integration.ts`; rules: `apps/api/src/domain/integration-health.ts`; each
+warning links the guide chapter that fixes it (`apps/web/src/features/integration/integrationCopy.ts`).
 
 ## Per-app hints (informational — we never edit `D:\server`)
 

@@ -17,6 +17,83 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-03 — S5 Integration Health, Apps admin UI, snippet contract tests, guide
+
+**Done**
+- **Contract**: `packages/shared/src/constants/integration.ts` (status + warning codes, thresholds: 24 h window,
+  stale after 24 h, private-IP warning > 90 % with ≥ 20 events, clock skew > 60 s); `dto/integration.ts`
+  extended. `PENDING_ROUTE_LEAVES` is now **empty** — every ROUTES leaf is served.
+- **API** (chain [03-code-navigation.md](03-code-navigation.md) §4b): `IngestHealthRepository.perApp`
+  (5 read-only queries), `domain/integration-health.ts` (pure rules), `IntegrationService`,
+  `IntegrationController`, route open to any dashboard user.
+- **Web**: Integration page (tiles + per-app card: status, warnings linked to guide chapters via
+  `lib/guide.ts`, counters per source, SDK/skew table, private-IP share). Apps admin page (admin only; register/
+  edit with the shared schemas, keys table with "exposed" badge, one-time key reveal that closes only via "I have
+  stored the key", expire with grace / revoke in in-page dialogs). New `ui/{dialog,switch,textarea}`,
+  `AdminOnly`, `FormField`, `InlineError`.
+- **Integration kit**: `packages/node/src/snippets-payload.contract.test.ts` (23 tests: snippets validated
+  against the shared schemas), `apps/api/test/docs-build.test.ts` (no `{{…}}` left, absolute links). Guide:
+  rotation steps (01), Integration page in verify (10), a troubleshooting section per warning (11).
+- **Tests**: `npm run typecheck && npm test` green (api 675); `RUN_DB_TESTS=1 npm run test:db` 834/834.
+
+**Next (S6)**: retention + partition jobs (`apps/api/src/jobs/`), backups check, nginx + `DEPLOY.md` for the TL,
+security suite (plan Phase 2 list), Playwright smoke via `edge`, ai-context doc-link test, polish, push `main`.
+
+**Notes / known issues**
+- Non-admins see an "Admins only" panel on Apps (the plan had the app list visible to all).
+- `npm run sdk:pack` must run after `npm run docs:build` (docs:build clears `docs/dist`).
+
+---
+
+## 2026-10-01 — S4 Socket.io live + Live page
+
+**Done**
+- **Contract** (`packages/shared/src/events.ts`): `SOCKET_PATH`, `LIVE_SESSION_SWEEP_MS`, session-end reasons,
+  `LIVE_AUTH_ERROR_MESSAGE`, `liveRoomOfScope()` / `parseLiveRoom()`; `live.snapshot` no longer pending.
+- **API**: `src/socket.ts` `createRealtime` (missing Origin allowed, `null`/foreign rejected; `/` namespace
+  refuses; `/live` checks the SSO cookie); `src/live/` (live-window, broadcaster with viewer payloads stripped
+  of IP, feed, origin policy, socket auth, subscription handler, session sweeper, tick scheduler 2 s / flush
+  1 s / sweep 60 s); `LiveService.snapshot` + `LiveController` (`no-store`); `server.ts` starts realtime after
+  `listen`, `shutdown.ts` closes it first. Chain: [03-code-navigation.md](03-code-navigation.md) §5c.
+- **Web**: `lib/socket.ts`, `features/live/` (`liveBuffer`, `useLiveSnapshot`, `useLiveFeed`,
+  `endLiveSession`, `LiveView` — 4 tiles, 60-min chart, streaming table with pause/resume); proxy matcher skips
+  `socket.io/`; dev-only rewrite of `/traffic/socket.io/` to the api.
+- **Tests**: unit tests for every live module; `apps/api/test/e2e/live-socket.test.ts` (in-process server +
+  `socket.io-client`: handshake rules, tick ≤ `LIVE_TICK_MS` after a row reaches `LiveFeed`, role masking);
+  `LiveView` with a fake socket. `apps/api/vitest.config.ts` now resolves `@nexus/source` (tests ran on dist).
+
+**Notes / known issues**
+- The SQL of `WebEventQueryRepository.activityTimeseries` / `listRecentEvents` has no DB test yet.
+- The snapshot uses `timeseries(filter, 'minute')` instead of the plan's `lastHourBuckets`; past ticks carry
+  `activeUsers: 0`.
+- Overview has no live sparkline (it does not expect one); no Playwright smoke yet (S6).
+
+---
+
+## 2026-10-01 — S3 Browser ingest + Users / Journeys / Pages & Tools / Geography
+
+**Done**
+- **Browser ingest** (`POST /api/v1/ingest/browser`, chain in [03-code-navigation.md](03-code-navigation.md) §3b):
+  OPTIONS preflight (`AppRepository.anyAllowsOrigin`), `beaconBody` (text/plain or JSON, 60 KiB),
+  `parseBeaconJson`, envelope validation, `publishableKeyAuth` (key in the body; secret key → 403
+  `SECRET_KEY_EXPOSED` + `exposed_at`; `APP_DISABLED`; `BROWSER_INGEST_DISABLED`), `browserIngestCors`,
+  `originGuard`, per-key (`INGEST_RATE_LIMIT_BROWSER_PER_MIN`, new, 6000) and per-session rate limits.
+  `BrowserEventEnricher`, `toWebEventInsert`, base-path rule (`PATH_OUTSIDE_APP`), `WebEventIngestRepository`;
+  dedupe / partition retry / bisect shared with the server path via `IngestService.storeBatch`.
+- **Read side** (§5b): `WebEventQueryRepository` (users, profile, timeline, sessions, session replay, top
+  3-step paths, page stats, tool usage + trend, countries, cities; IP admin-only), `User/Journey/Page/Tool/
+  GeoService` + controllers; `session-replay.ts`; shared `WindowedListDto` and DTO additions.
+- **Web**: Users + profile, Journeys + session replay, Pages / Tools (one nav entry, two routes),
+  Geography (bar chart, "approximate" cities, GeoLite2 attribution). New components `ActivityEvent`,
+  `RankedList`, `RankedBarChart`, `Sparkline`.
+- **Docs**: guide lists the per-app browser rate limit.
+- **Tests**: api 607 unit + S3 DB blocks (`analytics-queries` 31/31, `e2e/dashboard` 17/17), web 105.
+
+**Notes / known issues**
+- Pages, Tools and Geography have no totals endpoint; they show top-N lists only.
+
+---
+
 ## 2026-10-01 — S2 Dashboard shell + SSO + Overview / API Routes / Errors
 
 **Done**

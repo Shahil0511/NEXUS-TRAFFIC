@@ -1,18 +1,10 @@
-import { MousePointerClick } from 'lucide-react';
 import type { Metadata } from 'next';
 
-import { ComingSoon } from '@/components/ComingSoon';
+import { PagesView } from '@/features/pages/PagesView';
 
-export const metadata: Metadata = { title: 'Pages & Tools' };
+export const metadata: Metadata = { title: 'Pages' };
 
-const HIGHLIGHTS = [
-  'Time on page: views, average and median visible time, exits',
-  'Tool usage: uses, distinct users and trend per tool',
-] as const;
-
-/** PAGES.pages() — placeholder until S3 delivers its data (@see ../../../lib/nav.ts comingIn). */
+/** PAGES.pages() — @see ../../../features/pages/PagesView.tsx */
 export default function PagesPage() {
-  return (
-    <ComingSoon title="Pages & Tools" step="S3" icon={MousePointerClick} highlights={HIGHLIGHTS} />
-  );
+  return <PagesView />;
 }

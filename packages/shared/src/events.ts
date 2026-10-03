@@ -14,6 +14,12 @@ export const SOCKET_NAMESPACES = {
   live: '/live',
 } as const;
 
+/**
+ * Socket.io server path (apps/api/src/socket.ts). Browsers reach it under the public base path
+ * (`/traffic/socket.io`, nginx strips `/traffic`); the web client reads NEXT_PUBLIC_SOCKET_PATH.
+ */
+export const SOCKET_PATH = '/socket.io';
+
 export const SOCKET_EVENTS = {
   /** client → server: join a live scope. */
   subscribe: 'live:subscribe',
@@ -34,6 +40,18 @@ export const LIVE_SNAPSHOT_MINUTES = 60;
 export const LIVE_SNAPSHOT_RECENT_EVENTS = 50;
 /** Window used for "active users now". */
 export const ACTIVE_USER_WINDOW_MS = 5 * 60 * 1000;
+/** How often the api re-checks every connected socket's SSO token expiry and access policy. */
+export const LIVE_SESSION_SWEEP_MS = 60 * 1000;
+
+/** Why the server ended a live session (payload of SOCKET_EVENTS.sessionExpired). */
+export const LIVE_SESSION_END_REASON_VALUES = ['expired', 'revoked'] as const;
+export type LiveSessionEndReason = (typeof LIVE_SESSION_END_REASON_VALUES)[number];
+
+/**
+ * `connect_error` message of a refused handshake (bad/missing SSO cookie or not on the policy).
+ * The client treats it like SOCKET_EVENTS.sessionExpired: back to the portal login.
+ */
+export const LIVE_AUTH_ERROR_MESSAGE = 'unauthorized';
 
 /** What a dashboard client subscribes to. No app = all apps. */
 export interface LiveFilter {
@@ -48,18 +66,37 @@ export function liveScopeKey(filter: LiveFilter): string {
   return filter.app ? `app:${filter.app}` : 'all';
 }
 
+/** Socket.io room of a scope key (liveScopeKey) + role (viewer payloads carry no IP). */
+export function liveRoomOfScope(scope: string, role: LiveRole): string {
+  return `${scope}:${role}`;
+}
+
 /** Socket.io room for a scope + role (viewer payloads carry no IP). */
 export function liveRoom(filter: LiveFilter, role: LiveRole): string {
-  return `${liveScopeKey(filter)}:${role}`;
+  return liveRoomOfScope(liveScopeKey(filter), role);
+}
+
+/** Inverse of liveRoomOfScope; null for any other room (e.g. a socket's own id room). */
+export function parseLiveRoom(room: string): { scope: string; role: LiveRole } | null {
+  for (const role of LIVE_ROLE_VALUES) {
+    const suffix = `:${role}`;
+    if (room.length > suffix.length && room.endsWith(suffix)) {
+      return { scope: room.slice(0, -suffix.length), role };
+    }
+  }
+  return null;
 }
 
 export interface ServerToClientEvents {
   [SOCKET_EVENTS.trafficTick]: (tick: LiveTickDto) => void;
   [SOCKET_EVENTS.trafficEvents]: (events: LiveEventDto[]) => void;
-  [SOCKET_EVENTS.sessionExpired]: (payload: { reason: string }) => void;
+  [SOCKET_EVENTS.sessionExpired]: (payload: { reason: LiveSessionEndReason }) => void;
 }
 
 export interface ClientToServerEvents {
   [SOCKET_EVENTS.subscribe]: (filter: LiveFilter, ack: (result: LiveSubscribeAck) => void) => void;
-  [SOCKET_EVENTS.unsubscribe]: (filter: LiveFilter, ack?: (result: LiveSubscribeAck) => void) => void;
+  [SOCKET_EVENTS.unsubscribe]: (
+    filter: LiveFilter,
+    ack?: (result: LiveSubscribeAck) => void,
+  ) => void;
 }

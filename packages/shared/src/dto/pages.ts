@@ -1,4 +1,7 @@
-/** GET ROUTES.pages.list item — time spent per page. */
+/**
+ * GET ROUTES.pages.list item (WindowedListDto) — time spent per page (path template).
+ * avg/p50 are over page views with at least one `page_time` delta (Σ visible ms per page view).
+ */
 export interface PageStatsDto {
   app: string;
   pathTemplate: string;

@@ -1,17 +1,25 @@
 import { randomUUID } from 'node:crypto';
 
-import { ERROR_CODES, INGEST_CONTRACT_VERSION, type ServerIngestEnvelope } from '@nexus/shared';
+import {
+  ERROR_CODES,
+  INGEST_CONTRACT_VERSION,
+  type BrowserIngestEnvelope,
+  type ServerIngestEnvelope,
+} from '@nexus/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  browserEvent,
+  browserIngestContext,
   fake,
   FIXED_NOW,
   ingestContext,
   serverEvent,
   silentLogger,
+  testBrowserEventEnricher,
   testServerEventEnricher,
 } from '../../test/ingest-fixtures';
-import type { ApiRequestInsert, IngestCounterIncrement } from '../domain/inserts';
+import type { ApiRequestInsert, IngestCounterIncrement, WebEventInsert } from '../domain/inserts';
 import type { AppRow } from '../domain/rows';
 import { EventTimeGuard } from '../enrichment/event-time.guard';
 import { AppError } from '../errors/app-error';
@@ -20,12 +28,20 @@ import type { LiveFeed } from '../live/live-feed';
 import type { ApiRequestIngestRepository } from '../repositories/api-request-ingest.repository';
 import type { IngestCounterRepository } from '../repositories/ingest-counter.repository';
 import type { PartitionRepository } from '../repositories/partition.repository';
+import type { WebEventIngestRepository } from '../repositories/web-event-ingest.repository';
 import { IngestService } from './ingest.service';
 import { PARTITION_MONTHS_AHEAD, PARTITION_MONTHS_BACK } from './partition.service';
 
 // ─── pg error shapes (as node-postgres raises them) ─────────────────────────
-const MISSING_PARTITION = { code: '23514', message: 'no partition of relation "api_requests" found for row' };
-const CHECK_VIOLATION = { code: '23514', constraint: 'api_requests_path_check', message: 'violates check' };
+const MISSING_PARTITION = {
+  code: '23514',
+  message: 'no partition of relation "api_requests" found for row',
+};
+const CHECK_VIOLATION = {
+  code: '23514',
+  constraint: 'api_requests_path_check',
+  message: 'violates check',
+};
 const POOL_TIMEOUT = { message: 'timeout exceeded when trying to connect' };
 
 /** In-memory api_requests: ON CONFLICT DO NOTHING semantics, injectable failures. */
@@ -84,9 +100,11 @@ describe('IngestService.ingestServerEvents', () => {
     logger = silentLogger();
     service = new IngestService(
       fake<ApiRequestIngestRepository>(apiRequests),
+      fake<WebEventIngestRepository>({}),
       fake<IngestCounterRepository>(counters),
       fake<PartitionRepository>(partitions),
       testServerEventEnricher(),
+      testBrowserEventEnricher(),
       new EventTimeGuard(),
       fake<LiveFeed>(liveFeed),
       logger,
@@ -106,7 +124,14 @@ describe('IngestService.ingestServerEvents', () => {
     expect(rows.map((r) => r.eventId)).toEqual(events.map((e) => e.eventId));
     expect(rows[0]?.clockSkewMs).toBe(1000);
     expect(counters.increment).toHaveBeenCalledWith(
-      { appId: ctx.app.id, source: 'server', accepted: 3, duplicates: 0, rejected: 0, rateLimited: 0 },
+      {
+        appId: ctx.app.id,
+        source: 'server',
+        accepted: 3,
+        duplicates: 0,
+        rejected: 0,
+        rateLimited: 0,
+      },
       FIXED_NOW,
     );
     expect(liveFeed.recordApiRequests).toHaveBeenCalledWith(ctx.app, rows);
@@ -130,7 +155,9 @@ describe('IngestService.ingestServerEvents', () => {
       [4, ERROR_CODES.EVENT_TIME_OUT_OF_RANGE],
     ]);
     expect(result.rejected[0]?.message).toMatch(/^status: /);
-    expect(result.warnings).toEqual([{ index: 5, code: ERROR_CODES.FIELD_DROPPED, field: 'userEmail' }]);
+    expect(result.warnings).toEqual([
+      { index: 5, code: ERROR_CODES.FIELD_DROPPED, field: 'userEmail' },
+    ]);
     expect(counters.increment.mock.calls[0]?.[0]).toMatchObject({ accepted: 2, rejected: 4 });
   });
 
@@ -142,7 +169,12 @@ describe('IngestService.ingestServerEvents', () => {
 
   it('counts later copies of an eventId within the batch as duplicates', async () => {
     const first = serverEvent();
-    const result = await ingest([first, serverEvent(), { ...first, durationMs: 99 }, { ...first, eventId: first.eventId.toUpperCase() }]);
+    const result = await ingest([
+      first,
+      serverEvent(),
+      { ...first, durationMs: 99 },
+      { ...first, eventId: first.eventId.toUpperCase() },
+    ]);
 
     expect(result).toMatchObject({ accepted: 2, duplicates: 2, rejected: [] });
     const [rows] = apiRequests.insertBatch.mock.calls[0]!;
@@ -214,7 +246,9 @@ describe('IngestService.ingestServerEvents', () => {
     apiRequests.poisonEventIds.add(only.eventId);
     const result = await ingest([only]);
     expect(result).toMatchObject({ accepted: 0, duplicates: 0 });
-    expect(result.rejected).toEqual([{ index: 0, code: ERROR_CODES.DB_CONSTRAINT, message: expect.any(String) }]);
+    expect(result.rejected).toEqual([
+      { index: 0, code: ERROR_CODES.DB_CONSTRAINT, message: expect.any(String) },
+    ]);
     expect(apiRequests.insertBatch).toHaveBeenCalledTimes(1);
   });
 
@@ -239,12 +273,17 @@ describe('IngestService.ingestServerEvents', () => {
 
   it('dryRun validates and enriches but writes, counts and publishes nothing', async () => {
     const first = serverEvent();
-    const result = await ingest([first, { ...first }, { ...serverEvent(), path: 'no-slash' }], true);
+    const result = await ingest(
+      [first, { ...first }, { ...serverEvent(), path: 'no-slash' }],
+      true,
+    );
 
     expect(result).toEqual({
       accepted: 2,
       duplicates: 0,
-      rejected: [{ index: 2, code: ERROR_CODES.INVALID_EVENT, message: expect.stringMatching(/^path: /) }],
+      rejected: [
+        { index: 2, code: ERROR_CODES.INVALID_EVENT, message: expect.stringMatching(/^path: /) },
+      ],
       warnings: [],
       dryRun: true,
     });
@@ -271,9 +310,13 @@ describe('IngestService.ingestServerEvents', () => {
   });
 
   it('skew is null when the envelope sentAt is unusable', async () => {
-    await service.ingestServerEvents({ sentAt: 'garbage', events: [serverEvent({ eventId: randomUUID() })] }, ctx, {
-      dryRun: false,
-    });
+    await service.ingestServerEvents(
+      { sentAt: 'garbage', events: [serverEvent({ eventId: randomUUID() })] },
+      ctx,
+      {
+        dryRun: false,
+      },
+    );
     expect(apiRequests.insertBatch.mock.calls[0]?.[0][0]?.clockSkewMs).toBeNull();
   });
 });
@@ -282,9 +325,11 @@ describe('IngestService.verify', () => {
   it('describes the authenticated app and key', () => {
     const service = new IngestService(
       fake<ApiRequestIngestRepository>({}),
+      fake<WebEventIngestRepository>({}),
       fake<IngestCounterRepository>({}),
       fake<PartitionRepository>({}),
       testServerEventEnricher(),
+      testBrowserEventEnricher(),
       new EventTimeGuard(),
       fake<LiveFeed>({}),
       silentLogger(),
@@ -295,5 +340,197 @@ describe('IngestService.verify', () => {
       contractVersion: INGEST_CONTRACT_VERSION,
       serverTime: FIXED_NOW.toISOString(),
     });
+  });
+});
+
+// ─── Browser ingest ─────────────────────────────────────────────────────────
+
+/** In-memory web_events: ON CONFLICT DO NOTHING semantics, injectable failures. */
+class FakeWebEvents implements Pick<WebEventIngestRepository, 'insertBatch'> {
+  stored = new Set<string>();
+  poisonEventIds = new Set<string>();
+  missingPartitionFailures = 0;
+  failWith: unknown = null;
+  insertBatch = vi.fn(async (rows: WebEventInsert[]): Promise<string[]> => {
+    if (this.failWith) throw this.failWith;
+    if (this.missingPartitionFailures > 0) {
+      this.missingPartitionFailures -= 1;
+      throw MISSING_PARTITION;
+    }
+    if (rows.some((row) => this.poisonEventIds.has(row.eventId))) throw CHECK_VIOLATION;
+    const inserted: string[] = [];
+    for (const row of rows) {
+      if (this.stored.has(row.eventId)) continue;
+      this.stored.add(row.eventId);
+      inserted.push(row.eventId);
+    }
+    return inserted;
+  });
+}
+
+class FakeBrowserLiveFeed implements Pick<LiveFeed, 'recordWebEvents'> {
+  recordWebEvents = vi.fn((_app: AppRow, _rows: readonly WebEventInsert[]) => undefined);
+}
+
+function browserEnvelope(
+  events: unknown[],
+  extra: Partial<BrowserIngestEnvelope> = {},
+): BrowserIngestEnvelope {
+  return {
+    key: 'nx_pk_x',
+    sentAt: '2026-10-01T09:59:59.000Z',
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    events,
+    ...extra,
+  };
+}
+
+describe('IngestService.ingestBrowserEvents', () => {
+  let webEvents: FakeWebEvents;
+  let counters: FakeCounters;
+  let partitions: FakePartitions;
+  let liveFeed: FakeBrowserLiveFeed;
+  let service: IngestService;
+  const ctx = browserIngestContext();
+
+  beforeEach(() => {
+    webEvents = new FakeWebEvents();
+    counters = new FakeCounters();
+    partitions = new FakePartitions();
+    liveFeed = new FakeBrowserLiveFeed();
+    service = new IngestService(
+      fake<ApiRequestIngestRepository>({}),
+      fake<WebEventIngestRepository>(webEvents),
+      fake<IngestCounterRepository>(counters),
+      fake<PartitionRepository>(partitions),
+      testServerEventEnricher(),
+      testBrowserEventEnricher(),
+      new EventTimeGuard(),
+      fake<LiveFeed>(liveFeed),
+      silentLogger(),
+    );
+  });
+
+  const ingest = (events: unknown[], extra: Partial<BrowserIngestEnvelope> = {}) =>
+    service.ingestBrowserEvents(browserEnvelope(events, extra), ctx);
+
+  it('stores every event type into web_events, counts as browser and publishes live', async () => {
+    const pageViewId = randomUUID();
+    const events = [
+      browserEvent({ eventId: pageViewId }),
+      browserEvent({
+        type: 'page_time',
+        pageViewId,
+        visibleMs: 900,
+        final: false,
+        reason: 'hidden',
+        seq: 1,
+      }),
+      browserEvent({ type: 'tool_use', tool: 'stores.export', seq: 2 }),
+      browserEvent({ type: 'custom', name: 'report.opened', seq: 3 }),
+    ];
+    const result = await ingest(events);
+
+    expect(result).toEqual({ accepted: 4, duplicates: 0, rejected: [], warnings: [] });
+    const [rows] = webEvents.insertBatch.mock.calls[0]!;
+    expect(rows.map((r) => r.eventType)).toEqual(['page_view', 'page_time', 'tool_use', 'custom']);
+    expect(rows[0]).toMatchObject({
+      appId: ctx.app.id,
+      sessionId: '33333333-3333-4333-8333-333333333333',
+    });
+    expect(rows[0]?.clockSkewMs).toBe(1000);
+    expect(counters.increment).toHaveBeenCalledWith(
+      {
+        appId: ctx.app.id,
+        source: 'browser',
+        accepted: 4,
+        duplicates: 0,
+        rejected: 0,
+        rateLimited: 0,
+      },
+      FIXED_NOW,
+    );
+    expect(liveFeed.recordWebEvents).toHaveBeenCalledWith(ctx.app, rows);
+  });
+
+  it('rejects invalid, out-of-window and outside-the-base-path events with their indexes', async () => {
+    const result = await ingest([
+      browserEvent(),
+      browserEvent({ type: 'tool_use', tool: 'NOT VALID' }),
+      browserEvent({ occurredAt: '2026-09-20T00:00:00.000Z' }),
+      browserEvent({ path: '/other-app/page' }),
+      browserEvent({ path: '/ebo-sales-admin' }),
+    ]);
+
+    expect(result.accepted).toBe(1);
+    expect(result.rejected.map((r) => [r.index, r.code])).toEqual([
+      [1, ERROR_CODES.INVALID_EVENT],
+      [2, ERROR_CODES.EVENT_TIME_OUT_OF_RANGE],
+      [3, ERROR_CODES.PATH_OUTSIDE_APP],
+      [4, ERROR_CODES.PATH_OUTSIDE_APP],
+    ]);
+    expect(result.rejected[2]?.message).not.toContain('/other-app');
+    expect(counters.increment.mock.calls[0]?.[0]).toMatchObject({
+      source: 'browser',
+      accepted: 1,
+      rejected: 4,
+    });
+  });
+
+  it('a claimed hint fills claimed_email only; an implausible one warns once, on the first stored event', async () => {
+    const claimed = await ingest([browserEvent(), browserEvent()], {
+      user: { email: 'Someone@Libas.in' },
+    });
+    expect(claimed.warnings).toEqual([]);
+    const [rows] = webEvents.insertBatch.mock.calls[0]!;
+    expect(rows[0]).toMatchObject({
+      identitySource: 'client_claimed',
+      claimedEmail: 'someone@libas.in',
+      userEmail: null,
+      userKey: null,
+    });
+
+    const dropped = await ingest([{ bad: true }, browserEvent(), browserEvent()], {
+      user: { email: 'nope' },
+    });
+    expect(dropped.warnings).toEqual([
+      { index: 1, code: ERROR_CODES.FIELD_DROPPED, field: 'user.email' },
+    ]);
+  });
+
+  it('counts in-batch and DB duplicates and keeps them off the live feed', async () => {
+    const known = browserEvent();
+    webEvents.stored.add(known.eventId);
+    const fresh = browserEvent();
+    const result = await ingest([known, fresh, { ...fresh }]);
+
+    expect(result).toMatchObject({ accepted: 1, duplicates: 2 });
+    const [, liveRows] = liveFeed.recordWebEvents.mock.calls[0]!;
+    expect(liveRows.map((r) => r.eventId)).toEqual([fresh.eventId]);
+  });
+
+  it('creates missing partitions and retries the insert once', async () => {
+    webEvents.missingPartitionFailures = 1;
+    const result = await ingest([browserEvent()]);
+    expect(result.accepted).toBe(1);
+    expect(partitions.ensure).toHaveBeenCalledWith(PARTITION_MONTHS_BACK, PARTITION_MONTHS_AHEAD);
+    expect(webEvents.insertBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('bisects and rejects only the poison rows as DB_CONSTRAINT', async () => {
+    const events = Array.from({ length: 5 }, () => browserEvent());
+    webEvents.poisonEventIds.add(events[3]!.eventId.toLowerCase());
+    const result = await ingest(events);
+    expect(result.accepted).toBe(4);
+    expect(result.rejected.map((r) => [r.index, r.code])).toEqual([[3, ERROR_CODES.DB_CONSTRAINT]]);
+  });
+
+  it('DB unavailable → 503 INGEST_UNAVAILABLE, nothing counted', async () => {
+    webEvents.failWith = POOL_TIMEOUT;
+    await expect(ingest([browserEvent()])).rejects.toMatchObject({
+      statusCode: 503,
+      code: ERROR_CODES.INGEST_UNAVAILABLE,
+    });
+    expect(counters.increment).not.toHaveBeenCalled();
   });
 });

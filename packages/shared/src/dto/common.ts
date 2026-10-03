@@ -18,6 +18,15 @@ export interface TimeWindowDto {
   grain: Grain;
 }
 
+/**
+ * A short, non-paged list (top N) over a time window: Pages, Tools, Geography, top paths.
+ * `window` is echoed so charts (e.g. tool trends) can label their axis.
+ */
+export interface WindowedListDto<T> {
+  window: TimeWindowDto;
+  items: T[];
+}
+
 /** A KPI with its value over the previous equal-length window. */
 export interface MetricDto {
   value: number | null;

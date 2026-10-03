@@ -7,3 +7,5 @@
  */
 export const CACHE_CONTROL_HEADER = 'Cache-Control';
 export const DASHBOARD_ANALYTICS_CACHE = 'private, max-age=15';
+/** The Live backfill must never be reused: the page applies socket ticks on top of it. */
+export const DASHBOARD_LIVE_CACHE = 'private, no-store';

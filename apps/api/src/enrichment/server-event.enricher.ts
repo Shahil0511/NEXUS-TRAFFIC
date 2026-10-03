@@ -8,15 +8,16 @@
 import { ERROR_CODES, INGEST_LIMITS, type IngestWarningCode, type ServerEvent } from '@nexus/shared';
 import { toEndpointId } from '@nexus/shared/endpoint-id';
 
-import type { ActorColumns, ApiRequestInsert } from '../domain/inserts';
+import type { ApiRequestInsert } from '../domain/inserts';
 import { toApiRequestInsert } from '../domain/to-api-request-insert';
 import type { IngestContext } from '../domain/viewer';
-import type { GeoInfo, GeoIpEnricher } from './geo-ip.enricher';
+import { sdkLabel, toActorColumns } from './actor-columns';
+import type { GeoIpEnricher } from './geo-ip.enricher';
 import type { ResolvedIdentity, IdentityResolver } from './identity.resolver';
-import type { AnonymizedIp, IpAnonymizer } from './ip.anonymizer';
+import type { IpAnonymizer } from './ip.anonymizer';
 import type { PathSanitizer } from './path.sanitizer';
 import type { RouteNormalizer } from './route.normalizer';
-import type { ParsedUserAgent, UserAgentParser } from './user-agent.parser';
+import type { UserAgentParser } from './user-agent.parser';
 import type { UserKeyHasher } from './user-key.hasher';
 
 export interface EnrichmentWarning {
@@ -36,41 +37,6 @@ const WARNING_FIELDS = {
   userEmail: 'userEmail',
   userAgent: 'userAgent',
 } as const;
-
-interface ActorParts {
-  identity: ResolvedIdentity;
-  userKey: Buffer | null;
-  network: AnonymizedIp;
-  geo: GeoInfo | null;
-  userAgent: ParsedUserAgent;
-  sdk: string | null;
-}
-
-function toActorColumns(parts: ActorParts): ActorColumns {
-  const { identity, network, geo, userAgent } = parts;
-  return {
-    userEmail: identity.userEmail,
-    userKey: parts.userKey,
-    claimedEmail: identity.claimedEmail,
-    identitySource: identity.identitySource,
-    ip: network.ip,
-    ipHash: network.ipHash,
-    ipClass: network.ipClass,
-    geoCountry: geo?.country ?? null,
-    geoRegion: geo?.region ?? null,
-    geoCity: geo?.city ?? null,
-    geoLat: geo?.lat ?? null,
-    geoLon: geo?.lon ?? null,
-    uaBrowser: userAgent.browser,
-    uaOs: userAgent.os,
-    uaDevice: userAgent.device,
-    sdk: parts.sdk,
-  };
-}
-
-function sdkLabel(sdk: string | null): string | null {
-  return sdk ? sdk.slice(0, INGEST_LIMITS.maxSdkNameLength) : null;
-}
 
 /** WHY: composes the single-purpose enrichers in the one correct order (geo BEFORE anonymizing). */
 export class ServerEventEnricher {

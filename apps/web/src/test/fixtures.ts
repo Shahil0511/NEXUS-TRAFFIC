@@ -9,11 +9,24 @@ import type {
   EndpointStatsDto,
   ErrorSummaryDto,
   FailedRequestDto,
+  GeoCityDto,
+  GeoCountryDto,
   MeDto,
   OverviewSummaryDto,
   OverviewTimeseriesDto,
+  PageStatsDto,
+  SessionDetailDto,
+  SessionEventDto,
+  SessionSummaryDto,
+  TimelineItemDto,
+  TimelineItemKind,
   TimeseriesPointDto,
   TimeWindowDto,
+  ToolUsageDto,
+  TopPathDto,
+  UserProfileDto,
+  UserSummaryDto,
+  WindowedListDto,
 } from '@nexus/shared';
 
 export const WINDOW: TimeWindowDto = {
@@ -138,4 +151,200 @@ export const ENDPOINT_DETAIL: EndpointDetailDto = {
     { status: 404, count: 12 },
   ],
   slowest: [failedRequest('9d7a3c1e-1111-4a2b-9c3d-4e5f6a7b8c9d', 200)],
+};
+
+// ─── S3: users, journeys, pages, tools, geography ───────────────────────────
+
+/** A valid userKey (64 hex chars, the shape of the API's HMAC). */
+export const USER_KEY = 'a'.repeat(64);
+export const SESSION_ID = '7c1d2e3f-4a5b-4c6d-8e7f-001122334455';
+
+export function userSummary(overrides: Partial<UserSummaryDto> = {}): UserSummaryDto {
+  return {
+    userKey: USER_KEY,
+    email: 'buyer@libas.in',
+    lastSeenAt: '2026-10-01T07:45:00.000Z',
+    requests: 1_234,
+    pageViews: 56,
+    sessions: 7,
+    apps: ['ebo-sales'],
+    ...overrides,
+  };
+}
+
+export const USER_PROFILE: UserProfileDto = {
+  summary: userSummary(),
+  firstSeenAt: '2026-09-30T09:00:00.000Z',
+  failedRequests: 12,
+  topTools: [{ app: 'ebo-sales', tool: 'export-csv', uses: 9 }],
+  topPages: [{ app: 'ebo-sales', pathTemplate: '/orders/:id', views: 31 }],
+  countries: ['IN'],
+};
+
+export function timelineItem(
+  eventId: string,
+  kind: TimelineItemKind,
+  overrides: Partial<TimelineItemDto> = {},
+): TimelineItemDto {
+  return {
+    eventId,
+    occurredAt: '2026-10-01T07:40:00.000Z',
+    kind,
+    app: 'ebo-sales',
+    path: '/orders/123',
+    sessionId: SESSION_ID,
+    identitySource: 'sso_cookie',
+    method: kind === 'api' ? 'GET' : null,
+    status: kind === 'api' ? 200 : null,
+    durationMs: kind === 'api' ? 84 : null,
+    tool: kind === 'tool_use' ? 'export-csv' : null,
+    visibleMs: kind === 'page_view' ? 65_000 : null,
+    name: null,
+    ip: null,
+    ...overrides,
+  };
+}
+
+export function sessionSummary(overrides: Partial<SessionSummaryDto> = {}): SessionSummaryDto {
+  return {
+    app: 'ebo-sales',
+    sessionId: SESSION_ID,
+    startedAt: '2026-10-01T07:30:00.000Z',
+    lastSeenAt: '2026-10-01T07:42:00.000Z',
+    durationMs: 720_000,
+    pageViews: 4,
+    toolUses: 2,
+    visibleMs: 540_000,
+    userKey: USER_KEY,
+    userEmail: 'buyer@libas.in',
+    claimedEmail: null,
+    identitySource: 'sso_cookie',
+    entryPath: '/orders',
+    exitPath: '/orders/:id',
+    country: 'IN',
+    ip: null,
+    ...overrides,
+  };
+}
+
+/** A claimed (browser-hint) identity: shown, flagged, never a user. */
+export const CLAIMED_SESSION = sessionSummary({
+  sessionId: '8d2e3f40-5b6c-4d7e-9f80-112233445566',
+  userKey: null,
+  userEmail: null,
+  claimedEmail: 'someone@libas.in',
+  identitySource: 'client_claimed',
+  ip: '203.0.113.9',
+});
+
+export function sessionEvent(
+  eventId: string,
+  kind: TimelineItemKind,
+  overrides: Partial<SessionEventDto> = {},
+): SessionEventDto {
+  return {
+    eventId,
+    occurredAt: '2026-10-01T07:30:00.000Z',
+    seq: null,
+    kind,
+    path: '/orders',
+    tool: kind === 'tool_use' ? 'export-csv' : null,
+    visibleMs: kind === 'page_view' ? 42_000 : null,
+    name: kind === 'custom' ? 'filter-applied' : null,
+    method: kind === 'api' ? 'GET' : null,
+    status: kind === 'api' ? 200 : null,
+    durationMs: kind === 'api' ? 120 : null,
+    ...overrides,
+  };
+}
+
+export const SESSION_DETAIL: SessionDetailDto = {
+  summary: sessionSummary(),
+  events: [
+    sessionEvent('e1', 'page_view', { seq: 1 }),
+    sessionEvent('e2', 'tool_use', { seq: 2, occurredAt: '2026-10-01T07:30:42.000Z' }),
+    sessionEvent('e3', 'api', {
+      occurredAt: '2026-10-01T07:30:43.000Z',
+      path: '/api/orders/export',
+      status: 500,
+    }),
+    sessionEvent('e4', 'page_view', {
+      seq: 3,
+      occurredAt: '2026-10-01T07:31:05.000Z',
+      path: '/orders/:id',
+      visibleMs: 125_000,
+    }),
+  ],
+};
+
+export const TOP_PATHS: WindowedListDto<TopPathDto> = {
+  window: WINDOW,
+  items: [{ app: 'ebo-sales', steps: ['/', '/orders', '/orders/:id'], sessions: 18 }],
+};
+
+export const PAGE_STATS: WindowedListDto<PageStatsDto> = {
+  window: WINDOW,
+  items: [
+    {
+      app: 'ebo-sales',
+      pathTemplate: '/orders/:id',
+      views: 420,
+      uniqueSessions: 200,
+      avgVisibleMs: 48_000,
+      p50VisibleMs: 31_000,
+      exits: 50,
+    },
+    {
+      app: 'ebo-sales',
+      pathTemplate: '/reports',
+      views: 12,
+      uniqueSessions: 10,
+      avgVisibleMs: null,
+      p50VisibleMs: null,
+      exits: 0,
+    },
+  ],
+};
+
+export const TOOL_USAGE: WindowedListDto<ToolUsageDto> = {
+  window: WINDOW,
+  items: [
+    {
+      app: 'ebo-sales',
+      tool: 'export-csv',
+      uses: 1_250,
+      distinctUsers: 34,
+      distinctSessions: 80,
+      lastUsedAt: '2026-10-01T07:55:00.000Z',
+      trend: [
+        { bucket: '2026-10-01T06:00:00.000Z', uses: 3 },
+        { bucket: '2026-10-01T07:00:00.000Z', uses: 40 },
+      ],
+    },
+  ],
+};
+
+export const GEO_COUNTRIES: WindowedListDto<GeoCountryDto> = {
+  window: WINDOW,
+  items: [
+    { country: 'IN', requests: 9_800, pageViews: 600, users: 40 },
+    { country: 'AE', requests: 120, pageViews: 0, users: 2 },
+    { country: null, requests: 15, pageViews: 3, users: 0 },
+  ],
+};
+
+export const GEO_CITIES: WindowedListDto<GeoCityDto> = {
+  window: WINDOW,
+  items: [
+    {
+      country: 'IN',
+      region: 'Maharashtra',
+      city: 'Mumbai',
+      lat: 19.07,
+      lon: 72.88,
+      requests: 7_000,
+      pageViews: 450,
+      users: 30,
+    },
+  ],
 };

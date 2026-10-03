@@ -9,7 +9,12 @@ import { ERROR_CODES, type ServerIngestEnvelope } from '@nexus/shared';
 import type { Lookup } from 'geoip-lite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { fake, serverEvent, silentLogger } from '../../test/ingest-fixtures';
+import {
+  fake,
+  serverEvent,
+  silentLogger,
+  testBrowserEventEnricher,
+} from '../../test/ingest-fixtures';
 import {
   RUN_DB_TESTS,
   createTestDatabase,
@@ -34,12 +39,15 @@ import { ServerEventEnricher } from '../enrichment/server-event.enricher';
 import { UserAgentParser } from '../enrichment/user-agent.parser';
 import { UserKeyHasher } from '../enrichment/user-key.hasher';
 import { SystemClock } from '../lib/clock';
+import { LiveBroadcaster } from '../live/live.broadcaster';
 import { LiveFeed } from '../live/live-feed';
+import { LiveWindow } from '../live/live-window';
 import { ApiKeyRepository } from '../repositories/api-key.repository';
 import { ApiRequestIngestRepository } from '../repositories/api-request-ingest.repository';
 import { AppRepository } from '../repositories/app.repository';
 import { IngestCounterRepository } from '../repositories/ingest-counter.repository';
 import { PartitionRepository } from '../repositories/partition.repository';
+import { WebEventIngestRepository } from '../repositories/web-event-ingest.repository';
 import { IngestService } from './ingest.service';
 
 /** This IP "geolocates" to an invalid lower-case country → violates api_requests_geo_country_check. */
@@ -85,23 +93,35 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
       createdBy: 'admin@libas.in',
     });
     secretKey = generated.plaintext;
-    authenticator = new AppKeyAuthenticator(keys, apps, hasher, new AppKeyCache(clock), clock, silentLogger());
+    authenticator = new AppKeyAuthenticator(
+      keys,
+      apps,
+      hasher,
+      new AppKeyCache(clock),
+      clock,
+      silentLogger(),
+    );
 
-    liveFeed = new LiveFeed();
+    const liveWindow = new LiveWindow();
+    liveFeed = new LiveFeed(liveWindow, new LiveBroadcaster(liveWindow), clock);
     const enricher = new ServerEventEnricher(
       new PathSanitizer(),
       new RouteNormalizer(),
       new IpAnonymizer('full', 'i'.repeat(64)),
       poisonGeo(),
       new UserAgentParser(),
-      new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) })),
+      new IdentityResolver(
+        fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) }),
+      ),
       new UserKeyHasher('u'.repeat(64)),
     );
     service = new IngestService(
       new ApiRequestIngestRepository(db.appPool),
+      new WebEventIngestRepository(db.appPool),
       new IngestCounterRepository(db.appPool),
       new PartitionRepository(db.appPool),
       enricher,
+      testBrowserEventEnricher(),
       new EventTimeGuard(),
       liveFeed,
       silentLogger(),
@@ -119,15 +139,20 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
 
   function ingest(events: unknown[], dryRun = false) {
     const envelope: ServerIngestEnvelope = { sentAt: new Date().toISOString(), events };
-    return service.ingestServerEvents(envelope, { ...auth, receivedAt: clock.now(), sdk: 'it@1' }, { dryRun });
+    return service.ingestServerEvents(
+      envelope,
+      { ...auth, receivedAt: clock.now(), sdk: 'it@1' },
+      { dryRun },
+    );
   }
 
   it('authenticates a generated key and records its usage', async () => {
     expect(auth.app.id).toBe(app.id);
     await vi.waitFor(async () => {
-      const { rows } = await db.appPool.query(`SELECT last_used_at, last_sdk FROM traffic.api_keys WHERE id = $1`, [
-        auth.key.id,
-      ]);
+      const { rows } = await db.appPool.query(
+        `SELECT last_used_at, last_sdk FROM traffic.api_keys WHERE id = $1`,
+        [auth.key.id],
+      );
       expect(rows[0]).toMatchObject({ last_sdk: '@nexus/express@1.0.0' });
       expect(rows[0].last_used_at).toBeInstanceOf(Date);
     });
@@ -137,16 +162,29 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
     await expect(authenticator.authenticate(secretKey, 'publishable')).rejects.toMatchObject({
       code: ERROR_CODES.SECRET_KEY_EXPOSED,
     });
-    const { rows } = await db.appPool.query(`SELECT exposed_at FROM traffic.api_keys WHERE id = $1`, [auth.key.id]);
+    const { rows } = await db.appPool.query(
+      `SELECT exposed_at FROM traffic.api_keys WHERE id = $1`,
+      [auth.key.id],
+    );
     expect(rows[0].exposed_at).toBeInstanceOf(Date);
   });
 
   it('stores a batch with mapped columns and reports a resend as duplicates', async () => {
     const events = [
-      recentEvent({ status: 404, ip: '::ffff:49.36.1.1', userEmail: 'Saurabh@Libas.in', path: '/ebo-sales/api/x?t=1' }),
+      recentEvent({
+        status: 404,
+        ip: '::ffff:49.36.1.1',
+        userEmail: 'Saurabh@Libas.in',
+        path: '/ebo-sales/api/x?t=1',
+      }),
       recentEvent(),
     ];
-    expect(await ingest(events)).toEqual({ accepted: 2, duplicates: 0, rejected: [], warnings: [] });
+    expect(await ingest(events)).toEqual({
+      accepted: 2,
+      duplicates: 0,
+      rejected: [],
+      warnings: [],
+    });
     expect(await ingest(events)).toMatchObject({ accepted: 0, duplicates: 2 });
 
     const { rows } = await db.appPool.query(
@@ -166,7 +204,13 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
   });
 
   it('bisects around a row the database rejects and keeps its original index', async () => {
-    const events = [recentEvent(), recentEvent(), recentEvent({ ip: POISON_IP }), recentEvent(), recentEvent()];
+    const events = [
+      recentEvent(),
+      recentEvent(),
+      recentEvent({ ip: POISON_IP }),
+      recentEvent(),
+      recentEvent(),
+    ];
     const record = vi.spyOn(liveFeed, 'recordApiRequests');
     const result = await ingest([{ bogus: true }, ...events]);
 
@@ -175,9 +219,10 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
       [0, ERROR_CODES.INVALID_EVENT],
       [3, ERROR_CODES.DB_CONSTRAINT],
     ]);
-    const { rows } = await db.appPool.query(`SELECT count(*)::int AS n FROM traffic.api_requests WHERE event_id = ANY($1)`, [
-      events.map((e) => e.eventId),
-    ]);
+    const { rows } = await db.appPool.query(
+      `SELECT count(*)::int AS n FROM traffic.api_requests WHERE event_id = ANY($1)`,
+      [events.map((e) => e.eventId)],
+    );
     expect(rows[0].n).toBe(4);
     expect(record.mock.calls.at(-1)?.[1]).toHaveLength(4);
   });
@@ -185,7 +230,10 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
   it('dryRun writes nothing', async () => {
     const event = recentEvent();
     expect(await ingest([event], true)).toMatchObject({ accepted: 1, dryRun: true });
-    const { rows } = await db.appPool.query(`SELECT 1 FROM traffic.api_requests WHERE event_id = $1`, [event.eventId]);
+    const { rows } = await db.appPool.query(
+      `SELECT 1 FROM traffic.api_requests WHERE event_id = $1`,
+      [event.eventId],
+    );
     expect(rows).toHaveLength(0);
   });
 

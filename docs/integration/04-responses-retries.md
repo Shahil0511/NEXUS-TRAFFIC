@@ -94,6 +94,6 @@ send(batch):
 |---|---|---|
 | Events per request | {{SERVER_MAX_EVENTS}} | {{BROWSER_MAX_EVENTS}} |
 | Body size | {{SERVER_MAX_BODY_KB}} KiB | {{BROWSER_MAX_BODY_KB}} KiB |
-| Rate | {{RATE_SERVER_PER_MIN}} requests / minute / key | {{RATE_BROWSER_PER_MIN}} requests / minute / session |
+| Rate | {{RATE_SERVER_PER_MIN}} requests / minute / key | {{RATE_BROWSER_PER_MIN}} requests / minute / session ({{RATE_BROWSER_APP_PER_MIN}} / minute / app) |
 | Event time window | {{MAX_BACKDATE_DAYS}} days back, {{MAX_FUTURE_MINUTES}} minutes ahead | same |
 | Failed key checks | {{RATE_IP_FAILURES_PER_MIN}} / minute / IP, then `429` | same |

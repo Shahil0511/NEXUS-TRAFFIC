@@ -265,6 +265,10 @@ export const SECTIONS: readonly Section[] = [
         description: 'Server-ingest requests per key per minute.',
       },
       {
+        key: 'INGEST_RATE_LIMIT_BROWSER_PER_MIN',
+        description: 'Browser beacons per publishable key per minute (all sessions of one app).',
+      },
+      {
         key: 'INGEST_RATE_LIMIT_BROWSER_PER_SESSION_PER_MIN',
         description: 'Browser beacons per session per minute.',
       },

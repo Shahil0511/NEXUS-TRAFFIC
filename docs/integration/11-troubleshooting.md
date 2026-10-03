@@ -54,3 +54,17 @@ this.
 | p95 latency very high | downloads/SSE counted as normal requests | mark them `kind: "stream"` (the snippets detect common cases) |
 | health checks dominate | not skipped | skip `/health`, `/ready`, static files |
 | nothing arrives, no errors in logs | `NEXUS_URL` empty in that environment (the client is a no-op) | set it; check the process environment, not just `.env` |
+
+## Integration page warnings
+
+The dashboard's Integration page ([chapter 10](10-verify.md)) flags these per app:
+
+| Warning | Cause | Fix |
+|---|---|---|
+| **exposed secret key** | an `nx_sk_` key reached the browser endpoint (`403 SECRET_KEY_EXPOSED`) | treat it as leaked: new key → deploy → revoke the old one ([chapter 1](01-getting-keys.md)); use the `nx_pk_` key in the browser |
+| **private IPs** (more than 90 % of server events) | `trustProxyHops` too low — you record your own gateway | count your proxies ([chapter 6](06-client-ip.md)) |
+| **clock skew** | the sending host's clock is off (skew = our receive time − your `sentAt`) | enable NTP; compare with `serverTime` from `/v1/ingest/verify` |
+| **rejected events** | events break the contract | the `rejected[].code` of our 202 responses names the field ([chapter 4](04-responses-retries.md)) |
+| **rate limited** | more than the per-key request limit | batch events instead of one request per event |
+| **stale** | events used to arrive but stopped | a deploy dropped the middleware, `NEXUS_URL` or the key; check the `[nexus]` warnings in your logs |
+| **never** | no event has ever arrived | run the checks of [chapter 10](10-verify.md) from the host that sends |

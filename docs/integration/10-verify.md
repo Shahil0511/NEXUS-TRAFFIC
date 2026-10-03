@@ -52,8 +52,30 @@ before going live, or every retry will count twice.
 
 ## 4. Real traffic
 
-Deploy, click through your app for a minute, then ask {{DOCS_CONTACT}} for a look at your app in the
-dashboard (the self-service *Integration Health* page is on its way). What good looks like:
+Deploy, click through your app for a minute, then open your app on the dashboard's **Integration**
+page: [{{PUBLIC_URL}}/integration]({{PUBLIC_URL}}/integration) (portal sign-in). No dashboard access?
+Ask {{DOCS_CONTACT}} to check it for you.
+
+### What the Integration page shows
+
+| Item | What it tells you |
+|---|---|
+| Status | **healthy** (events are arriving), **stale** (nothing for a while — did a deploy drop the middleware or `NEXUS_URL`?) or **never** (no event has ever arrived) |
+| Last server event / last browser event | when your backend middleware and your frontend tracker last delivered |
+| Counters (last 24 h) | per source: `accepted`, `duplicates`, `rejected`, `rate limited` |
+| SDKs | every SDK name@version that sent events, with its clock skew (our receive time minus your `sentAt`) |
+| Warnings | the problems below — each one links to the chapter that fixes it |
+
+| Warning | Meaning | Fix |
+|---|---|---|
+| Exposed secret key | an `nx_sk_` key was sent to the browser endpoint | treat it as leaked: create a new key, deploy it, revoke the old one ([chapter 1](01-getting-keys.md)) |
+| Private IPs (> 90 %) | your events carry your own proxy's address, not the user's | set `trustProxyHops` to your real proxy count ([chapter 6](06-client-ip.md)) |
+| Clock skew | your server's clock is off by more than about a minute | enable NTP on the host; events too far off are rejected |
+| Rejected events | some events break the contract | read `rejected[].code` in our responses ([chapter 4](04-responses-retries.md), [chapter 11](11-troubleshooting.md)) |
+| Rate limited | you hit the per-key request limit | batch events — never one request per event |
+| Stale / never | events stopped, or never started | check `NEXUS_URL` and the key in **this** environment, then steps 1–3 above |
+
+What good looks like:
 
 | Check | Good | If not |
 |---|---|---|

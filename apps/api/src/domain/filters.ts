@@ -53,3 +53,26 @@ export interface FailureListOptions {
   after: EventKeyset | null;
   limit: number;
 }
+
+/** Paging + search of `WebEventQueryRepository.listUsers` (offset: aggregate list). */
+export interface UserListOptions {
+  /** Case-insensitive substring of the verified email. */
+  search?: string;
+  limit: number;
+  offset: number;
+}
+
+/** Paging of `WebEventQueryRepository.listUserTimeline` (keyset, newest first). */
+export interface TimelineOptions {
+  /** Items strictly older than this keyset; null = first page. */
+  after: EventKeyset | null;
+  limit: number;
+}
+
+/** Paging + optional user scope of `WebEventQueryRepository.listSessions` (offset). */
+export interface SessionListOptions {
+  /** Stored user_key (bytea): only sessions in which this user was seen. */
+  userKey?: Buffer;
+  limit: number;
+  offset: number;
+}

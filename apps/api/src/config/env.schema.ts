@@ -70,6 +70,9 @@ export const apiEnvSchema = z.object({
   /** Extra browser origins allowed in development (comma-separated). */
   CORS_DEV_ORIGINS: csv,
   INGEST_RATE_LIMIT_SERVER_PER_MIN: z.coerce.number().int().min(1).default(600),
+  /** Browser beacons per publishable key per minute (all sessions of one app together; DB guard). */
+  INGEST_RATE_LIMIT_BROWSER_PER_MIN: z.coerce.number().int().min(1).default(6000),
+  /** Browser beacons per (app, sessionId) per minute (one runaway tab). */
   INGEST_RATE_LIMIT_BROWSER_PER_SESSION_PER_MIN: z.coerce.number().int().min(1).default(60),
   /** Failed key authentications allowed per IP per minute. */
   INGEST_IP_FAILURE_PER_MIN: z.coerce.number().int().min(1).default(60),

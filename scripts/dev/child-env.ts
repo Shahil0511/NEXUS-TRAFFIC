@@ -13,7 +13,7 @@
  */
 import path from 'node:path';
 
-import { PUBLIC_BASE_PATH } from '@nexus/shared';
+import { PUBLIC_BASE_PATH, SOCKET_PATH } from '@nexus/shared';
 
 import type { DevEnvValues } from './env-file';
 import { API_ORIGIN, API_PORT, DEV_DB, devDbUrl, REPO_ROOT, WEB_ORIGIN } from './topology';
@@ -79,6 +79,7 @@ export function apiEnv(values: DevEnvValues, input: DevTopologyInput): EnvMap {
     TRUST_PROXY_HOPS: '0',
     CORS_DEV_ORIGINS: [WEB_ORIGIN, input.launcherOrigin].join(','),
     INGEST_RATE_LIMIT_SERVER_PER_MIN: '600',
+    INGEST_RATE_LIMIT_BROWSER_PER_MIN: '6000',
     INGEST_RATE_LIMIT_BROWSER_PER_SESSION_PER_MIN: '60',
     INGEST_IP_FAILURE_PER_MIN: '60',
     DOCS_CONTACT: 'local dev',
@@ -98,7 +99,8 @@ export function webEnv(values: DevEnvValues, input: DevTopologyInput): EnvMap {
     PUBLIC_ORIGIN: WEB_ORIGIN,
     PUBLIC_BASE_PATH,
     ...dashboardPolicy(input),
-    NEXT_PUBLIC_SOCKET_PATH: '/socket.io',
+    // Same public path as production; next.config.ts rewrites it to the api in dev.
+    NEXT_PUBLIC_SOCKET_PATH: `${PUBLIC_BASE_PATH}${SOCKET_PATH}`,
     NEXT_TELEMETRY_DISABLED: '1',
   };
 }

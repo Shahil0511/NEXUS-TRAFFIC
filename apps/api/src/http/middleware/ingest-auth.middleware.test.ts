@@ -1,14 +1,15 @@
-import { ERROR_CODES, INGEST_HEADERS, type KeyKind } from '@nexus/shared';
+import { browserIngestEnvelopeSchema, ERROR_CODES, INGEST_HEADERS, type KeyKind } from '@nexus/shared';
 import express, { type RequestHandler } from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
 import { apiKeyRow, appRow, fake, silentLogger } from '../../../test/ingest-fixtures';
 import type { AppKeyAuthenticator } from '../../auth/app-key.authenticator';
-import { UnauthorizedError } from '../../errors/app-error';
+import { ForbiddenError, UnauthorizedError } from '../../errors/app-error';
 import { requireIngest } from '../request-accessors';
 import { errorHandlerMiddleware } from './error-handler.middleware';
-import { anyKeyAuthMiddleware, serverKeyAuthMiddleware } from './ingest-auth.middleware';
+import { anyKeyAuthMiddleware, publishableKeyAuthMiddleware, serverKeyAuthMiddleware } from './ingest-auth.middleware';
+import { validateBody } from './validate.middleware';
 
 const AUTHENTICATED = { app: appRow(), key: apiKeyRow() };
 
@@ -51,5 +52,63 @@ describe('ingest auth middleware', () => {
     const { app, authenticate } = setup(serverKeyAuthMiddleware);
     await request(app).get('/probe');
     expect(authenticate.mock.calls[0]?.[0]).toBeUndefined();
+  });
+});
+
+describe('publishableKeyAuthMiddleware', () => {
+  const BROWSER_APP = appRow({ browser_ingest_enabled: true });
+  const PUBLISHABLE = apiKeyRow({ kind: 'publishable' });
+
+  function browserSetup(result: () => { app: ReturnType<typeof appRow>; key: ReturnType<typeof apiKeyRow> }) {
+    const authenticate = vi.fn(async (_raw: string | undefined, _expected: KeyKind | 'any', _sdk?: string | null) =>
+      result(),
+    );
+    const app = express();
+    app.post(
+      '/beacon',
+      express.json(),
+      validateBody(browserIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
+      publishableKeyAuthMiddleware(fake<AppKeyAuthenticator>({ authenticate })),
+      (_req, res) => {
+        res.json({ keyId: requireIngest(res).key.id });
+      },
+    );
+    app.use(errorHandlerMiddleware(silentLogger()));
+    return { app, authenticate };
+  }
+
+  const envelope = (extra: Record<string, unknown> = {}) => ({
+    key: 'nx_pk_body',
+    sentAt: '2026-10-01T09:59:59.000Z',
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    events: [{}],
+    ...extra,
+  });
+
+  it('reads the key from the BODY, requires a publishable key and records the client sdk', async () => {
+    const { app, authenticate } = browserSetup(() => ({ app: BROWSER_APP, key: PUBLISHABLE }));
+    const res = await request(app)
+      .post('/beacon')
+      .set(INGEST_HEADERS.key, 'nx_sk_header_is_ignored')
+      .send(envelope({ client: { sdk: '@nexus/react', version: '1.0.0' } }));
+    expect(res.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledWith('nx_pk_body', 'publishable', '@nexus/react@1.0.0');
+  });
+
+  it('403 BROWSER_INGEST_DISABLED when the app has browser ingest off', async () => {
+    const { app } = browserSetup(() => ({ app: appRow({ browser_ingest_enabled: false }), key: PUBLISHABLE }));
+    const res = await request(app).post('/beacon').send(envelope());
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe(ERROR_CODES.BROWSER_INGEST_DISABLED);
+  });
+
+  it('renders the authenticator verdict (e.g. SECRET_KEY_EXPOSED) through the error envelope', async () => {
+    const { app } = browserSetup(() => {
+      throw new ForbiddenError('A secret key was sent to a browser endpoint', ERROR_CODES.SECRET_KEY_EXPOSED);
+    });
+    const res = await request(app).post('/beacon').send(envelope({ key: 'nx_sk_oops' }));
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe(ERROR_CODES.SECRET_KEY_EXPOSED);
+    expect(JSON.stringify(res.body)).not.toContain('nx_sk_oops');
   });
 });

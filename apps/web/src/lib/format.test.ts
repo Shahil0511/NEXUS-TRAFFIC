@@ -6,12 +6,15 @@ import {
   formatCompact,
   formatDateTime,
   formatDeltaPct,
+  formatCountry,
   formatDuration,
+  formatElapsed,
   formatInteger,
   formatPercent,
   formatWindowCaption,
   fromIstInputValue,
   toIstInputValue,
+  UNKNOWN_COUNTRY,
 } from './format';
 
 describe('format helpers', () => {
@@ -65,5 +68,20 @@ describe('format helpers', () => {
       grain: 'hour',
     });
     expect(caption).toMatch(/^30 Sept?, 13:30 – 1 Oct, 13:30 IST · hourly buckets$/);
+  });
+
+  it('formats session offsets as +m:ss / +h:mm:ss', () => {
+    expect(formatElapsed(0)).toBe('+0:00');
+    expect(formatElapsed(42_000)).toBe('+0:42');
+    expect(formatElapsed(754_900)).toBe('+12:34');
+    expect(formatElapsed(3_723_000)).toBe('+1:02:03');
+    expect(formatElapsed(null)).toBe(EMPTY_VALUE);
+  });
+
+  it('names countries and labels unknown ones', () => {
+    expect(formatCountry('IN')).toBe('India');
+    expect(formatCountry('ae')).toBe('United Arab Emirates');
+    expect(formatCountry(null)).toBe(UNKNOWN_COUNTRY);
+    expect(formatCountry('EU-X')).toBe('EU-X');
   });
 });

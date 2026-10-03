@@ -46,7 +46,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     label: 'Monitor',
     items: [
       { id: 'overview', label: 'Overview', href: PAGES.overview(), icon: LayoutDashboard },
-      { id: 'live', label: 'Live', href: PAGES.live(), icon: Activity, comingIn: 'S4' },
+      { id: 'live', label: 'Live', href: PAGES.live(), icon: Activity },
     ],
   },
   {
@@ -61,20 +61,18 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     id: 'frontend',
     label: 'Frontend',
     items: [
-      { id: 'users', label: 'Users', href: PAGES.users(), icon: Users, comingIn: 'S3' },
+      { id: 'users', label: 'Users', href: PAGES.users(), icon: Users },
       {
         id: 'journeys',
         label: 'Journeys',
         href: PAGES.journeys(),
         icon: Waypoints,
-        comingIn: 'S3',
       },
       {
         id: 'pages',
         label: 'Pages & Tools',
         href: PAGES.pages(),
         icon: MousePointerClick,
-        comingIn: 'S3',
         alsoActiveOn: [PAGES.tools()],
       },
       {
@@ -82,7 +80,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Geography',
         href: PAGES.geography(),
         icon: Globe2,
-        comingIn: 'S3',
       },
     ],
   },
@@ -90,14 +87,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     id: 'admin',
     label: 'Setup',
     items: [
-      {
-        id: 'integration',
-        label: 'Integration',
-        href: PAGES.integration(),
-        icon: PlugZap,
-        comingIn: 'S5',
-      },
-      { id: 'apps', label: 'Apps', href: PAGES.apps(), icon: AppWindow, comingIn: 'S5' },
+      { id: 'integration', label: 'Integration', href: PAGES.integration(), icon: PlugZap },
+      { id: 'apps', label: 'Apps', href: PAGES.apps(), icon: AppWindow },
     ],
   },
 ];

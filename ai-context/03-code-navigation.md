@@ -1,7 +1,7 @@
 # 03 — code navigation
 
 Where to start reading code, which folder is which layer, and the chains that exist: server ingest
-and app/key admin (S1), and the dashboard read side UI → SQL for Overview / API Routes / Errors (S2). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
+and app/key admin (S1, admin UI + Integration Health in S5 §4/§4b), and the dashboard read side UI → SQL for Overview / API Routes / Errors (S2). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
 for status.
 
 ## 1. Entry files
@@ -10,7 +10,9 @@ for status.
 |---|---|
 | `packages/shared/src/routes.ts` | `ROUTES`: every API path. Start every trace here (Shift+F12 on a leaf). |
 | `packages/shared/src/ingest/schemas.ts` | The public ingest contract v1 (zod), plus `examples.ts`. |
-| `apps/api/src/server.ts` | Process entry: config → container → schema guard → partitions → listen → jobs. |
+| `apps/api/src/server.ts` | Process entry: config → container → schema guard → partitions → listen → realtime → jobs. |
+| `apps/api/src/socket.ts` | `createRealtime`: Socket.io on the HTTP server (origin policy, `/live` namespace auth, subscriptions, tick timers). |
+| `packages/shared/src/events.ts` | The socket contract: `SOCKET_NAMESPACES`, `SOCKET_EVENTS`, typed event maps, `liveRoom()`, `LIVE_TICK_MS`. |
 | `apps/api/src/container.ts` | THE composition root; every class is built here once. |
 | `apps/api/src/app.ts` | Express wiring (helmet, request id, access log, `/api` router, 404, errors). |
 | `apps/api/src/http/routes/index.ts` | THE route table: path → middleware chain → controller method. |
@@ -26,24 +28,25 @@ for status.
 | `http/middleware/` | cross-cutting HTTP | auth, CSRF, body parsing, validation, rate limits, errors |
 | `http/controllers/` | HTTP adapters | arrow-property methods named like the `ROUTES` leaf; no logic |
 | `services/` | use cases | orchestrate; method name = leaf name; `@see` to repositories |
-| `enrichment/` | pure-ish transforms | one transformation per class; `ServerEventEnricher` orchestrates |
+| `enrichment/` | pure-ish transforms | one transformation per class; `ServerEventEnricher` / `BrowserEventEnricher` orchestrate |
 | `auth/` | key + SSO auth | parse / hash / generate / cache keys; read the SSO cookie |
-| `domain/` | types + pure rules | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO, IP admin-only), `to-api-request-insert.ts` (wire → row); read side: `filters.ts` (repository inputs), `compute-deltas.ts` (KPI deltas), `timeseries-gaps.ts` (zero-filled IST buckets), `pagination.ts` (limit + 1, cursors), `numbers.ts` (rounding) |
+| `domain/` | types + pure rules | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO, IP admin-only), `to-api-request-insert.ts` / `to-web-event-insert.ts` (wire → row), `base-path.ts` (browser base-path rule), `browser-sdk.ts`; read side: `filters.ts` (repository inputs), `compute-deltas.ts` (KPI deltas), `timeseries-gaps.ts` (zero-filled IST buckets), `session-replay.ts` (API calls interleaved into a replay), `pagination.ts` (limit + 1, cursors), `numbers.ts` (rounding) |
 | `repositories/` | SQL | one class per table concern; `@see ../../migrations/NNNN_x.sql` |
 | `db/` | DB plumbing | pools, transactions, pg error classifiers, migration runner, schema guard |
 | `jobs/` | timers | partition maintenance, retention (listed in `jobs/scheduler.ts`) |
-| `live/` | realtime | `LiveFeed` buffer (Socket.io arrives in S4) |
+| `live/` | realtime | `LiveFeed` (ingest → live) → `LiveWindow` (current-minute counters) + `LiveBroadcaster` (per-role rooms); socket auth, origin policy, subscriptions, sweeper, `LiveTickScheduler` |
 | `config/`, `lib/`, `errors/`, `context/`, `lifecycle/` | infrastructure | env schema, logger, clock, `AppError`s, request context, shutdown |
 
 Tests: unit tests sit next to the file (`*.test.ts`); DB suites are `*.integration.test.ts` and
 self-skip unless `RUN_DB_TESTS=1`. Shared helpers live in `apps/api/test/` (`db/test-database.ts`
 creates a fresh migrated database per suite). Contract tests: `apps/api/test/routes-contract.test.ts`
-(every built leaf registered once, `EXPECTED_PENDING` lists what S2–S5 still add),
+(every leaf registered exactly once; `PENDING_ROUTE_LEAVES` is empty since S5),
 `apps/api/test/no-scaffolding.test.ts`, `apps/api/test/db/schema-parity.integration.test.ts`.
-End to end: `apps/api/test/e2e/ingest.integration.test.ts` (S1) and
-`apps/api/test/e2e/dashboard.integration.test.ts` (S2). The S2 read side is proven on a real database by
-`apps/api/test/db/analytics-queries.integration.test.ts`; both S2 suites share the dataset in
-`apps/api/test/db/analytics-seed.ts`.
+End to end: `apps/api/test/e2e/ingest.integration.test.ts` (S1 server + S3 browser beacons) and
+`apps/api/test/e2e/dashboard.integration.test.ts` (S2 + S3 read routes). The read side is proven on a real
+database by `apps/api/test/db/analytics-queries.integration.test.ts`; the datasets live in
+`apps/api/test/db/analytics-seed.ts` (`seedAnalytics` for S2, `seedJourneys` for the S3 browser sessions,
+each in its own database).
 
 ## 3. The server ingest chain (`POST /api/v1/ingest/server`)
 
@@ -76,6 +79,46 @@ violation bisects the batch so only the bad rows come back as `DB_CONSTRAINT`; D
 `INGEST_UNAVAILABLE` with Retry-After. `GET /api/v1/ingest/verify` runs `anyKeyAuthMiddleware` →
 `IngestController.verify` → `IngestService.verify` (no DB write besides the usage touch).
 
+### 3b. The browser ingest chain (`POST /api/v1/ingest/browser`, S3)
+
+Same storage path as §3, but the key is in the BODY (sendBeacon sends `text/plain`, no custom headers),
+so auth runs after parsing; the actor (identity, IP, geo, UA) is resolved ONCE per beacon.
+
+```
+packages/shared/src/routes.ts                       ROUTES.ingest.browser = { method: 'POST', path: '/v1/ingest/browser' }
+apps/api/src/http/routes/index.ts                   r.use(path, browserIngestPreflight)  (OPTIONS only: 204, reflects a
+                                                    registered origin — AppRepository.anyAllowsOrigin)
+                                                    r.post(ROUTES.ingest.browser.path, …chain…, ctl.ingest.browser)
+  apps/api/src/http/middleware/rate-limit.middleware.ts      ipFailureLimitMiddleware (own instance: browserIpFailureLimit)
+  apps/api/src/http/middleware/beacon-body.middleware.ts     beaconBodyMiddleware     (text/plain | application/json, 60 KiB)
+  apps/api/src/http/middleware/parse-beacon-json.middleware.ts  parseBeaconJsonMiddleware (malformed → INVALID_ENVELOPE)
+  apps/api/src/http/middleware/validate.middleware.ts        validateBody(browserIngestEnvelopeSchema)
+  apps/api/src/http/middleware/ingest-auth.middleware.ts     publishableKeyAuthMiddleware (body `key`; AppKeyAuthenticator
+                                                    with 'publishable': secret → markExposed + 403 SECRET_KEY_EXPOSED,
+                                                    APP_DISABLED; then 403 BROWSER_INGEST_DISABLED)
+  apps/api/src/http/middleware/browser-ingest-cors.middleware.ts  browserIngestCorsMiddleware (reflects Origin only if in
+                                                    app.allowed_origins, with credentials; never *)
+  apps/api/src/http/middleware/origin-guard.middleware.ts    originGuardMiddleware   (Origin decides; 'null' rejected; Referer
+                                                    only when Origin is absent; neither → 403 ORIGIN_NOT_ALLOWED)
+  apps/api/src/http/middleware/rate-limit.middleware.ts      keyRateLimitMiddleware (INGEST_RATE_LIMIT_BROWSER_PER_MIN) →
+                                                    sessionRateLimitMiddleware (app + sessionId, …_PER_SESSION_PER_MIN)
+apps/api/src/http/controllers/ingest.controller.ts  IngestController.browser  (req.ip, User-Agent, Cookie → BrowserRequestInfo;
+                                                    sdk = domain/browser-sdk.ts browserSdkOf(envelope.client))
+apps/api/src/services/ingest.service.ts             IngestService.ingestBrowserEvents
+  once:      BrowserEventEnricher.enrichActor → identity.resolver forBrowser (SSO cookie → sso_cookie; else user.email hint →
+             client_claimed = claimed_email ONLY; user_key only for sso_cookie) → ip.anonymizer / geo-ip / user-agent
+  per event: browserEventSchema → event-time.guard → domain/base-path.ts isWithinBasePath (PATH_OUTSIDE_APP)
+             → BrowserEventEnricher.enrich (path.sanitizer for path + referrerPath → route.normalizer)
+apps/api/src/enrichment/browser-event.enricher.ts   (actor columns shared with the server path: enrichment/actor-columns.ts)
+apps/api/src/domain/to-web-event-insert.ts          toWebEventInsert(event, enrichment) → WebEventInsert
+apps/api/src/repositories/web-event-ingest.repository.ts  WebEventIngestRepository.insertBatch (same unnest + ON CONFLICT)
+apps/api/migrations/0005_web_events.sql             traffic.web_events
+  then: ingest-counter.repository.ts (source 'browser') and LiveFeed.recordWebEvents
+```
+
+Dedupe, partition retry, poison-row bisect and 503 are the SAME code as §3 (`IngestService.storeBatch`,
+generic over the row type). `GET verify` accepts the publishable key too (`anyKeyAuthMiddleware`).
+
 ## 4. The app/key admin chain (`/api/v1/apps…`)
 
 ```
@@ -94,6 +137,33 @@ apps/api/src/domain/mappers.ts                      mapApp / mapApiKey → AppDt
 apps/api/migrations/0002_apps_and_api_keys.sql      traffic.apps, traffic.api_keys
 apps/api/migrations/0003_admin_audit_log.sql        traffic.admin_audit_log (append-only for nexus_app)
 ```
+
+Web half (S5, admins only; non-admins get `components/AdminOnly.tsx` from the `useMe` flag):
+`app/(dashboard)/apps/page.tsx` (passes NEXUS_URL from the server env) → `features/apps/AppsView.tsx` →
+`AppCard.tsx` (settings, integration values, key table `keyColumns.tsx`) + dialogs `AppFormDialog.tsx`
+(create/update, validated with the shared schemas in `appForm.ts`), `CreateKeyDialog.tsx` (one-time reveal +
+copy; the plaintext lives only in component state, mutation `gcTime: 0` + `reset()`), `KeyActionDialog.tsx`
+(expire with a grace period / revoke, in-page confirm) → `useAppMutations.ts` (invalidates `qk.apps.all` +
+`qk.integration.all`) → `api.apps.<leaf>` (`lib/api.ts`, sends `X-Nexus-Dashboard: 1`).
+
+### 4b. The Integration Health chain (S5, `GET /api/v1/integration/health`)
+
+```
+apps/web/src/features/integration/IntegrationView.tsx   tallies (KpiCard) + AppHealthCard per app (global ?app= narrows client-side)
+apps/web/src/features/integration/integrationCopy.ts    warning/status copy + guide chapter (lib/guide.ts guideHref → /traffic/api/docs/#…)
+apps/web/src/features/integration/useIntegrationHealth.ts  useQuery(qk.integration.health()) → api.integration.health
+packages/shared/src/routes.ts                           ROUTES.integration.health (...dashboard, any viewer)
+apps/api/src/http/controllers/integration.controller.ts IntegrationController.health (private, max-age=15)
+apps/api/src/services/integration.service.ts            IntegrationService.health: window = INTEGRATION_HEALTH_WINDOW_MS, rows per app
+apps/api/src/domain/integration-health.ts               integrationStatusOf / privateIpRatioOf / countersBySource / integrationWarningsOf
+                                                        (thresholds: packages/shared/src/constants/integration.ts)
+apps/api/src/repositories/ingest-health.repository.ts   IngestHealthRepository.perApp (QUERY pool, 5 reads in parallel): apps + newest
+                                                        event per source (DESC LIMIT 1), Σ ingest_counters, SDK stats per table
+                                                        (percentile_cont skew; private-IP counts on api_requests only), exposed live keys
+apps/api/src/domain/mappers.ts                          mapIngestCounter / mapSdkHealth / mapExposedKey → shared dto/integration.ts
+```
+
+Proven by `ingest-health.repository.test.ts` (SQL shape) and `apps/api/test/db/ingest-health.integration.test.ts`.
 
 Health: `ROUTES.health.ready` → `HealthController.ready` → `HealthService.ready` (ping, schema guard,
 future partitions). Docs: `ROUTES.docs.*` → `apps/api/src/http/controllers/docs.controller.ts`, serving
@@ -141,11 +211,90 @@ carries `occurred_at` as microsecond text (`keysetTimeExpr` in `apps/api/src/db/
 `Date` keeps only milliseconds and would repeat rows at page boundaries. Both query repositories run on
 the read-only QUERY pool. IPs leave the API for admins only (`mapActor` in `apps/api/src/domain/mappers.ts`).
 
+### 5b. The browser analytics chain (S3): Users, Journeys, Pages & Tools, Geography
+
+Same shape as §5 (`...dashboard`, shared schema per leaf, `Cache-Control: private, max-age=15`). Every
+leaf reads `WebEventQueryRepository` (`apps/api/src/repositories/web-event-query.repository.ts`), which
+also reads `api_requests` where a user's activity spans both tables. Example, the session replay:
+
+```
+apps/web/src/features/journeys/sessionColumns.tsx      row link PAGES.sessionDetail(app, sessionId)  (lib/pages.ts — slug + uuid only)
+apps/web/src/app/(dashboard)/journeys/[app]/[sessionId]/page.tsx  sessionParamsSchema.safeParse(params) → 404 | <SessionDetailView>
+apps/web/src/features/journeys/SessionDetailView.tsx   KPIs + <SessionReplay> (sessionSteps.ts groupSessionSteps: page → tools/API calls)
+apps/web/src/features/journeys/useSessionDetail.ts     useQuery(qk.journeys.session(app, sessionId, f)) → api.journeys.session
+apps/web/src/lib/api.ts                                api.journeys.session(app, sessionId, q) → request(ROUTES.journeys.session, q, {params})
+packages/shared/src/routes.ts                          ROUTES.journeys.session = GET /v1/journeys/sessions/:app/:sessionId
+packages/shared/src/schemas/analytics.ts               sessionParamsSchema + sessionQuerySchema (window; the PATH app wins)
+apps/api/src/http/routes/index.ts                      r.get(…, ...dashboard, validateParams, validateQuery, ctl.journeys.session)
+apps/api/src/http/controllers/journey.controller.ts    JourneyController.session
+apps/api/src/services/journey.service.ts               JourneyService.session (slug → id, 404 when empty)
+apps/api/src/repositories/web-event-query.repository.ts  getSession: header (sessionStatsStatement) + browser events
+                                                       (seq, occurred_at, event_id; page_time folded) + API calls (app_id, session_id)
+apps/api/src/domain/session-replay.ts                  interleaveByTime (API calls placed by time, seq order kept)
+apps/api/src/domain/mappers.ts                         mapSessionSummary (IP admin-only) / mapSessionEvent → dto/journeys.ts
+```
+
+| ROUTES leaf | Controller / service method | Repository method | Notes |
+|---|---|---|---|
+| `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, email search, offset cursor |
+| `users.profile` | `.profile` | `getUserProfile` | by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows |
+| `users.timeline` | `.timeline` | `listUserTimeline` | API ∪ browser, keyset `(occurred_at, event_id)` DESC; IP admin-only |
+| `journeys.sessions` | `JourneyController.sessions` / `JourneyService.sessions` | `listSessions` | strongest identity (`IDENTITY_RANKS`), entry/exit page, optional `userKey`, offset cursor |
+| `journeys.session` | `.session` | `getSession` | see above |
+| `journeys.topPaths` | `.topPaths` | `listTopPaths` | 3-step `lead()` over page views, reloads collapsed; 31-day cap |
+| `pages.list` | `PageController.list` / `PageService.list` | `listPageStats` | Σ `visible_ms` per page view → avg / p50 (31-day cap), exits |
+| `tools.usage` | `ToolController.usage` / `ToolService.usage` | `listToolUsage` | top tools + trend of those tools; gaps → `fillToolTrendGaps` |
+| `geo.countries` / `geo.cities` | `GeoController` / `GeoService` | `listCountries` / `listCities` | API calls + page views per location (`geoStatement`) |
+
+Non-paged lists (top paths, pages, tools, geo) return `WindowedListDto<T>` = `{ window, items }`.
+`page_time` rows carry visible-ms DELTAS: the time of a page view is Σ `visible_ms` of the `page_time`
+rows whose `page_view_id` is its `event_id` (`pageViewVisibleMs`); timelines and replays fold them into
+the page view and never list them.
+
+Web half (page → View → hook → `api.*`; every View reads the global filters from `useGlobalFilters`):
+
+| Page (`apps/web/src/app/(dashboard)/…`) | View (`apps/web/src/features/…`) | Hook(s) → `api.*` | Notes |
+|---|---|---|---|
+| `users/` | `users/UsersView.tsx` | `useUserList` → `users.list` | `?q=` search (`useUserListParams`), "Load more"; link `PAGES.userDetail(userKey)` |
+| `users/[userKey]/` | `users/UserDetailView.tsx` | `useUserProfile` → `users.profile`, `useUserTimeline` → `users.timeline` | `userKeyParamsSchema` → 404; timeline columns in `userTimelineColumns.tsx` |
+| `journeys/` | `journeys/JourneysView.tsx` | `useTopPaths` → `journeys.topPaths`, `useSessionList` → `journeys.sessions` | `?userKey=` (`useSessionListParams`, from a profile's "View sessions"); `ClaimedBadge` via `ActorCell` |
+| `journeys/[app]/[sessionId]/` | `journeys/SessionDetailView.tsx` | `useSessionDetail` → `journeys.session` | see the chain above |
+| `pages/` · `tools/` | `pages/PagesView.tsx` · `tools/ToolsView.tsx` | `usePageStats` → `pages.list` · `useToolUsage` → `tools.usage` | ONE nav entry ("Pages & Tools", `alsoActiveOn`); `PagesToolsTabs` switches routes |
+| `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution |
+
+Shared UI of these pages: `components/ActivityEvent.tsx` (timeline/replay row), `components/RankedList.tsx`,
+`components/charts/RankedBarChart.tsx`, `components/charts/Sparkline.tsx`; `formatCountry` / `formatElapsed`
+in `lib/format.ts`.
+
+### 5c. The live chain (S4): Live page
+
+Two halves meet in the cached snapshot: REST backfills it from the DB, Socket.io keeps it moving.
+
+```
+apps/web/src/features/live/LiveView.tsx          tiles (latest tick) + TrafficChart (ticksToPoints) + streaming DataTable, pause/resume
+apps/web/src/features/live/useLiveFeed.ts        snapshot + socket: subscribe → ticks → upsertTick (liveBuffer.ts) → setQueryData;
+                                                 events → mergeEvents (≤ LIVE_FEED_BUFFER); session end → endLiveSession (reload → proxy login)
+apps/web/src/features/live/useLiveSnapshot.ts    useQuery(qk.live.snapshot(f)) → api.live.snapshot → ROUTES.live.snapshot
+apps/api/src/http/controllers/live.controller.ts LiveController.snapshot (no-store) → LiveService.snapshot
+apps/api/src/services/live.service.ts            ApiRequestQueryRepository.timeseries(minute) + WebEventQueryRepository.activityTimeseries /
+                                                 listRecentEvents / countActiveUsers → domain/live-ticks.ts toLiveTicks + mapLiveEvent (IP admin-only)
+apps/web/src/lib/socket.ts                       createLiveSocket: io(origin + SOCKET_NAMESPACES.live, { path: NEXT_PUBLIC_SOCKET_PATH })
+apps/api/src/socket.ts                           createRealtime: allowRequest (live/socket-origin.policy.ts) → socketAuth (live/socket-auth.middleware.ts)
+                                                 → LiveSubscriptionHandler (joins liveRoom(filter, role)) → LiveTickScheduler
+ingest: IngestService.publishLive → LiveFeed.record* → LiveWindow.record* + LiveBroadcaster.enqueue
+timers: LIVE_TICK_MS → LiveBroadcaster.emitTicks (traffic:tick per subscribed scope) · LIVE_EVENTS_FLUSH_MS → flushEvents
+        (traffic:events, admin room with IP / viewer room withoutIp) · LIVE_SESSION_SWEEP_MS → LiveSessionSweeper.sweep (live:session-expired)
+```
+
+Dev: `NEXT_PUBLIC_SOCKET_PATH=/traffic/socket.io` everywhere; `next dev` rewrites it to the api (`next.config.ts`),
+nginx does in production. Proven by `apps/api/test/e2e/live-socket.test.ts` (real socket, tick ≤ `LIVE_TICK_MS`).
+
 ## 6. How to find X
 
 | I want… | Go to |
 |---|---|
 | the handler of a path | Shift+F12 on the `ROUTES` leaf → `apps/api/src/http/routes/index.ts` |
+| who emits / listens to a socket event | Shift+F12 on the `SOCKET_EVENTS` key → `apps/api/src/live/*` and `apps/web/src/features/live/useLiveFeed.ts` |
 | the SQL behind a service | the `@see` lines on the service method |
 | a table's columns and CHECKs | `apps/api/migrations/` + [07-data-model.md](07-data-model.md) |
 | what other teams send | `packages/shared/src/ingest/schemas.ts` + [08-integration-contract.md](08-integration-contract.md) |

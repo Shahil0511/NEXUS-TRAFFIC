@@ -7,16 +7,29 @@ import type { Grain } from '@nexus/shared';
 import type {
   EndpointListOptions,
   FailureListOptions,
+  SessionListOptions,
+  TimelineOptions,
   TrafficFilter,
+  UserListOptions,
 } from '../../src/domain/filters';
 import type {
   ApiRequestRow,
   EndpointDetailRows,
   EndpointStatsRow,
   ErrorSummaryRows,
+  GeoCityRow,
+  GeoCountryRow,
+  PageStatsRow,
   PageViewBucketRow,
+  SessionRows,
+  SessionSummaryRow,
+  TimelineEventRow,
+  ToolUsageRows,
+  TopPathRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserProfileRows,
+  UserSummaryRow,
 } from '../../src/domain/rows';
 import type { ApiRequestQueryRepository } from '../../src/repositories/api-request-query.repository';
 import type { WebEventQueryRepository } from '../../src/repositories/web-event-query.repository';
@@ -102,13 +115,36 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
   }
 }
 
-type WebQueryMethods = 'summarizePageViews' | 'pageViewTimeseries' | 'countActiveUsers';
+type WebQueryMethods =
+  | 'summarizePageViews'
+  | 'pageViewTimeseries'
+  | 'countActiveUsers'
+  | 'listUsers'
+  | 'getUserProfile'
+  | 'listUserTimeline'
+  | 'listSessions'
+  | 'getSession'
+  | 'listTopPaths'
+  | 'listPageStats'
+  | 'listToolUsage'
+  | 'listCountries'
+  | 'listCities';
 
 export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQueryMethods> {
   readonly calls: Array<{ method: WebQueryMethods; args: unknown[] }> = [];
   pageViews: number[] = [0, 0];
   pageViewBuckets: PageViewBucketRow[] = [];
   activeUsers = 0;
+  users: UserSummaryRow[] = [];
+  profile: UserProfileRows | null = null;
+  timeline: TimelineEventRow[] = [];
+  sessions: SessionSummaryRow[] = [];
+  session: SessionRows | null = null;
+  topPaths: TopPathRow[] = [];
+  pageStats: PageStatsRow[] = [];
+  toolUsage: ToolUsageRows = { tools: [], trend: [] };
+  countries: GeoCountryRow[] = [];
+  cities: GeoCityRow[] = [];
 
   async summarizePageViews(filter: TrafficFilter): Promise<number> {
     const index = this.calls.filter((c) => c.method === 'summarizePageViews').length;
@@ -124,5 +160,70 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   async countActiveUsers(filter: TrafficFilter): Promise<number> {
     this.calls.push({ method: 'countActiveUsers', args: [filter] });
     return this.activeUsers;
+  }
+
+  async listUsers(filter: TrafficFilter, options: UserListOptions): Promise<UserSummaryRow[]> {
+    this.calls.push({ method: 'listUsers', args: [filter, options] });
+    return this.users;
+  }
+
+  async getUserProfile(userKey: Buffer, filter: TrafficFilter): Promise<UserProfileRows | null> {
+    this.calls.push({ method: 'getUserProfile', args: [userKey, filter] });
+    return this.profile;
+  }
+
+  async listUserTimeline(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    options: TimelineOptions,
+  ): Promise<TimelineEventRow[]> {
+    this.calls.push({ method: 'listUserTimeline', args: [userKey, filter, options] });
+    return this.timeline;
+  }
+
+  async listSessions(
+    filter: TrafficFilter,
+    options: SessionListOptions,
+  ): Promise<SessionSummaryRow[]> {
+    this.calls.push({ method: 'listSessions', args: [filter, options] });
+    return this.sessions;
+  }
+
+  async getSession(
+    appId: string,
+    sessionId: string,
+    filter: TrafficFilter,
+  ): Promise<SessionRows | null> {
+    this.calls.push({ method: 'getSession', args: [appId, sessionId, filter] });
+    return this.session;
+  }
+
+  async listTopPaths(filter: TrafficFilter, limit: number): Promise<TopPathRow[]> {
+    this.calls.push({ method: 'listTopPaths', args: [filter, limit] });
+    return this.topPaths;
+  }
+
+  async listPageStats(filter: TrafficFilter, limit: number): Promise<PageStatsRow[]> {
+    this.calls.push({ method: 'listPageStats', args: [filter, limit] });
+    return this.pageStats;
+  }
+
+  async listToolUsage(filter: TrafficFilter, grain: Grain, limit: number): Promise<ToolUsageRows> {
+    this.calls.push({ method: 'listToolUsage', args: [filter, grain, limit] });
+    return this.toolUsage;
+  }
+
+  async listCountries(filter: TrafficFilter, limit: number): Promise<GeoCountryRow[]> {
+    this.calls.push({ method: 'listCountries', args: [filter, limit] });
+    return this.countries;
+  }
+
+  async listCities(filter: TrafficFilter, limit: number): Promise<GeoCityRow[]> {
+    this.calls.push({ method: 'listCities', args: [filter, limit] });
+    return this.cities;
+  }
+
+  argsOf(method: WebQueryMethods): unknown[][] {
+    return this.calls.filter((c) => c.method === method).map((c) => c.args);
   }
 }

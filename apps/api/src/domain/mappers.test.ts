@@ -6,9 +6,17 @@ import {
   ENDPOINT_ID,
   endpointStatsRow,
   EVENT_ID,
+  geoCityRow,
   OCCURRED_AT,
+  pageStatsRow,
   PLAIN_VIEWER,
+  sessionEventRow,
+  sessionSummaryRow,
+  timelineEventRow,
+  toolUsageRow,
   trafficBucketRow,
+  USER_KEY_HEX,
+  userSummaryRow,
 } from '../../test/fixtures/analytics-rows';
 import { apiKeyRow, appRow, CREATED_AT } from '../../test/fixtures/app-rows';
 import {
@@ -16,9 +24,19 @@ import {
   mapApiKey,
   mapApp,
   mapEndpointStats,
+  mapGeoCity,
+  mapGeoCountry,
+  mapPageStats,
   mapRequestSample,
+  mapSessionEvent,
+  mapSessionSummary,
   mapStatusCount,
+  mapTimelineItem,
   mapTimeseriesPoint,
+  mapToolUsage,
+  mapTopPath,
+  mapUserProfile,
+  mapUserSummary,
 } from './mappers';
 
 describe('mapApiKey', () => {
@@ -191,5 +209,145 @@ describe('mapTimeseriesPoint / mapStatusCount', () => {
 
   it('maps a status count', () => {
     expect(mapStatusCount({ status_code: 404, count: 12 })).toEqual({ status: 404, count: 12 });
+  });
+});
+
+// ─── S3 browser analytics ───────────────────────────────────────────────────
+
+describe('mapUserSummary / mapUserProfile', () => {
+  it('renders user_key as 64-char hex and copies the counts', () => {
+    expect(mapUserSummary(userSummaryRow())).toEqual({
+      userKey: USER_KEY_HEX,
+      email: 'someone@libas.in',
+      lastSeenAt: OCCURRED_AT.toISOString(),
+      requests: 12,
+      pageViews: 5,
+      sessions: 2,
+      apps: ['ebo-sales', 'hr-portal'],
+    });
+    expect(USER_KEY_HEX).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('maps the profile header and its top lists', () => {
+    const dto = mapUserProfile({
+      summary: userSummaryRow(),
+      topTools: [{ app_slug: 'ebo-sales', tool: 'export-csv', uses: 2 }],
+      topPages: [{ app_slug: 'ebo-sales', path_template: '/home', views: 3 }],
+      countries: ['IN', 'AE'],
+    });
+    expect(dto).toMatchObject({
+      firstSeenAt: '2026-10-01T08:00:00.000Z',
+      failedRequests: 2,
+      topTools: [{ app: 'ebo-sales', tool: 'export-csv', uses: 2 }],
+      topPages: [{ app: 'ebo-sales', pathTemplate: '/home', views: 3 }],
+      countries: ['IN', 'AE'],
+    });
+  });
+});
+
+describe('mapTimelineItem', () => {
+  it('maps an API call (status, rounded duration) and masks the IP for non-admins', () => {
+    const row = timelineEventRow({
+      kind: 'api',
+      method: 'POST',
+      status_code: 500,
+      duration_ms: 12.3456,
+      visible_ms: null,
+    });
+    expect(mapTimelineItem(row, ADMIN_VIEWER)).toMatchObject({
+      eventId: EVENT_ID,
+      kind: 'api',
+      method: 'POST',
+      status: 500,
+      durationMs: 12.35,
+      ip: '8.8.8.8',
+    });
+    expect(mapTimelineItem(row, PLAIN_VIEWER).ip).toBeNull();
+  });
+
+  it('keeps the folded visible time of a page view', () => {
+    expect(mapTimelineItem(timelineEventRow(), ADMIN_VIEWER)).toMatchObject({
+      kind: 'page_view',
+      visibleMs: 4200,
+      status: null,
+      durationMs: null,
+    });
+  });
+});
+
+describe('mapSessionSummary / mapSessionEvent', () => {
+  it('rounds the duration to whole ms and shows the IP to admins only', () => {
+    const admin = mapSessionSummary(sessionSummaryRow(), ADMIN_VIEWER);
+    expect(admin).toMatchObject({
+      durationMs: 930250,
+      userKey: USER_KEY_HEX,
+      entryPath: '/home',
+      exitPath: '/reports',
+      ip: '8.8.8.8',
+    });
+    expect(mapSessionSummary(sessionSummaryRow(), PLAIN_VIEWER).ip).toBeNull();
+    expect(
+      mapSessionSummary(sessionSummaryRow({ user_key: null }), ADMIN_VIEWER).userKey,
+    ).toBeNull();
+  });
+
+  it('maps a replay step without identity or IP', () => {
+    const dto = mapSessionEvent(sessionEventRow({ kind: 'custom', name: 'leave_submitted' }));
+    expect(dto).toEqual({
+      eventId: EVENT_ID,
+      occurredAt: OCCURRED_AT.toISOString(),
+      seq: 0,
+      kind: 'custom',
+      path: '/home',
+      tool: null,
+      visibleMs: null,
+      name: 'leave_submitted',
+      method: null,
+      status: null,
+      durationMs: null,
+    });
+  });
+});
+
+describe('pages / tools / paths / geo mappers', () => {
+  it('mapTopPath lists the three steps in order', () => {
+    expect(
+      mapTopPath({ app_slug: 'ebo-sales', step1: '/a', step2: '/b', step3: '/c', sessions: 4 }),
+    ).toEqual({ app: 'ebo-sales', steps: ['/a', '/b', '/c'], sessions: 4 });
+  });
+
+  it('mapPageStats rounds visible time to whole ms (null stays null)', () => {
+    expect(mapPageStats(pageStatsRow())).toMatchObject({ avgVisibleMs: 3500, p50VisibleMs: 3001 });
+    expect(
+      mapPageStats(pageStatsRow({ avg_visible_ms: null, p50_visible_ms: null })),
+    ).toMatchObject({ avgVisibleMs: null, p50VisibleMs: null });
+  });
+
+  it('mapToolUsage never exposes the internal app id', () => {
+    const dto = mapToolUsage(toolUsageRow(), [{ bucket: '2026-10-01T08:30:00.000Z', uses: 1 }]);
+    expect(dto).toEqual({
+      app: 'ebo-sales',
+      tool: 'export-csv',
+      uses: 7,
+      distinctUsers: 2,
+      distinctSessions: 4,
+      lastUsedAt: OCCURRED_AT.toISOString(),
+      trend: [{ bucket: '2026-10-01T08:30:00.000Z', uses: 1 }],
+    });
+    expect(JSON.stringify(dto)).not.toContain(toolUsageRow().app_id);
+  });
+
+  it('mapGeoCountry / mapGeoCity (centroid rounded to 4 decimals)', () => {
+    expect(mapGeoCountry({ country: 'IN', requests: 3, page_views: 4, users: 1 })).toEqual({
+      country: 'IN',
+      requests: 3,
+      pageViews: 4,
+      users: 1,
+    });
+    expect(mapGeoCity(geoCityRow())).toMatchObject({ lat: 19.076, lon: 72.8777 });
+    expect(mapGeoCity(geoCityRow({ lat: null, lon: null }))).toMatchObject({
+      lat: null,
+      lon: null,
+    });
   });
 });

@@ -70,9 +70,16 @@ default for local development and tests.
 
 An app can have several active keys at once, so rotation needs no downtime:
 
-1. Ask for a **new** key (same kind).
-2. Deploy your app with the new key.
-3. We **expire** the old key at an agreed time (a grace period), or **revoke** it immediately if it
-   leaked.
+1. **Create** a new key of the same kind. Nexus admins do this on the dashboard's **Apps** page; a
+   secret key is shown **once**, right then — put it straight into your secret manager.
+2. **Deploy** your app with the new key (backend: `NEXUS_SECRET_KEY`; frontend: rebuild with the new
+   publishable key).
+3. **Expire** the old key with a grace time (for example one day after your deploy). It keeps
+   working until that moment, so instances still on the old key do not lose events.
+   If the old key **leaked** (or the Integration page says *exposed*), **revoke** it instead: it
+   stops working immediately.
+4. **Check** your app on the dashboard's Integration page ([chapter 10](10-verify.md)): events keep
+   arriving and the *exposed secret key* warning is gone. On the Apps page the old key's
+   *last used* time stops moving.
 
 Requests with an expired or revoked key get `401 INVALID_API_KEY`.

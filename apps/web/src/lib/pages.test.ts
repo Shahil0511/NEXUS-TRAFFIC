@@ -20,6 +20,10 @@ describe('PAGES', () => {
       '/endpoints/6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11',
     );
     expect(PAGES.endpointDetail('../x?y')).toBe('/endpoints/..%2Fx%3Fy');
+    expect(PAGES.userDetail('ab12')).toBe('/users/ab12');
+    expect(PAGES.sessionDetail('ebo-sales', '7c1d2e3f-0000-4000-8000-000000000001')).toBe(
+      '/journeys/ebo-sales/7c1d2e3f-0000-4000-8000-000000000001',
+    );
   });
 
   it('appends only non-empty query values', () => {

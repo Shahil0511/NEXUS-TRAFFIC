@@ -142,3 +142,36 @@ export function formatWindowCaption(window: { from: string; to: string; grain: G
   const to = windowBoundFormat.format(new Date(window.to));
   return `${from} – ${to} IST · ${GRAIN_LABELS[window.grain]} buckets`;
 }
+
+const MS_PER_HOUR = 3_600_000;
+const SECONDS_PER_MINUTE = 60;
+
+/** Offset from the start of a session: 42_000 → "+0:42", 754_000 → "+12:34", 3_723_000 → "+1:02:03". */
+export function formatElapsed(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return EMPTY_VALUE;
+  const totalSeconds = Math.max(0, Math.floor(ms / MS_PER_SECOND));
+  const hours = Math.floor(ms / MS_PER_HOUR);
+  const minutes = Math.floor(totalSeconds / SECONDS_PER_MINUTE) % SECONDS_PER_MINUTE;
+  const seconds = String(totalSeconds % SECONDS_PER_MINUTE).padStart(2, '0');
+  if (hours > 0) return `+${hours}:${String(minutes).padStart(2, '0')}:${seconds}`;
+  return `+${minutes}:${seconds}`;
+}
+
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/;
+export const UNKNOWN_COUNTRY = 'Unknown';
+
+/**
+ * ISO-3166 alpha-2 → "India"; null (unknown / private IP) → "Unknown"; a code Intl does not know
+ * stays as the code.
+ */
+export function formatCountry(code: string | null | undefined): string {
+  if (!code) return UNKNOWN_COUNTRY;
+  const upper = code.toUpperCase();
+  if (!COUNTRY_CODE_PATTERN.test(upper)) return code;
+  try {
+    return regionNames.of(upper) ?? upper;
+  } catch {
+    return upper;
+  }
+}

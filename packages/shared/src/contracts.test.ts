@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { toEndpointId, uuidV5 } from './endpoint-id';
-import { liveRoom, liveScopeKey, SOCKET_EVENTS } from './events';
+import { liveRoom, liveScopeKey, parseLiveRoom, SOCKET_EVENTS } from './events';
 import {
   buildPath,
   listRoutes,
@@ -50,6 +50,16 @@ describe('socket contract', () => {
     expect(liveScopeKey({ app: 'ebo-sales' })).toBe('app:ebo-sales');
     expect(liveRoom({ app: 'ebo-sales' }, 'viewer')).toBe('app:ebo-sales:viewer');
     expect(SOCKET_EVENTS.trafficTick).toBe('traffic:tick');
+  });
+
+  it('parses role rooms back and ignores other rooms', () => {
+    expect(parseLiveRoom('app:ebo-sales:viewer')).toEqual({
+      scope: 'app:ebo-sales',
+      role: 'viewer',
+    });
+    expect(parseLiveRoom(liveRoom({}, 'admin'))).toEqual({ scope: 'all', role: 'admin' });
+    expect(parseLiveRoom('Xk3_socket-id')).toBeNull();
+    expect(parseLiveRoom(':admin')).toBeNull();
   });
 });
 

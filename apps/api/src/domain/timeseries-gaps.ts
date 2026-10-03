@@ -7,7 +7,12 @@
  * MUST match the SQL bucket expression (`bucketExpr` in src/db/sql.ts): IST-aligned `date_bin` for
  * minute/hour and IST midnight for day. Asia/Kolkata has no DST, so a fixed offset is exact.
  */
-import { GRAIN_MS, type Grain, type TimeseriesPointDto } from '@nexus/shared';
+import {
+  GRAIN_MS,
+  type Grain,
+  type TimeseriesPointDto,
+  type ToolTrendPointDto,
+} from '@nexus/shared';
 
 import { BUCKET_ORIGIN_ISO } from '../db/sql';
 
@@ -76,4 +81,20 @@ export function withPageViews(
     ...point,
     pageViews: pageViewsByBucket.get(point.bucket) ?? point.pageViews,
   }));
+}
+
+/**
+ * A tool's usage trend with one point per bucket of the window (missing buckets → 0 uses), oldest
+ * first. Same rules as fillTimeseriesGaps (points outside the expected buckets are kept).
+ */
+export function fillToolTrendGaps(
+  points: readonly ToolTrendPointDto[],
+  window: SeriesWindow,
+): ToolTrendPointDto[] {
+  const byBucket = new Map<string, ToolTrendPointDto>();
+  for (const start of bucketStarts(window)) {
+    byBucket.set(start.toISOString(), { bucket: start.toISOString(), uses: 0 });
+  }
+  for (const point of points) byBucket.set(point.bucket, point);
+  return [...byBucket.values()].sort((a, b) => a.bucket.localeCompare(b.bucket));
 }

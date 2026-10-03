@@ -9,9 +9,10 @@
  *   `.next/standalone` (which mirrors the monorepo layout → `apps/web/server.js`).
  * - transpilePackages: @nexus/shared and @nexus/auth are consumed as TypeScript source (the
  *   `@nexus/source` export condition), never from their dist.
- * - rewrites ONLY in development: `/traffic/api/*` → the local api. In production nginx routes
- *   `/traffic/api/` straight to the api container (ops/nginx/nexus-traffic.conf) and never
- *   reaches this server.
+ * - rewrites ONLY in development: `/traffic/api/*` and `/traffic/socket.io/` → the local api
+ *   (Next proxies the websocket upgrade of an external rewrite too, and socket.io falls back to
+ *   long-polling anyway). In production nginx routes `/traffic/api/` and `/traffic/socket.io/`
+ *   straight to the api container (ops/nginx/nexus-traffic.conf) and never reaches this server.
  * - experimental.authInterrupts: src/app/no-access/page.tsx calls forbidden() so the no-access
  *   page is a real 403 (src/app/forbidden.tsx).
  *
@@ -23,7 +24,7 @@ import path from 'node:path';
 
 import type { NextConfig } from 'next';
 
-import { PUBLIC_BASE_PATH } from '@nexus/shared';
+import { PUBLIC_BASE_PATH, SOCKET_PATH } from '@nexus/shared';
 
 const REPO_ROOT = path.join(__dirname, '../..');
 const IS_DEV = process.env.NODE_ENV !== 'production';
@@ -55,7 +56,11 @@ const nextConfig: NextConfig = {
   async rewrites() {
     if (!IS_DEV) return [];
     const target = process.env.API_INTERNAL_URL ?? DEFAULT_API_INTERNAL_URL;
-    return [{ source: '/api/:path*', destination: `${target}/api/:path*` }];
+    return [
+      { source: '/api/:path*', destination: `${target}/api/:path*` },
+      // socket.io always requests exactly `<path>/?EIO=4&…` (the query string is forwarded).
+      { source: `${SOCKET_PATH}/`, destination: `${target}${SOCKET_PATH}/` },
+    ];
   },
 };
 

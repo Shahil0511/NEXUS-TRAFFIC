@@ -115,13 +115,14 @@ export function proxy(req: NextRequest): NextResponse {
 
 /**
  * Everything except the health check, the no-access page, the dev API rewrite (`api/`, a fetch
- * must get the api's 401 JSON, not a redirect) and static files. Next prefixes the basePath
+ * must get the api's 401 JSON, not a redirect), the dev Socket.io rewrite (`socket.io/`, the api
+ * authenticates the handshake itself) and static files. Next prefixes the basePath
  * itself. MUST stay a literal: Next analyses it at build time.
  */
 export const config = {
   matcher: [
     // The basePath root itself (`/traffic`, no trailing slash) is NOT covered by the pattern below.
     '/',
-    '/((?!api/|healthz|no-access|_next/static|_next/image|favicon.ico|icon.svg|robots.txt).*)',
+    '/((?!api/|socket.io/|healthz|no-access|_next/static|_next/image|favicon.ico|icon.svg|robots.txt).*)',
   ],
 };

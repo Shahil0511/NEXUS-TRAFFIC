@@ -19,6 +19,8 @@ export function createNonce(): string {
  * The policy. Scripts: only nonce-bearing ones and what they load ('strict-dynamic').
  * Styles allow inline attributes because React/recharts/radix render `style="…"` (CSS cannot
  * execute script). 'unsafe-eval' ONLY in development (React's debugging needs it).
+ * connect-src 'self' also covers the live socket: it is same-origin (`/traffic/socket.io`,
+ * src/lib/socket.ts) and CSP Level 3 matches 'self' for ws:/wss: on the same host.
  */
 export function buildCsp(nonce: string, isDev: boolean): string {
   return [

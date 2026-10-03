@@ -20,7 +20,7 @@ Content-Type: text/plain        ← what navigator.sendBeacon sends; application
 | Paths | every event `path` must start with your app's base path (`PATH_OUTSIDE_APP` otherwise) |
 | Identity | the SSO `access_token` cookie travels with the beacon (same site) and **we verify it ourselves** |
 | Size | up to **{{BROWSER_MAX_EVENTS}} events** and **{{BROWSER_MAX_BODY_KB}} KiB** per request |
-| Rate | {{RATE_BROWSER_PER_MIN}} requests per minute per session |
+| Rate | {{RATE_BROWSER_PER_MIN}} requests per minute per session, and {{RATE_BROWSER_APP_PER_MIN}} per minute for the whole app |
 
 A **secret** key sent here is refused with `403 SECRET_KEY_EXPOSED` and flagged for rotation.
 

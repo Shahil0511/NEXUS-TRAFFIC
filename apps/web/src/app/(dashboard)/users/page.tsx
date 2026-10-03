@@ -1,17 +1,10 @@
-import { Users } from 'lucide-react';
 import type { Metadata } from 'next';
 
-import { ComingSoon } from '@/components/ComingSoon';
+import { UsersView } from '@/features/users/UsersView';
 
 export const metadata: Metadata = { title: 'Users' };
 
-const HIGHLIGHTS = [
-  'Identified users with last seen, requests and sessions',
-  'A profile per user with a combined timeline of pages, tools and API calls',
-  'Only verified identities count; browser claims stay flagged',
-] as const;
-
-/** PAGES.users() — placeholder until S3 delivers its data (@see ../../../lib/nav.ts comingIn). */
+/** PAGES.users() — @see ../../../features/users/UsersView.tsx */
 export default function UsersPage() {
-  return <ComingSoon title="Users" step="S3" icon={Users} highlights={HIGHLIGHTS} />;
+  return <UsersView />;
 }
