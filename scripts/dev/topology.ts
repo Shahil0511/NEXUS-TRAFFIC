@@ -38,7 +38,7 @@ export const DEV_DB = {
 } as const;
 
 export const API_PORT = 4000;
-export const WEB_PORT = 3305;
+export const WEB_PORT = 3000;
 export const DEFAULT_LAUNCHER_PORT = 3399;
 /** How many ports after the requested one the launcher tries when it is busy. */
 export const LAUNCHER_PORT_ATTEMPTS = 20;

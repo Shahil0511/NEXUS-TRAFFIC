@@ -4,8 +4,8 @@
 **/coverage
 **/*.tsbuildinfo
 .git
-.env
-.env.*
+**/.env
+**/.env.*
 backups
 docs/dist
 ai-context

@@ -19,7 +19,13 @@
  * @see ./env.schema.ts
  * @see ./lib/csp.ts
  */
-import { ACCESS_TOKEN_COOKIE, decideDashboardAccess, verifyAccessToken } from '@nexus/auth';
+import {
+  ACCESS_TOKEN_COOKIE,
+  decideDashboardAccess,
+  DEV_ACCESS_TOKEN_TTL_SECONDS,
+  signAccessToken,
+  verifyAccessToken,
+} from '@nexus/auth';
 import { PUBLIC_BASE_PATH } from '@nexus/shared';
 import { NextResponse, type NextRequest } from 'next/server';
 
@@ -49,6 +55,21 @@ export function readVerifiedEmail(
   if (!token) return null;
   const result = verifyAccessToken(token, env.LIBAS_JWT_SECRET, nowMs);
   return result.ok ? result.email : null;
+}
+
+/**
+ * `next dev` without a portal (like EBO_SALES' DEV_USER_EMAIL): a token for DEV_USER_EMAIL, signed
+ * with the dev LIBAS_JWT_SECRET, so the api and the socket verify it with the production code path.
+ * Null outside development, when DEV_USER_EMAIL is unset, or when the request already has a token.
+ */
+export function devSignInToken(
+  req: NextRequest,
+  env: WebEnv,
+  isDev: boolean,
+  nowMs: number = Date.now(),
+): string | null {
+  if (!isDev || !env.DEV_USER_EMAIL || readVerifiedEmail(req, env, nowMs)) return null;
+  return signAccessToken(env.DEV_USER_EMAIL, env.LIBAS_JWT_SECRET, nowMs).token;
 }
 
 /** Request headers for the render: the nonce, plus the CSP Next extracts it from. */
@@ -88,16 +109,28 @@ export function gateRequest(
   env: WebEnv,
   options: GateOptions = {},
 ): NextResponse {
+  const isDev = options.isDev ?? false;
+  const devToken = devSignInToken(req, env, isDev, options.nowMs);
+  if (devToken) req.cookies.set(ACCESS_TOKEN_COOKIE, devToken);
+
   const email = readVerifiedEmail(req, env, options.nowMs);
   if (!email) return NextResponse.redirect(buildLoginRedirectUrl(req, env));
 
   const nonce = createNonce();
-  const csp = buildCsp(nonce, options.isDev ?? false);
+  const csp = buildCsp(nonce, isDev);
   const headers = renderHeaders(req, csp, nonce);
   const response = decideDashboardAccess(email, accessPolicyOf(env)).allowed
     ? NextResponse.next({ request: { headers } })
     : forbidden(req, headers);
   response.headers.set(CSP_HEADER, csp);
+  if (devToken) {
+    response.cookies.set(ACCESS_TOKEN_COOKIE, devToken, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: DEV_ACCESS_TOKEN_TTL_SECONDS,
+    });
+  }
   return response;
 }
 

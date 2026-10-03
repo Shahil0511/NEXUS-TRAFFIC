@@ -2,7 +2,7 @@
  * Supervisor of the long-running children (api, web): start, track state, stop the whole tree.
  *
  * WHY: `tsx watch` and `next dev` each spawn grandchildren; killing only the direct child would
- * leave a server holding port 4000/3305. On Windows the tree is killed with `taskkill /T /F`, on
+ * leave a server holding port 4000/3000. On Windows the tree is killed with `taskkill /T /F`, on
  * POSIX the child leads its own process group and the group is signalled.
  */
 import { spawn, type ChildProcess } from 'node:child_process';

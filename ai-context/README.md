@@ -34,7 +34,7 @@ folder before touching the code, read this one.
 | 6 | [06-process.md](06-process.md) | run, test, commit, deploy, roll back |
 | 7 | [07-data-model.md](07-data-model.md) | understand every table/column and how personal data is protected |
 | 8 | [08-integration-contract.md](08-integration-contract.md) | know what other teams send us (one-page summary) |
-| 9 | [09-local-development.md](09-local-development.md) | run everything locally with one command (`npm run dev`) and use the Dev Launcher page |
+| 9 | [09-local-development.md](09-local-development.md) | run locally: `npm run dev:setup` once, then `npm run dev` (api + dashboard, no sign-in in dev) |
 | — | [GLOSSARY.md](GLOSSARY.md) | look up a term (one noun per concept) |
 | — | [decisions/](decisions/) | know *why* something is the way it is (ADRs) |
 | — | [PROGRESS.md](PROGRESS.md) | see what is done, what is next, known issues |

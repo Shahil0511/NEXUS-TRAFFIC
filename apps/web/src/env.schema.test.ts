@@ -16,7 +16,10 @@ import { webEnvSchema } from './env.schema';
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 /** Read by next.config.ts under `next dev` only; the container never needs it. */
-const DEV_ONLY_KEYS = new Set(['API_INTERNAL_URL']);
+const DEV_ONLY_KEYS = new Set(['API_INTERNAL_URL', 'DEV_USER_EMAIL']);
+
+/** `next dev` sign-in only (apps/web/.env.local via npm run dev:setup): never in the server .env. */
+const LOCAL_DEV_FILE_KEYS = new Set(['DEV_USER_EMAIL']);
 
 const WEB_KEYS = Object.keys(webEnvSchema.shape);
 
@@ -41,7 +44,7 @@ describe('web env keys', () => {
   it('are all documented in .env.example', () => {
     const example = readRepoFile('.env.example');
     const documented = new Set([...example.matchAll(/^#?\s*([A-Z0-9_]+)=/gm)].map((m) => m[1]));
-    expect(WEB_KEYS.filter((key) => !documented.has(key))).toEqual([]);
+    expect(WEB_KEYS.filter((key) => !LOCAL_DEV_FILE_KEYS.has(key) && !documented.has(key))).toEqual([]);
   });
 
   it('are all passed to the web container by docker-compose.yml (except dev-only keys)', () => {

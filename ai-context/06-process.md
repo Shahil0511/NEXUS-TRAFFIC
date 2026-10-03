@@ -42,7 +42,7 @@ The guide is then at `http://localhost:4000/api/docs/` (served from `docs/dist`)
 ```bash
 npm run build:shared                          # once: next.config.ts imports PUBLIC_BASE_PATH from the shared dist
 npm run dev -w @nexus/api                     # the dashboard API on :4000 (see above)
-npm run dev -w @nexus/web                     # Next on http://localhost:3305/traffic/ (basePath in dev too)
+npm run dev -w @nexus/web                     # Next on http://localhost:3000/traffic/ (basePath in dev too)
 npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (8 h, signed with .env LIBAS_JWT_SECRET)
 ```
 

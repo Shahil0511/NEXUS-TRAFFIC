@@ -4,7 +4,7 @@
   "private": true,
   "description": "Data Nexus Traffic dashboard: Next.js 16 App Router behind the portal SSO, served at /traffic.",
   "scripts": {
-    "dev": "next dev -p 3305",
+    "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3305",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p e2e/tsconfig.json",

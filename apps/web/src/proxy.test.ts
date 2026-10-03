@@ -173,3 +173,26 @@ describe('gateRequest', () => {
     expect(allowed.headers.get('x-middleware-next')).toBe('1');
   });
 });
+
+describe('dev sign-in (DEV_USER_EMAIL, next dev only)', () => {
+  const DEV_ENV: WebEnv = { ...ENV, DEV_USER_EMAIL: 'dev@libas.in' };
+
+  it('in development, a request without a cookie renders and receives a dev access_token', () => {
+    const res = gateRequest(requestFor('/'), DEV_ENV, { nowMs: NOW_MS, isDev: true });
+    expect(getRedirectUrl(res)).toBeNull();
+    expect(res.cookies.get('access_token')?.value).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+  });
+
+  it('outside development, DEV_USER_EMAIL is ignored and the portal login still applies', () => {
+    const res = gateRequest(requestFor('/'), DEV_ENV, { nowMs: NOW_MS, isDev: false });
+    expect(getRedirectUrl(res)).toMatch(/^https:\/\/nexus\.libas\.in\/login\?return=/);
+    expect(res.cookies.get('access_token')).toBeUndefined();
+  });
+
+  it('keeps an existing valid token instead of minting a new one', () => {
+    const token = signToken({ email: 'someone@libas.in' });
+    const res = gateRequest(requestFor('/', token), DEV_ENV, { nowMs: NOW_MS, isDev: true });
+    expect(getRedirectUrl(res)).toBeNull();
+    expect(res.cookies.get('access_token')).toBeUndefined();
+  });
+});

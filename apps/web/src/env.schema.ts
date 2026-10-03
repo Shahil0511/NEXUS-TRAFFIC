@@ -33,6 +33,11 @@ export const webEnvSchema = z
     DASHBOARD_ADMIN_EMAILS: z.string().default(''),
     /** `next dev` rewrite target only (next.config.ts reads it directly). */
     API_INTERNAL_URL: z.url().default('http://localhost:4000'),
+    /**
+     * `next dev` ONLY: no portal in front of the dev server, so the proxy signs in as this email
+     * (like EBO_SALES' DEV_USER_EMAIL). Ignored when NODE_ENV is not 'development'.
+     */
+    DEV_USER_EMAIL: z.email().optional(),
   })
   .strip();
 

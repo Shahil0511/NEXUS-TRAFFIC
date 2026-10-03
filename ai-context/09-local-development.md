@@ -1,23 +1,52 @@
-# 09 — Local development (`npm run dev`)
+# 09 — Local development (`npm run dev`, the EBO_SALES way)
 
-One command brings up the **whole** dev environment on your laptop and opens a small local page,
-the **Dev Launcher**, to check it is up, sign in, add demo data and read the logs.
+Same shape as `D:\server\EBO_SALES` (read-only reference): a one-time setup, then **one command that
+runs the api and the dashboard side by side** with `concurrently`. **No sign-in in dev**: `next dev`
+signs you in as `DEV_USER_EMAIL` automatically (like EBO's `DEV_USER_EMAIL`), so the dashboard just opens.
 
 ```bash
-npm install        # once
-npm run dev        # everything; Ctrl+C to stop
+npm install          # once
+npm run dev:setup    # once (and after a dev DB reset): dev DB, migrations, apps/api/.env, apps/web/.env.local
+npm run dev          # every day: [api] tsx watch on :4000 + [web] next dev on :3000; Ctrl+C stops both
 ```
 
-The code lives in [`scripts/dev/`](../scripts/dev/) (entry: [`scripts/dev/index.ts`](../scripts/dev/index.ts)).
-It only uses Node built-ins and the repo's existing `tsx`, so it adds no new dependencies.
+Open **http://localhost:3000/traffic/** — signed in as `admin@libas.in` (admin), no login page.
 
-## Prerequisites
+| Script | What it runs |
+|---|---|
+| `npm run dev` | `build:shared`, then `concurrently` → `npm run dev -w @nexus/api` + `npm run dev -w @nexus/web` |
+| `npm run dev:api` / `npm run dev:web` | one side only |
+| `npm run dev:setup` | [`scripts/dev/setup.ts`](../scripts/dev/setup.ts): `.env.dev` secrets → dev DB container (:55434) → builds → migrations → writes the two env files |
+| `npm run dev:launcher` | the older all-in-one launcher with the Dev Launcher page (described below; optional) |
+
+**Env files (EBO's `backend/.env` + `frontend/.env.local`)** — both git-ignored and docker-ignored,
+written by `dev:setup`:
+- `apps/api/.env`: every api + migrate key with dev values. The api loads it **before** the root `.env`
+  (dotenv never overrides), so the root `.env` (compose / production values) cannot leak in.
+- `apps/web/.env.local`: every web key + `DEV_USER_EMAIL`. `next dev` loads it before `next.config.ts`
+  loads the root `.env`.
+
+**How the dev sign-in works:** `apps/web/src/proxy.ts` `devSignInToken` — only when `NODE_ENV` is
+`development` (i.e. `next dev`) and `DEV_USER_EMAIL` is set — signs an `access_token` with the dev
+`LIBAS_JWT_SECRET` (`@nexus/auth` `signAccessToken`) and sets it as a cookie. The api and the Live socket
+then verify it with the normal production code. `next start` / the Docker image never do this.
+
+Ports: **3000** dashboard, **4000** api, **55434** dev DB. The docker rehearsal uses 3305 / 4005 / 8080,
+so both can run at the same time.
+
+---
+
+## The Dev Launcher (`npm run dev:launcher`, optional)
+
+The code lives in [`scripts/dev/`](../scripts/dev/) (entry: [`scripts/dev/index.ts`](../scripts/dev/index.ts)).
+
+### Prerequisites
 
 - **Node 22 or newer** (`node -v`), npm 10+.
 - **Docker Desktop running.** If it is not running you get *"Start Docker Desktop, then run npm run dev again"*.
-- Free ports **4000** (api) and **3305** (dashboard). The launcher picks the next free port when 3399 is busy.
+- Free ports **4000** (api) and **3000** (dashboard). The launcher picks the next free port when 3399 is busy.
 
-## What `npm run dev` does, step by step
+### What `npm run dev:launcher` does, step by step
 
 | # | Step | Details | Module |
 |---|---|---|---|
@@ -27,7 +56,7 @@ It only uses Node built-ins and the repo's existing `tsx`, so it adds no new dep
 | 4 | Builds (in parallel with 3) | `npm run build:shared` (Next.js reads `@nexus/shared` / `@nexus/auth` from `dist`) and `npm run docs:build` (the public guide). A failed build is a warning, not a stop. | [`build.ts`](../scripts/dev/build.ts) |
 | 5 | Migrations | The api's migrate CLI with `DB_APP_ROLE_MODE=separate`: it creates role `nexus_app` (DML only), applies the SQL migrations and creates partitions. **A failure stops the run.** | [`migrate.ts`](../scripts/dev/migrate.ts) |
 | 6 | API | `tsx watch` on port 4000 (restarts when you save a file). Waits for `/api/health`. | [`servers.ts`](../scripts/dev/servers.ts) |
-| 7 | Dashboard | `npm run dev -w @nexus/web` (Next.js on port 3305). If `apps/web` is not ready, or its dev server exits, everything else keeps running and the launcher says *"dashboard not available yet"*. | [`servers.ts`](../scripts/dev/servers.ts) |
+| 7 | Dashboard | `npm run dev -w @nexus/web` (Next.js on port 3000). If `apps/web` is not ready, or its dev server exits, everything else keeps running and the launcher says *"dashboard not available yet"*. | [`servers.ts`](../scripts/dev/servers.ts) |
 | 8 | Browser | Prints a summary box with every URL and opens the launcher (skip with `--no-open`). | [`open-browser.ts`](../scripts/dev/open-browser.ts) |
 
 Every line in the terminal has a coloured prefix (`[db]`, `[migrate]`, `[api]`, `[web]`, `[launcher]`).
@@ -35,7 +64,7 @@ Every line in the terminal has a coloured prefix (`[db]`, `[migrate]`, `[api]`, 
 **Ctrl+C** stops the api, the dashboard and the launcher (including their child processes; on Windows
 with `taskkill /T`). The dev database **keeps running**, so the next start is quick.
 
-Options (put them after `--`): `npm run dev -- --no-open --no-web --port 3400`.
+Options (put them after `--`): `npm run dev:launcher -- --no-open --no-web --port 3400`.
 
 | Option | Effect |
 |---|---|
@@ -48,12 +77,12 @@ Options (put them after `--`): `npm run dev -- --no-open --no-web --port 3400`.
 - **Status cards**, refreshed every 3 s: dev database (Docker state and TCP), API (`/api/health` and
   `/api/health/ready`), dashboard (`/traffic/healthz`), with ports and green/amber/red dots. Below the
   cards is the start sequence, step by step.
-- **Quick links:** dashboard `http://localhost:3305/traffic/`, API health, the public integration guide
+- **Quick links:** dashboard `http://localhost:3000/traffic/`, API health, the public integration guide
   `http://localhost:4000/api/docs/`, and the OpenAPI JSON.
 - **Sign in (dev token):** there is no company portal locally. *Sign in as admin* (the email in the box,
   default `admin@libas.in`) or *Sign in as viewer* (`viewer@libas.in`). The launcher signs an `access_token`
   (HS256, 8 hours) with the dev `LIBAS_JWT_SECRET` and sets it as an HttpOnly cookie for `localhost`.
-  Cookies are not tied to a port, so the dashboard (:3305) and the api (:4000) accept it. The dashboard
+  Cookies are not tied to a port, so the dashboard (:3000) and the api (:4000) accept it. The dashboard
   is configured with `PORTAL_LOGIN_URL=http://localhost:3399/`, so opening it signed out takes you to the
   launcher with a **"Sign in to continue"** banner, and sends you back after you sign in. Admins are
   `admin@libas.in` plus your `git config user.email` if it ends in `@libas.in`.
@@ -82,12 +111,12 @@ anywhere else, because the dev `LIBAS_JWT_SECRET` is random per laptop.
 |---|---|---|
 | 55434 | dev Postgres (`nexus-traffic-devdb`) | 127.0.0.1 |
 | 4000 | api (`/api/*`, the guide at `/api/docs/`) | all interfaces (Node default) |
-| 3305 | dashboard (`/traffic/`, `/traffic/api/*` is rewritten to the api in dev) | Next.js default |
+| 3000 | dashboard (`/traffic/`, `/traffic/api/*` is rewritten to the api in dev) | Next.js default |
 | 3399 | Dev Launcher (next free port if busy) | 127.0.0.1 |
 
 Ports used by **other** setups, which `npm run dev` never touches: 55432 / 55433 (the DB test containers
 `nexus-traffic-testdb` / `nexus-traffic-testdb18`), and 4005 / 3305 / 8080 for the docker rehearsal.
-Do not run the rehearsal's web container and `npm run dev` together, because both use 3305.
+The dev dashboard uses 3000, so the rehearsal (3305) and `npm run dev` can run together.
 
 ## Stopping and resetting
 
@@ -118,7 +147,7 @@ Do not run the rehearsal's web container and `npm run dev` together, because bot
 | *"Docker is not available … Start Docker Desktop"* | start Docker Desktop, wait until it says *running*, run `npm run dev` again |
 | *"port 4000 is already in use"* | another api is running (an older `npm run dev`, `npm run dev -w @nexus/api`, or something else). Stop it, or run `npm run dev:stop` |
 | launcher on another port | 3399 was busy; the summary box and the log show the port actually used |
-| dashboard card red, *"dashboard not available yet"* | look at the `[web]` logs on the launcher. Typical causes: `apps/web` is not finished yet, port 3305 is taken (e.g. the rehearsal web container), or a compile error. The api and launcher keep working |
+| dashboard card red, *"dashboard not available yet"* | look at the `[web]` logs on the launcher. Typical causes: `apps/web` is not finished yet, port 3000 is taken, or a compile error. The api and launcher keep working |
 | migrations fail with *password authentication failed* | `.env.dev` was recreated but the old DB volume is still there (the launcher warns about this). Run `npm run dev:reset -- --yes`, then `npm run dev` |
 | migrations fail otherwise | read the `[migrate]` output. It is the same CLI as production (`apps/api/src/db/migrate.ts`); fix the migration and run again |
 | api card red but the process is running | the api crashed at boot; `tsx watch` restarts it when you save a file. Check the `[api]` logs (e.g. a config error lists every bad key) |

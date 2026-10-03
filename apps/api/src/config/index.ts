@@ -42,9 +42,10 @@ export function parseConfig(source: NodeJS.ProcessEnv): AppConfig {
   });
 }
 
-/** Reads `.env` (repo root, then apps/api) for local dev; containers get real env vars. */
+/** Reads `.env` (apps/api, then repo root) for local dev; containers get real env vars. */
 export function loadConfig(): AppConfig {
-  dotenv.config({ path: path.resolve(__dirname, '../../../../.env'), quiet: true });
+  // apps/api/.env FIRST: dotenv never overrides, so local dev values beat the root .env (compose).
   dotenv.config({ path: path.resolve(__dirname, '../../.env'), quiet: true });
+  dotenv.config({ path: path.resolve(__dirname, '../../../../.env'), quiet: true });
   return parseConfig(process.env);
 }

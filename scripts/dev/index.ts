@@ -6,7 +6,7 @@
  *   3. builds          shared packages (for Next) + public guide            build.ts
  *   4. migrations      apps/api migrate CLI, DB_APP_ROLE_MODE=separate       migrate.ts
  *   5. api             tsx watch on :4000                                    servers.ts
- *   6. web             next dev on :3305 (skipped if apps/web is not ready)  servers.ts
+ *   6. web             next dev on :3000 (skipped if apps/web is not ready)  servers.ts
  *   7. Dev Launcher    status / sign-in / seed / sample traffic on :3399    launcher-server.ts
  *   8. browser         opens the launcher (unless --no-open)                open-browser.ts
  *   9. Ctrl+C          stops api, web and launcher; the dev DB keeps running

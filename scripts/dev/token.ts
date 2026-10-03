@@ -6,36 +6,20 @@
  * production code path (@nexus/auth verifyAccessToken). This only works because the secret is
  * random per laptop — it can never forge a token for the real portal.
  */
-import { createHmac } from 'node:crypto';
-
-import { ACCESS_TOKEN_COOKIE } from '@nexus/auth';
+import { ACCESS_TOKEN_COOKIE, DEV_ACCESS_TOKEN_TTL_SECONDS, signAccessToken, type SignedAccessToken } from '@nexus/auth';
 
 /** 8 hours, like a working day on the portal. */
-export const DEV_TOKEN_TTL_SECONDS = 8 * 60 * 60;
+export const DEV_TOKEN_TTL_SECONDS = DEV_ACCESS_TOKEN_TTL_SECONDS;
 
-export interface MintedToken {
-  token: string;
-  /** Seconds since epoch. */
-  expiresAt: number;
-}
+export type MintedToken = SignedAccessToken;
 
-function base64UrlJson(value: unknown): string {
-  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
-}
-
-/** HS256 JWT with claims { email, type: 'access', iat, exp }. */
+/** HS256 JWT with claims { email, type: 'access', iat, exp } (@nexus/auth signAccessToken). */
 export function mintAccessToken(email: string, secret: string, nowMs: number = Date.now()): MintedToken {
-  if (!secret) throw new Error('mintAccessToken: empty secret');
-  const iat = Math.floor(nowMs / 1000);
-  const exp = iat + DEV_TOKEN_TTL_SECONDS;
-  const header = base64UrlJson({ alg: 'HS256', typ: 'JWT' });
-  const payload = base64UrlJson({ email, type: 'access', iat, exp });
-  const signature = createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
-  return { token: `${header}.${payload}.${signature}`, expiresAt: exp };
+  return signAccessToken(email, secret, nowMs);
 }
 
 /**
- * Set-Cookie for localhost. Cookies are NOT port-scoped, so the dashboard (:3305) and the api
+ * Set-Cookie for localhost. Cookies are NOT port-scoped, so the dashboard (:3000) and the api
  * (:4000) receive a cookie set by the launcher (:3399) as long as the browser uses `localhost`.
  */
 export function accessTokenSetCookie(token: string): string {

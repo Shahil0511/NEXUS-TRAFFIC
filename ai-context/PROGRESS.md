@@ -68,6 +68,24 @@ and answers its open questions.
 
 ---
 
+## 2026-10-03 — Local dev the EBO_SALES way (no sign-in in dev)
+
+**Done** (requested by the user: "local dashboard and backend in dev like EBO_SALES, no auth check")
+- `npm run dev` = `build:shared` + `concurrently` (`[api]` tsx watch :4000, `[web]` next dev **:3000**);
+  `npm run dev:api` / `dev:web`; one-time `npm run dev:setup` ([`scripts/dev/setup.ts`](../scripts/dev/setup.ts):
+  `.env.dev` → dev DB :55434 → builds → migrations → writes `apps/api/.env` + `apps/web/.env.local`).
+  The older all-in-one launcher is now `npm run dev:launcher`.
+- **No sign-in in dev:** `DEV_USER_EMAIL` (web env, optional) — `proxy.ts` `devSignInToken` signs an
+  `access_token` with the dev secret only under `next dev` (`NODE_ENV=development`); production unchanged.
+  Signer moved to `@nexus/auth` `signAccessToken` (reused by `scripts/dev/token.ts`).
+- The api / migrate CLI load `apps/api/.env` BEFORE the root `.env`; `.dockerignore` now excludes
+  `**/.env` and `**/.env.*`. Dev dashboard moved from 3305 to 3000, so it no longer collides with the
+  docker rehearsal's web container.
+- Tests: 3 proxy dev sign-in cases; web 139, api 713, dev scripts 41 green; typecheck clean.
+  Checked live: `http://localhost:3000/traffic/` → 200 without a login, `/api/v1/me` → admin.
+
+---
+
 ## 2026-10-03 — S5 Integration Health, Apps admin UI, snippet contract tests, guide
 
 **Done**

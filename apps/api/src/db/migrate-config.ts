@@ -72,9 +72,10 @@ export function appRoleOf(config: MigrateConfig): AppRole {
   return { mode: 'separate', password: config.NEXUS_APP_DB_PASSWORD ?? '' };
 }
 
-/** Reads `.env` (repo root, then apps/api) for local runs; containers get real env vars. */
+/** Reads `.env` (apps/api, then repo root) for local runs; containers get real env vars. */
 export function loadMigrateConfig(): MigrateConfig {
-  dotenv.config({ path: path.resolve(__dirname, '../../../../.env'), quiet: true });
+  // apps/api/.env FIRST: dotenv never overrides, so local dev values beat the root .env (compose).
   dotenv.config({ path: path.resolve(__dirname, '../../.env'), quiet: true });
+  dotenv.config({ path: path.resolve(__dirname, '../../../../.env'), quiet: true });
   return parseMigrateConfig(process.env);
 }
