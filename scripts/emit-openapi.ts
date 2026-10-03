@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  apiErrorBodySchema,
   BROWSER_BATCH_EXAMPLE,
   browserIngestBatchSchema,
   buildIngestUrl,
@@ -67,16 +68,6 @@ const VERIFY_SECURITY_SCHEME = 'NexusAnyKey';
 const TAG_INGEST = 'Ingest';
 const TAG_DOCS = 'Docs';
 const RETRY_AFTER_HEADER = 'Retry-After';
-
-/** The error envelope every non-2xx JSON response uses (mirrors `ApiErrorBody`). */
-const errorEnvelopeSchema = z.object({
-  error: z.object({
-    code: z.enum(Object.values(ERROR_CODES) as [string, ...string[]]),
-    message: z.string(),
-    details: z.unknown().optional(),
-    requestId: z.string().optional(),
-  }),
-});
 
 // ─── Schema conversion ──────────────────────────────────────────────────────
 
@@ -132,7 +123,7 @@ function buildComponentSchemas(): Record<string, JsonObject> {
     BrowserIngestBatch: toComponentSchema(browserIngestBatchSchema),
     IngestResult: toComponentSchema(ingestResultSchema),
     VerifyResponse: toComponentSchema(verifyResponseSchema),
-    ErrorEnvelope: toComponentSchema(errorEnvelopeSchema),
+    ErrorEnvelope: toComponentSchema(apiErrorBodySchema),
   };
 }
 

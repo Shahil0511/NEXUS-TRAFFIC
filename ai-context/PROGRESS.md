@@ -17,6 +17,57 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-03 — S6 Jobs, backups/restore, DEPLOY.md, security suite, Playwright smoke, doc-link test
+
+**Done**
+- **Jobs** (chain [03-code-navigation.md](03-code-navigation.md) §5d): `apps/api/src/jobs/scheduler.ts` now waits
+  for runs in flight on `stop()` (explicit list, no overlap, unref'd timers); `apps/api/src/lifecycle/shutdown.ts`
+  awaits it before ending the pools (injectable `exit`, failsafe cleared). Partition maintenance and retention
+  already ran on the advisory-locked client (S1 carry-over fix confirmed). New tests: `scheduler.test.ts`,
+  `shutdown.test.ts`, `apps/api/test/db/retention-job.integration.test.ts` (real container, `RAW_RETENTION_MONTHS=1`,
+  back-dated partitions, as `nexus_app` via the SECURITY DEFINER function: only expired months dropped, once
+  per IST day). No new migration (`drop_expired_partitions` exists in 0001).
+- **Backups**: `BACKUP_AT_IST` / `BACKUP_KEEP` (compose-only keys, `.env.example` regenerated, passed to
+  `pg-backup`, validated in `ops/backup/run.sh`). New `ops/backup/restore.sh` (rename schema → restore in one
+  transaction → drop old / rename back on failure; plain `pg_restore --clean` fails on partitions). Rehearsed on
+  the local stack: manual dump, pruning, invalid-time rejection, scratch-DB restore and in-place restore → migrate
+  no-op, `/api/health/ready` 200.
+- **DEPLOY.md** (repo root) for the TL: prerequisites, owner-mode `.env` for 10.150.0.5 / `nexus_traffic`
+  (URL-encoding), preflight, gateway snippet (+ commented `auth_request off;` in `ops/nginx/nexus-traffic.conf`),
+  deploy, health checks (incl. websocket 101), first app + keys, curl.sh smoke, hairpin check, update/rollback,
+  jobs, backups/restore, open questions. `scripts/deploy.sh` always waits for the web health check.
+- **Security suite** `apps/api/test/security/`: `security.test.ts` (no DB; header table maps every plan case to
+  the test proving it): CSRF + admin + cookie on every non-GET `apps.*` leaf, forged leftmost XFF cannot dodge the
+  per-IP failure limiter, `javascript:`/non-absolute paths rejected by the contract, expired / forged /
+  disallowed socket tokens refused at the handshake. `security.integration.test.ts`: revoked key rejected on the
+  next request (cache invalidated), forged XFF → stored IP is the gateway hop, same `session_id` in two apps never
+  mixes (incl. a correlated API call), `javascript:` path rejected over HTTP and by the DB CHECK as `nexus_app`.
+  Existing tests referenced for Origin null/foreign, secret key on browser, poison bisect, 23514 retry, IP masking.
+- **Playwright smoke** `apps/web/e2e/` (`npm run test:smoke`, not in `npm test`): auth redirect, Overview, API
+  Routes → endpoint detail, Live row within seconds of an ingest (socket via `edge`), Apps as admin.
+  Ran against the rebuilt local stack: 5/5 passed.
+- **ai-context doc-link test** `apps/api/test/ai-context-links.test.ts` (markdown links + repo-path code spans in
+  ai-context, DEPLOY/CLAUDE/AGENTS; exempts the other-teams table of 08). Fixed the 2 broken references it found.
+- **Polish**: `apiErrorBodySchema` exported from `packages/shared/src/schemas/errors.ts` (used by
+  `scripts/emit-openapi.ts`; openapi unchanged); `scripts/tsconfig.json` + `npm run typecheck:scripts` (part of
+  `npm run typecheck`); dead `demo:traffic` script removed; DB tests for `activityTimeseries` /
+  `listRecentEvents`; docs: 06-process (tests, gates, git, deploy/rollback), 04-how-to-recipes, 03 §5d.
+- **Gates**: `npm run typecheck` clean; `npm test` green (api 713 + 169 DB-skipped, web 136, shared 32, node 83,
+  express 43, react 37, auth 10); `RUN_DB_TESTS=1 npm run test:db` 882/882 on PostgreSQL 18 and on 17;
+  `env:example --check`, `openapi:emit --check`, `docs:build` OK.
+
+**Next**: push `main` after the user approves; then the TL dry-runs [`DEPLOY.md`](../DEPLOY.md) on the server
+and answers its open questions.
+
+**Notes / known issues**
+- Non-admins still see "Admins only" on Apps (plan: read-only list for everyone) — deliberate, not changed.
+- Live snapshot past ticks carry `activeUsers: 0`; Pages/Tools/Geography have no totals endpoint (unchanged).
+- Column lengths without `INGEST_LIMITS` constants and TEST-NET IPs classed `public` (S1 notes) unchanged.
+- `scripts/dev` vitest tests are not part of the root `npm test`.
+- The smoke registers an app `smoke-test` and writes a few events into the LOCAL database it runs against.
+
+---
+
 ## 2026-10-03 — S5 Integration Health, Apps admin UI, snippet contract tests, guide
 
 **Done**
@@ -178,7 +229,7 @@ from `PENDING_ROUTE_LEAVES`.
 then S2.
 
 **Notes / known issues**
-- The comments of migrations `0001`/`0003` still mention `0007_grants.sql`; left as is (editing an applied file
+- The comments of migrations `apps/api/migrations/0001_helpers_and_partitions.sql` / `0003_admin_audit_log.sql` still mention `0007_grants.sql`; left as is (editing an applied file
   is checksum drift). A database migrated by an S1 rehearsal lists `0007_grants` as unknown-applied (warning).
 - `deploy.sh` runs `--remove-orphans` and the production preflight (no `--localdb`); it is meant for the
   external-database deploy only.
@@ -188,7 +239,7 @@ then S2.
 ## 2026-10-01 — S1 Database, server ingest, key admin, docs skeleton, Docker
 
 **Done**
-- **Database** (`apps/api/migrations/0001`–`0007`, see `apps/api/migrations/README.md` and
+- **Database** (`apps/api/migrations/`, files 0001–0007, see `apps/api/migrations/README.md` and
   [07-data-model.md](07-data-model.md)): helpers + monthly partition functions, apps/api_keys, append-only
   admin audit log, `api_requests`, `web_events` (schema only), `ingest_counters` (IST hour buckets),
   grants for `nexus_app` (DML only). Migration runner + CLI (`apps/api/src/db/migrate.ts`, exit codes

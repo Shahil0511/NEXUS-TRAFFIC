@@ -35,10 +35,6 @@ wait_for() {
   echo "ok  ${url}"
 }
 
-has_service() {
-  docker compose config --services | grep -qx "$1"
-}
-
 step 'Preflight'
 bash scripts/preflight.sh
 
@@ -62,11 +58,7 @@ fi
 step 'Health'
 wait_for "$API_READY_URL"
 curl -fsS -o /dev/null "$API_DOCS_URL" && echo "ok  ${API_DOCS_URL}"
-if has_service web; then
-  wait_for "$WEB_HEALTH_URL"
-else
-  echo 'skip web (service not defined yet — arrives in S2)'
-fi
+wait_for "$WEB_HEALTH_URL"
 
 step 'Status'
 docker compose ps

@@ -7,8 +7,9 @@
     "dev": "next dev -p 3305",
     "build": "next build",
     "start": "next start -p 3305",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p e2e/tsconfig.json",
+    "test": "vitest run",
+    "test:smoke": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {
     "@nexus/auth": "1.0.0",
@@ -31,6 +32,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.3",

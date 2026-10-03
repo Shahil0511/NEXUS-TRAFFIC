@@ -31,6 +31,8 @@ export const COMPOSE_ONLY_KEYS = [
   'POSTGRES_DB',
   'PG_IMAGE',
   'BACKUP_DATABASE_URL',
+  'BACKUP_AT_IST',
+  'BACKUP_KEEP',
 ] as const;
 
 /** Read ONLY by the web container (apps/web/src/env.schema.ts + its test). */
@@ -137,6 +139,16 @@ export const SECTIONS: readonly Section[] = [
         description:
           'What pg-backup dumps nightly. Empty = MIGRATION_DATABASE_URL (the usual choice).',
         value: '',
+      },
+      {
+        key: 'BACKUP_AT_IST',
+        description: 'Time of the nightly pg-backup dump, HH:MM in IST (Asia/Kolkata).',
+        value: '01:30',
+      },
+      {
+        key: 'BACKUP_KEEP',
+        description: 'How many dump files pg-backup keeps in ./backups (newest first; older ones are deleted).',
+        value: '14',
       },
       { key: 'PG_POOL_WRITE_MAX', description: 'api connections for ingest/admin writes.' },
       { key: 'PG_POOL_QUERY_MAX', description: 'api connections for dashboard reads.' },

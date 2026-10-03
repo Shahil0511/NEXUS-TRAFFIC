@@ -599,4 +599,47 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     });
     expect(cities.items[2]).toMatchObject({ requests: 1, pageViews: 1, users: 2 });
   });
+
+  // ─── Live backfill (S4 SQL: LiveService.snapshot → these two queries) ────────
+
+  describe('WebEventQueryRepository live backfill', () => {
+    const hourBefore = () => ({ from: new Date(seed.now.getTime() - HOUR), to: seed.now });
+
+    async function ownerCount(sql: string): Promise<number> {
+      const { rows } = await db.ownerPool.query<{ n: string }>(sql, [hourBefore().from, hourBefore().to]);
+      return Number(rows[0]?.n);
+    }
+
+    it('activityTimeseries: minute buckets whose totals equal the page views / tool uses of the window', async () => {
+      const buckets = await new WebEventQueryRepository(queryPool).activityTimeseries(hourBefore(), 'minute');
+      expect(buckets.length).toBeGreaterThan(0);
+      for (const b of buckets) expect(new Date(b.bucket).getUTCSeconds()).toBe(0);
+      const times = buckets.map((b) => new Date(b.bucket).getTime());
+      expect(times).toEqual([...times].sort((x, y) => x - y));
+      const window = `occurred_at >= $1 AND occurred_at < $2`;
+      expect(buckets.reduce((sum, b) => sum + Number(b.page_views), 0)).toBe(
+        await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'page_view'`),
+      );
+      expect(buckets.reduce((sum, b) => sum + Number(b.tool_uses), 0)).toBe(
+        await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'tool_use'`),
+      );
+    });
+
+    it('listRecentEvents: API calls + browser events (never page_time), newest first, limited', async () => {
+      const repo = new WebEventQueryRepository(queryPool);
+      const all = await repo.listRecentEvents(hourBefore(), 500);
+      const window = `occurred_at >= $1 AND occurred_at < $2`;
+      expect(all).toHaveLength(
+        (await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type <> 'page_time'`)) +
+          (await ownerCount(`SELECT count(*) AS n FROM traffic.api_requests WHERE ${window}`)),
+      );
+      expect(all.some((e) => e.kind === 'page_time')).toBe(false);
+      expect(new Set(all.map((e) => e.kind)).has('api')).toBe(true);
+      const times = all.map((e) => new Date(e.occurred_at).getTime());
+      expect(times).toEqual([...times].sort((x, y) => y - x));
+
+      const newest = await repo.listRecentEvents(hourBefore(), 3);
+      expect(newest.map((e) => e.event_id)).toEqual(all.slice(0, 3).map((e) => e.event_id));
+    });
+  });
 });

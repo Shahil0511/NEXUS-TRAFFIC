@@ -27,8 +27,9 @@ name: nexus-traffic
 #   api        ingest + dashboard API + Socket.io + the public guide. Host port 127.0.0.1:4005 only;
 #              the gateway nginx proxies https://nexus.libas.in/traffic/api/ → here
 #              (ops/nginx/nexus-traffic.conf).
-#   pg-backup  nightly pg_dump of BACKUP_DATABASE_URL (default: MIGRATION_DATABASE_URL) at 01:30 IST
-#              into ./backups, keeps the newest 14.
+#   pg-backup  nightly pg_dump of BACKUP_DATABASE_URL (default: MIGRATION_DATABASE_URL) at
+#              BACKUP_AT_IST (01:30 IST) into ./backups, keeps the newest BACKUP_KEEP (14).
+#              Restore: DEPLOY.md → "Backups and restore".
 #   edge       ONLY with --profile local: a local copy of the gateway on 127.0.0.1:8080.
 #   web        the dashboard (Next.js, basePath /traffic). Host port 127.0.0.1:3305 only; the gateway
 #              nginx proxies https://nexus.libas.in/traffic/ → here. Gets ONLY an env allowlist.
@@ -166,6 +167,8 @@ services:
     environment:
       # Connection string to dump (owner login); defaults to MIGRATION_DATABASE_URL.
       BACKUP_DATABASE_URL: ${BACKUP_DATABASE_URL:-${MIGRATION_DATABASE_URL:?set MIGRATION_DATABASE_URL in .env}}
+      BACKUP_AT_IST: ${BACKUP_AT_IST:-01:30} # HH:MM IST
+      BACKUP_KEEP: ${BACKUP_KEEP:-14} # dump files kept in ./backups
     volumes:
       - ./ops/backup:/ops/backup:ro
       - ./backups:/backups # host folder; copy it off the machine regularly

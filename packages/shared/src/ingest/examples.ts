@@ -3,7 +3,7 @@
  *
  * WHY: typed with `satisfies`, so a schema change that breaks them breaks the build. They are
  * emitted to docs/dist/examples/*.json for other teams, used by the OpenAPI document, by the
- * DB parity test ("every example inserts"), and by scripts/demo-traffic.ts.
+ * DB parity test ("every example inserts") and by the api tests.
  */
 import type { BrowserIngestBatchInput, ServerIngestBatchInput } from './schemas';
 

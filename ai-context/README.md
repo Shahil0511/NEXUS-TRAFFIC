@@ -15,7 +15,7 @@ folder before touching the code, read this one.
 5. **Dashboard:** Next.js 16 (`apps/web`) behind the company SSO, with live updates over Socket.io.
 6. **Contracts:** `packages/shared` holds every route, DTO, enum and ingest schema — the single source of truth.
 7. **Auth:** `packages/auth` verifies the portal's `access_token` cookie (HS256, `LIBAS_JWT_SECRET`).
-8. **Deploy:** the Team Lead runs `bash scripts/deploy.sh` (`git pull` + `docker compose up -d --build`).
+8. **Deploy:** the Team Lead follows [`DEPLOY.md`](../DEPLOY.md); updates are `bash scripts/deploy.sh` (`git pull` + `docker compose up -d --build`).
 9. **Public guide for other teams:** `https://nexus.libas.in/traffic/api/docs/` (built from `docs/integration/`).
 10. **Style:** SOLID, one function = one job, and VS Code ctrl-click navigation from a UI click down to SQL.
 
@@ -45,4 +45,5 @@ folder before touching the code, read this one.
 - Any change to architecture, the ingest contract, tables or conventions updates the matching file
   here **in the same commit**.
 - A new significant decision gets a new file in `decisions/` (context → decision → consequences).
-- A test checks that every file path mentioned in these documents exists, so they cannot silently rot.
+- A test (`apps/api/test/ai-context-links.test.ts`, part of `npm test`) checks that every repo path mentioned in
+  these documents exists, so they cannot silently rot.

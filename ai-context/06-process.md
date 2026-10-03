@@ -1,7 +1,8 @@
 # 06 — process
 
-> **Partly filled (S1, S2):** local development (api + web dashboard) and Docker are below. Test strategy details, git
-> workflow, the full deploy runbook and rollback for the Team Lead are completed in S6.
+How we run, test, commit, deploy and roll back. The Team Lead's runbook is [`DEPLOY.md`](../DEPLOY.md)
+(repo root); this page is the developer view. For the one-command local setup see
+[09-local-development.md](09-local-development.md).
 
 See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md) for status.
 
@@ -26,12 +27,13 @@ npm run dev -w @nexus/api                     # api on http://localhost:4000 (ts
 
 | Command | What it does |
 |---|---|
-| `npm run typecheck` | `tsc --noEmit` in every workspace |
+| `npm run typecheck` | `tsc --noEmit` in every workspace, then `scripts/` (`scripts/tsconfig.json`) and `scripts/dev/` |
 | `npm test` | vitest unit tests in every workspace |
 | `RUN_DB_TESTS=1 npm run test:db` | api DB tests (`*.integration.test.ts`) against a real Postgres (`TEST_PG_ADMIN_URL`, a superuser URL of a THROWAWAY cluster; run them on **18** — the production major — and 17) |
 | `npm run docs:build` | renders `docs/integration/*.md` → `docs/dist/` (guide, openapi.json, snippets, examples) |
 | `npm run openapi:emit` | regenerates `docs/openapi.json` (commit it); `-- --check` fails if stale |
 | `npm run env:example` | regenerates `.env.example` from the api env schema; `-- --check` fails if stale |
+| `npm run test:smoke` | Playwright smoke of the RUNNING docker stack via `edge` (not part of `npm test`, see below) |
 
 The guide is then at `http://localhost:4000/api/docs/` (served from `docs/dist`).
 
@@ -76,7 +78,8 @@ npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (
 | `docker-compose.yml` | `postgres` (profile `localdb` only), `migrate` (one-shot), `api`, `pg-backup`, `web` (env allowlist, `127.0.0.1:3305:3000`, healthcheck `/traffic/healthz`), `edge` (profile `local`) |
 | `ops/nginx/nexus-traffic.conf` | location blocks the TL pastes into the gateway nginx |
 | `ops/nginx/local.conf` | the same blocks for the local `edge` service (`/traffic/api/` + `/traffic/socket.io/` → api, `/traffic/` and `= /traffic` → web) |
-| `ops/backup/run.sh` | nightly `pg_dump "$BACKUP_DATABASE_URL" -Fc` at 01:30 IST, keeps 14 (`--once` for a manual dump) |
+| `ops/backup/run.sh` | nightly `pg_dump "$BACKUP_DATABASE_URL" -Fc` at `BACKUP_AT_IST` (01:30 IST), keeps `BACKUP_KEEP` (14) (`--once` for a manual dump) |
+| `ops/backup/restore.sh` | restore a dump into `BACKUP_DATABASE_URL` (schema `traffic` only, all-or-nothing) |
 | `scripts/preflight.sh` | checks Compose ≥ 2.20, `.env` completeness per `DB_APP_ROLE_MODE`, hex secrets, URL-encoded passwords, TCP reachability of the database, ports 3305/4005, disk ≥ 5 GB (`--localdb` for the local stack) |
 | `scripts/deploy.sh` | preflight → `git pull --ff-only` → `docker compose up -d --build --remove-orphans` → health checks |
 
@@ -109,8 +112,69 @@ docker compose --profile localdb --profile local down  # keeps the data volume (
 - **Lockfile:** `package-lock.json` must contain the Linux (musl) optional binaries. After changing
   dependencies on Windows, regenerate it inside Alpine, then run a normal `npm install`:
   `docker run --rm -v "$PWD:/w" -w /w node:22-alpine npm install --package-lock-only --no-audit --no-fund`.
-- Server deploy (TL): `bash scripts/preflight.sh` once, then `bash scripts/deploy.sh` for every update;
-  rollback = `git checkout <sha> && SKIP_PULL=1 bash scripts/deploy.sh` (migrations are additive).
-- Backups land in `./backups` on the host (git-ignored); restore instructions
-  (`pg_restore -d "$BACKUP_DATABASE_URL" …`) are in `ops/backup/run.sh`. The shared server may also be
-  backed up by its owners.
+- Server deploy (TL): [`DEPLOY.md`](../DEPLOY.md) — `.env` (owner mode), `bash scripts/preflight.sh`, the gateway
+  snippet, `bash scripts/deploy.sh`, health checks, first app + keys, backups/restore, open questions.
+- Backups land in `./backups` on the host (git-ignored): `ops/backup/run.sh` (nightly at `BACKUP_AT_IST`, keeps
+  `BACKUP_KEEP`, `--once` for a manual dump); restore with `ops/backup/restore.sh` (renames the live schema,
+  restores in one transaction, puts the old schema back on failure — plain `pg_restore --clean` fails on the
+  partitioned tables). The shared server may also be backed up by its owners.
+
+## Tests
+
+| Layer | Where | Runs in |
+|---|---|---|
+| unit (pure functions, services with fakes, middleware, jobs) | `*.test.ts` next to the file | `npm test` |
+| contract (ROUTES ↔ route table ↔ web client, env example, snippets, docs build, ai-context links) | `apps/api/test/*.test.ts`, `apps/web/src/lib/api.test.ts`, `packages/node/src/snippets-payload.contract.test.ts` | `npm test` |
+| security suite (no-DB part) | `apps/api/test/security/security.test.ts` (header table: every plan case → its test) | `npm test` |
+| DB / e2e (real Postgres, as `nexus_app`) | `*.integration.test.ts` (`apps/api/test/db/`, `apps/api/test/e2e/`, `apps/api/test/security/`, services) | `RUN_DB_TESTS=1 npm run test:db` |
+| browser smoke of the built stack | `apps/web/e2e/smoke.spec.ts` | `npm run test:smoke` |
+
+**DB suites** need a THROWAWAY cluster (each suite creates and drops its own database). The two local test
+containers (never the dev DB, never 10.150.0.5):
+
+```bash
+docker run -d --name nexus-traffic-testdb18 -e POSTGRES_PASSWORD=testpw -p 127.0.0.1:55433:5432 postgres:18-alpine  # once
+TEST_PG_ADMIN_URL=postgres://postgres:testpw@127.0.0.1:55433/postgres RUN_DB_TESTS=1 npm run test:db   # PG 18 (production major)
+RUN_DB_TESTS=1 npm run test:db      # default URL = nexus-traffic-testdb (postgres:17-alpine) on 127.0.0.1:55432
+```
+
+**Smoke** (Playwright, Chromium) against `http://localhost:8080/traffic` (override: `SMOKE_BASE_URL`):
+
+```bash
+docker compose --profile localdb --profile local up -d --build
+npx playwright install chromium     # once per machine
+npm run test:smoke                  # auth redirect, Overview, endpoint detail, Live tick, Apps as admin
+```
+
+It mints an admin cookie from the repo-root `.env` (`LIBAS_JWT_SECRET`, first `DASHBOARD_ADMIN_EMAILS`) and
+registers/reuses the app `smoke-test` (writes a few events to the LOCAL database). Config:
+`apps/web/e2e/playwright.config.ts`.
+
+## Gates before every commit
+
+```bash
+npm run typecheck && npm test
+RUN_DB_TESTS=1 npm run test:db                       # on 18 (see above) when SQL, migrations or repositories changed
+npm run env:example -- --check && npm run openapi:emit -- --check && npm run docs:build
+```
+
+## Git
+
+- One branch: `main`. Commit per implementation step, message `S<n>: <what>` (or a conventional summary for
+  small follow-ups); end AI-assisted commits with the `Co-Authored-By` line.
+- Every commit that changes architecture, contract, tables or conventions updates the matching ai-context file
+  and adds a [PROGRESS.md](PROGRESS.md) entry (rule 5 in `CLAUDE.md`).
+- Never commit `.env`, `backups/`, `docs/dist/`, `test-results/`.
+- Push only after the user approved; the TL deploys from `main` (`git pull --ff-only` in `deploy.sh`).
+
+## Deploy and rollback (summary of DEPLOY.md)
+
+| Action | Command (repo root on the server) |
+|---|---|
+| first time | `.env` from `.env.example` → `bash scripts/preflight.sh` → paste `ops/nginx/nexus-traffic.conf` → `bash scripts/deploy.sh` |
+| update | `bash scripts/deploy.sh` |
+| rollback | `git checkout <sha> && SKIP_PULL=1 bash scripts/deploy.sh` (migrations are additive; older code tolerates newer schema) |
+| backup now | `docker compose exec pg-backup sh /ops/backup/run.sh --once` |
+| restore | `docker compose stop api web` → `docker compose exec pg-backup sh /ops/backup/restore.sh /backups/<file>.dump` → `docker compose up -d` |
+
+A schema change that is NOT additive (drop/rename a column) needs a two-step release and an ADR.

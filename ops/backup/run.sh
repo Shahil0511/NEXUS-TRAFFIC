@@ -11,10 +11,8 @@
 # pg_dump must be >= the server's major version (18), hence the postgres:18-alpine image.
 #
 #   manual backup now:  docker compose exec pg-backup sh /ops/backup/run.sh --once
-#   restore (DANGER: drops and recreates the dumped objects in that database; ./backups is mounted
-#   at /backups in this container):
-#     docker compose exec pg-backup sh -c \
-#       'pg_restore -d "$BACKUP_DATABASE_URL" --clean --if-exists /backups/nexus-traffic-YYYY-MM-DD.dump'
+#   restore (stop api + web first; see DEPLOY.md → "Backups and restore"):
+#     docker compose exec pg-backup sh /ops/backup/restore.sh /backups/nexus-traffic-YYYY-MM-DD.dump
 #
 # Env (from docker-compose.yml): BACKUP_DATABASE_URL (postgres://user:url-encoded-password@host:port/db).
 # Optional: BACKUP_AT_IST (HH:MM, default 01:30), BACKUP_KEEP (default 14).
@@ -26,6 +24,13 @@ BACKUP_DIR=/backups
 BACKUP_AT_IST="${BACKUP_AT_IST:-01:30}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 : "${BACKUP_DATABASE_URL:?BACKUP_DATABASE_URL is not set (compose defaults it to MIGRATION_DATABASE_URL)}"
+case "$BACKUP_AT_IST" in
+  [0-1][0-9]:[0-5][0-9] | 2[0-3]:[0-5][0-9]) ;;
+  *) echo "pg-backup: BACKUP_AT_IST must be HH:MM (00:00–23:59), got '$BACKUP_AT_IST'" >&2; exit 2 ;;
+esac
+case "$BACKUP_KEEP" in
+  '' | *[!0-9]* | 0) echo "pg-backup: BACKUP_KEEP must be a positive integer, got '$BACKUP_KEEP'" >&2; exit 2 ;;
+esac
 IST_OFFSET_SECONDS=19800 # +05:30
 DAY_SECONDS=86400
 IST_TZ='IST-5:30' # POSIX TZ string: works without /usr/share/zoneinfo

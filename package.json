@@ -16,14 +16,15 @@
     "dev:stop": "tsx --conditions=@nexus/source scripts/dev/stop.ts",
     "dev:reset": "tsx --conditions=@nexus/source scripts/dev/reset.ts",
     "build:shared": "npm run build -w @nexus/shared && npm run build -w @nexus/auth",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:scripts",
+    "typecheck:scripts": "tsc -p scripts/tsconfig.json && tsc -p scripts/dev/tsconfig.json",
     "test": "npm run test --workspaces --if-present",
     "test:db": "npm run test:db -w @nexus/api",
+    "test:smoke": "npm run build:shared && npm run test:smoke -w @nexus/web",
     "docs:build": "tsx --conditions=@nexus/source scripts/build-docs.ts",
     "openapi:emit": "tsx --conditions=@nexus/source scripts/emit-openapi.ts",
     "env:example": "tsx --conditions=@nexus/source scripts/generate-env-example.ts",
     "sdk:pack": "tsx scripts/sdk-pack.ts",
-    "demo:traffic": "tsx --conditions=@nexus/source scripts/demo-traffic.ts",
     "format": "prettier --write ."
   },
   "devDependencies": {

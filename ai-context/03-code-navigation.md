@@ -1,7 +1,7 @@
 # 03 — code navigation
 
 Where to start reading code, which folder is which layer, and the chains that exist: server ingest
-and app/key admin (S1, admin UI + Integration Health in S5 §4/§4b), and the dashboard read side UI → SQL for Overview / API Routes / Errors (S2). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
+and app/key admin (S1, admin UI + Integration Health in S5 §4/§4b), the dashboard read side UI → SQL for Overview / API Routes / Errors (S2) and the following pages (S3–S5), and the background jobs (S6, §5d). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
 for status.
 
 ## 1. Entry files
@@ -47,6 +47,10 @@ End to end: `apps/api/test/e2e/ingest.integration.test.ts` (S1 server + S3 brows
 database by `apps/api/test/db/analytics-queries.integration.test.ts`; the datasets live in
 `apps/api/test/db/analytics-seed.ts` (`seedAnalytics` for S2, `seedJourneys` for the S3 browser sessions,
 each in its own database).
+Security suite (S6): `apps/api/test/security/security.test.ts` (no DB; its header table maps every plan
+case to the test that proves it) + `apps/api/test/security/security.integration.test.ts`. Docs stay true:
+`apps/api/test/ai-context-links.test.ts` (every repo path mentioned in ai-context exists). Browser smoke of
+the running stack (not in `npm test`): `apps/web/e2e/smoke.spec.ts` (`npm run test:smoke`).
 
 ## 3. The server ingest chain (`POST /api/v1/ingest/server`)
 
@@ -289,6 +293,26 @@ timers: LIVE_TICK_MS → LiveBroadcaster.emitTicks (traffic:tick per subscribed 
 Dev: `NEXT_PUBLIC_SOCKET_PATH=/traffic/socket.io` everywhere; `next dev` rewrites it to the api (`next.config.ts`),
 nginx does in production. Proven by `apps/api/test/e2e/live-socket.test.ts` (real socket, tick ≤ `LIVE_TICK_MS`).
 
+### 5d. Background jobs (S6): partitions + retention
+
+```
+apps/api/src/server.ts               startJobs(container) after listen; createShutdown({ jobs, … }) on SIGTERM/SIGINT
+apps/api/src/jobs/scheduler.ts        every(name, ms, run): explicit list, no overlap per job, unref'd timers,
+                                      failures logged ('job failed'); stop() clears timers + awaits runs in flight
+  ├─ every 6 h      → apps/api/src/jobs/partition-maintenance.job.ts  PartitionMaintenanceJob.run
+  └─ every 15 min   → apps/api/src/jobs/retention.job.ts              RetentionJob.run (works once per IST day, 02:30–03:30)
+both: apps/api/src/db/transaction.ts withAdvisoryXactLock(pool, ADVISORY_LOCKS.x, client => …)   (other replica holds it → skip)
+apps/api/src/services/partition.service.ts   ensureAhead(client) / dropExpired(client)  — the work runs on the LOCKED client
+apps/api/src/repositories/partition.repository.ts   ensure / dropExpired → SELECT traffic.ensure_partitions(1, 2) /
+                                      traffic.drop_expired_partitions(table, RAW_RETENTION_MONTHS)
+apps/api/migrations/0001_helpers_and_partitions.sql   the SECURITY DEFINER functions (nexus_app has no DDL of its own)
+apps/api/src/lifecycle/shutdown.ts    realtime.close → server.close → jobs.stop() → pools.end (10 s failsafe)
+```
+
+Proven by `apps/api/src/jobs/*.test.ts`, `apps/api/src/lifecycle/shutdown.test.ts` and
+`apps/api/test/db/retention-job.integration.test.ts` (real container, `RAW_RETENTION_MONTHS=1`, back-dated
+partitions, as `nexus_app`: only the expired months are dropped).
+
 ## 6. How to find X
 
 | I want… | Go to |
@@ -300,3 +324,5 @@ nginx does in production. Proven by `apps/api/test/e2e/live-socket.test.ts` (rea
 | what other teams send | `packages/shared/src/ingest/schemas.ts` + [08-integration-contract.md](08-integration-contract.md) |
 | how a class is constructed | `apps/api/src/container.ts` |
 | which env vars exist | `apps/api/src/config/env.schema.ts` (`.env.example` is generated from it) |
+| a background job | `apps/api/src/jobs/scheduler.ts` (the explicit list), §5d |
+| how to deploy / back up / restore | `DEPLOY.md` (repo root), `ops/backup/run.sh`, `ops/backup/restore.sh` |
