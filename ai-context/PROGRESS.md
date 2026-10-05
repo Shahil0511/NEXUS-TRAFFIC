@@ -17,6 +17,85 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-05 — One-port hosting (edge nginx) + handoff zip for the Team Lead
+
+**Done** ([ADR 0004](decisions/0004-one-host-port-edge-nginx.md)) — the user hosts Nexus like EBO_SALES: a zip to
+the TL, who runs compose and assigns ONE port.
+- `docker-compose.yml`: `edge` (nginx) always on and the only published port
+  `${NEXUS_BIND_ADDRESS:-0.0.0.0}:${NEXUS_PORT:-8080}`, with a healthcheck; api and web no longer publish
+  4005/3305. The former local-only gateway copy is now `ops/nginx/edge.conf` (passes the gateway's
+  `X-Forwarded-Proto`, relative redirects);
+  `ops/nginx/nexus-traffic.conf` now forwards `/traffic/…` to one upstream with the path kept.
+- `.env.example` (generator): new section *Hosting* (`NEXUS_PORT`, `NEXUS_BIND_ADDRESS`, compose-only keys),
+  `TRUST_PROXY_HOPS=2` (gateway + edge; schema default stays 1 for `npm run dev`).
+- `scripts/deploy.sh` works from an unpacked zip (no `.git` → no pull) and checks health through the edge;
+  `scripts/preflight.sh` checks `NEXUS_PORT` instead of 4005/3305.
+- New `scripts/handoff/make-handoff-zip.ps1` (git-visible files + `.env.production` as `.env`, refuses
+  `change-me` and localdb values) and the TL's one-page `HANDOFF.md` (repo root, EBO style); `DEPLOY.md` and
+  ai-context (02, 03, 06, 09, ADR 0001 note) updated. Local rehearsal is now `docker compose --profile localdb up`.
+
+---
+
+## 2026-10-05 — Dashboard auto-refresh + EBO_SALES request linking (audit of the integration)
+
+**Done** (the user reported: location unknown, features unclear, pages only update after a tab switch)
+- **Audit against the dev DB:** EBO sent 131 server + 45 browser events (`page_view`, `page_time`,
+  `tool_use`), email on 129/131. Two real problems found, one non-problem:
+  1. **No request ↔ page-view linking** (`session_id`/`page_view_id` null on every server event):
+     `openapi-fetch`'s `createClient()` captures `globalThis.fetch` at module load, before the tracker
+     wraps it. Fixed in EBO (`frontend/src/lib/api/client.ts`: late-bound fetch); the gateway → Next proxy
+     → FastAPI path was verified to carry both headers into `traffic.api_requests`. Guide chapter 9
+     (`docs/integration/09-environments.md`) now warns about clients that capture `fetch`.
+  2. **Analytics pages never refreshed** (60 s staleTime, no focus refetch, no socket) → new
+     `apps/web/src/features/live/useAutoRefresh.ts` + `autoRefreshPolicy.ts` + `AutoRefresh.tsx`
+     (see [02-architecture.md](02-architecture.md) § Real-time); 12 new tests.
+  3. **Location unknown = localhost**, not a bug: dev traffic is loopback (no geo). A public IP sent
+     through EBO's 2-hop chain resolved to IN / MH / Mumbai.
+- Live socket through the dev dashboard (`localhost:3000/traffic/socket.io`) measured: websocket
+  transport, event visible 4.6 s after the request (the 5 s SDK flush dominates).
+
+**Notes / known issues**
+- Only tools that were actually clicked appear on the Tools page (4 of ~30 ids so far) — expected.
+- In local dev, browser events carry the Nexus dashboard's own dev cookie (`admin@libas.in`), because
+  `localhost` cookies are shared across ports; production has one portal cookie.
+
+---
+
+## 2026-10-05 — EBO_SALES integrated (reference integration) + FastAPI snippet fixes
+
+**Done**
+- **Decision:** [ADR 0003](decisions/0003-ebo-sales-reference-integration.md) — the user allowed edits in
+  `D:\server\EBO_SALES` (their own app); every other `D:\server` app stays read-only. CLAUDE.md,
+  [README.md](README.md) and [01-project-overview.md](01-project-overview.md) note the exception.
+- **Snippet fixes** in `docs/snippets/fastapi_nexus_asgi.py` (found by integrating EBO_SALES):
+  1. route templates lost outer router prefixes on FastAPI 0.13x+ (`scope["route"]` holds the
+     router-relative path, e.g. `/filters/options` for `GET /api/v1/filters/options`) → new
+     `_restore_router_prefix` rebuilds the prefix from the real path + `path_params`; older FastAPI unchanged;
+  2. `mypy --strict` errors ("None not callable") → `get_user` / `get_error_code` bound to locals before
+     the lambdas. No contract change (no CHANGELOG entry).
+- **EBO_SALES** (uncommitted, in its own repo — files listed in its docs/NEXUS_TRAFFIC.md): vendored snippet
+  + `@nexus/react` tarball (from `npm run sdk:pack`), backend switch `NEXUS_ENABLED` and frontend switch
+  `NEXT_PUBLIC_NEXUS_ENABLED` (both default ON only in production), `<NexusTracker propagateHeaders>` in its
+  providers, ~30 `TOOL.*` ids on the main UI actions, Dockerfile/compose build args, 15 new backend tests.
+- **Local Nexus:** app `ebo-sales-dev` registered in the dev DB (no base path, origins localhost:3000–3002);
+  its keys sit in EBO's git-ignored `backend/.env` / `frontend/.env.local` with both switches `false`.
+- **Verified end to end** against the local api: 3 server events accepted, `identity_source=app_attested`,
+  public IP from the 2-hop XFF chain, `/health` skipped, full template `/api/v1/filters/options`;
+  `NEXUS_ENABLED=false` sends nothing; publishable key passes `GET /v1/ingest/verify`.
+
+**Next**
+- Production cut-over (user, later): register `ebo-sales` on https://nexus.libas.in/traffic/, put the prod
+  keys + URL into EBO's server env, `docker compose up -d --build` — steps in EBO's docs/NEXUS_TRAFFIC.md.
+- Browser events from EBO_SALES not yet exercised in a real browser (SDK covered by its own tests; EBO
+  side typechecks, lints and builds with the key inlined).
+
+**Notes / known issues**
+- EBO_SALES's own warehouse config on this laptop (`DB_NAME`) fails with *database "libas_read" does not
+  exist* — unrelated to Nexus (same 500 with monitoring off).
+- Recipes chapter 8 still says the React hook is "coming" although `@nexus/react` shipped in S5.
+
+---
+
 ## 2026-10-03 — S6 Jobs, backups/restore, DEPLOY.md, security suite, Playwright smoke, doc-link test
 
 **Done**

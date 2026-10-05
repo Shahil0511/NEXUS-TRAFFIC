@@ -40,6 +40,8 @@ Each app has its own ad-hoc logging; nothing is shared or real-time.
 **We never modify the projects in `D:\server`.** Our deliverable is the platform plus the API
 contract and guide. The appendix of the guide (`docs/integration/appendix-per-app-hints.md`)
 contains *informational* hints about where each app could add the middleware — the teams own that work.
+**Exception:** EBO_SALES is the user's own app; we integrated it ourselves as the reference
+integration ([ADR 0003](decisions/0003-ebo-sales-reference-integration.md)).
 
 ## What data we collect — and what we never collect
 

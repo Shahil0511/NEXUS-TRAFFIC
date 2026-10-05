@@ -79,6 +79,18 @@ When the tracker's optional `propagateHeaders` is on, it adds `X-Nexus-Session` 
 `X-Nexus-Page-View` to **your own** API calls so backend and frontend events can be linked. If your
 backend has an explicit CORS `allowedHeaders` list, add those two headers to it.
 
+The tracker does this by wrapping `window.fetch` when it mounts. An API client that **captures
+`fetch` when it is created** (at module load, before the tracker mounts) keeps calling the
+unwrapped one, and nothing gets linked — `openapi-fetch`'s `createClient()` does this by default.
+Give such a client a fetch that is looked up on every call:
+
+```ts
+// openapi-fetch
+export const api = createClient<paths>({ baseUrl, fetch: (request) => globalThis.fetch(request) });
+```
+
+To check: in the browser's network tab your own `/api/…` requests must carry `X-Nexus-Session`.
+
 ## When containers cannot reach nexus.libas.in
 
 Some servers cannot call their own public hostname from inside Docker ("hairpin" DNS / NAT). Check

@@ -9,30 +9,33 @@ name: nexus-traffic
 #   localdb      profile `localdb`: a postgres:18 container for laptops / CI / rehearsals, with the
 #                strict role split (DB_APP_ROLE_MODE=separate → the api runs as nexus_app, DML only).
 #
-# Team Lead quick reference
-#   first time:   cp .env.example .env   → fill EVERY change-me value → bash scripts/preflight.sh
-#   deploy:       bash scripts/deploy.sh  (git pull --ff-only + docker compose up -d --build + checks)
+# Team Lead quick reference (DEPLOY.md is the full runbook)
+#   first time:   .env ready (or cp .env.example .env + fill EVERY change-me) → bash scripts/preflight.sh
+#   deploy:       bash scripts/deploy.sh  (preflight + [git pull] + docker compose up -d --build + checks)
 #   by hand:      docker compose up -d --build
 #                 → against the EXTERNAL database (production; no postgres container)
-#   fully local:  docker compose --profile localdb --profile local up -d --build
-#                 → local postgres container + gateway copy on http://localhost:8080/traffic/
+#   fully local:  docker compose --profile localdb up -d --build
+#                 → local postgres container; open http://localhost:${NEXUS_PORT}/traffic/
 #                 (check the .env first with: bash scripts/preflight.sh --localdb)
-#   status:       docker compose ps        logs: docker compose logs -f api migrate
+#   status:       docker compose ps        logs: docker compose logs -f api migrate edge
+#
+# ONE HOST PORT (ADR 0004): only `edge` is published, on ${NEXUS_BIND_ADDRESS}:${NEXUS_PORT}. The
+# gateway nginx of nexus.libas.in forwards /traffic/… there (ops/nginx/nexus-traffic.conf); edge
+# routes /traffic/api + /traffic/socket.io → api:4000 and /traffic/ → web:3000 (ops/nginx/edge.conf).
 #
 # Services
 #   postgres   ONLY with --profile localdb. NOT published on the host; data in the named volume
 #              nexus-traffic-pgdata (mounted at /var/lib/postgresql — the PG18 image layout).
 #   migrate    one-shot: bootstraps the schema (+ role nexus_app and its grants in 'separate' mode),
 #              applies SQL migrations, ensures partitions, exits 0. api waits for it.
-#   api        ingest + dashboard API + Socket.io + the public guide. Host port 127.0.0.1:4005 only;
-#              the gateway nginx proxies https://nexus.libas.in/traffic/api/ → here
-#              (ops/nginx/nexus-traffic.conf).
+#   api        ingest + dashboard API + Socket.io + the public guide. NOT published: edge proxies
+#              /traffic/api/ and /traffic/socket.io/ → api:4000.
 #   pg-backup  nightly pg_dump of BACKUP_DATABASE_URL (default: MIGRATION_DATABASE_URL) at
 #              BACKUP_AT_IST (01:30 IST) into ./backups, keeps the newest BACKUP_KEEP (14).
 #              Restore: DEPLOY.md → "Backups and restore".
-#   edge       ONLY with --profile local: a local copy of the gateway on 127.0.0.1:8080.
-#   web        the dashboard (Next.js, basePath /traffic). Host port 127.0.0.1:3305 only; the gateway
-#              nginx proxies https://nexus.libas.in/traffic/ → here. Gets ONLY an env allowlist.
+#   edge       nginx, the ONLY published port (${NEXUS_BIND_ADDRESS:-0.0.0.0}:${NEXUS_PORT:-8080}).
+#   web        the dashboard (Next.js, basePath /traffic). NOT published: edge proxies /traffic/ →
+#              web:3000. Gets ONLY an env allowlist.
 #
 # Requires Docker Compose v2.20+ (`docker compose`, not the old `docker-compose` v1). v2.20 is the
 # first with `depends_on: … required: false`, which lets migrate/pg-backup run without the postgres
@@ -54,7 +57,7 @@ services:
   # ─── Local database (profile `localdb` only — production uses 10.150.0.5) ───
   # Production does NOT run this: the data lives on the external server (10.150.0.5, database
   # nexus_traffic, see ADR 0002). For laptops / CI / rehearsals:
-  #   docker compose --profile localdb --profile local up -d --build
+  #   docker compose --profile localdb up -d --build
   postgres:
     profiles: ['localdb']
     image: *pg-image
@@ -63,7 +66,7 @@ services:
       # The PG18 image keeps PGDATA at /var/lib/postgresql/18/docker and declares its VOLUME at
       # /var/lib/postgresql; its entrypoint REFUSES a mount at the old /var/lib/postgresql/data.
       # A volume initialised by postgres:17 cannot be reused as is: dump/restore it, or on a dev
-      # machine run `docker compose --profile localdb --profile local down -v` and start fresh.
+      # machine run `docker compose --profile localdb down -v` and start fresh.
       - pgdata:/var/lib/postgresql
     healthcheck:
       # -h 127.0.0.1 forces TCP: during first-time initdb Postgres listens on the unix socket only,
@@ -108,8 +111,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully # a failed migration keeps the old api running
-    ports:
-      - '127.0.0.1:4005:4000' # loopback only: the gateway nginx on this host proxies to it
+    # No host port: only the edge nginx reaches api:4000 (ADR 0004).
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4000/api/health >/dev/null || exit 1']
       interval: 30s
@@ -127,8 +129,8 @@ services:
     #     aliases: [nexus-traffic-api]
 
   # ─── Web dashboard ──────────────────────────────────────────────────────────
-  # Next.js standalone, served at /traffic (basePath). The gateway nginx proxies
-  # https://nexus.libas.in/traffic/ → here; /traffic/api/ and /traffic/socket.io/ go to the api.
+  # Next.js standalone, served at /traffic (basePath). The edge nginx proxies /traffic/ → here;
+  # /traffic/api/ and /traffic/socket.io/ go to the api.
   web:
     build:
       context: .
@@ -148,8 +150,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    ports:
-      - '127.0.0.1:3305:3000' # loopback only: the gateway nginx on this host proxies to it
+    # No host port: only the edge nginx reaches web:3000 (ADR 0004).
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/traffic/healthz >/dev/null || exit 1']
       interval: 30s
@@ -179,14 +180,21 @@ services:
     restart: unless-stopped
     logging: *logging
 
-  # ─── Local gateway (profile `local` only — never on the server) ─────────────
+  # ─── Edge nginx — the ONE published port (ADR 0004) ─────────────────────────
+  # The gateway of nexus.libas.in forwards /traffic/… here with the path kept; edge splits it into
+  # api / socket.io / dashboard. Locally: http://localhost:${NEXUS_PORT}/traffic/
   edge:
-    profiles: ['local']
     image: nginx:1.27-alpine
     volumes:
-      - ./ops/nginx/local.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ops/nginx/edge.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - '127.0.0.1:8080:80'
+      - '${NEXUS_BIND_ADDRESS:-0.0.0.0}:${NEXUS_PORT:-8080}:80'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1/traffic/api/health >/dev/null || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       api:
         condition: service_healthy

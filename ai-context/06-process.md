@@ -48,7 +48,7 @@ npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (
 
 - **Sign in locally:** there is no portal on a laptop. Mint a token with `scripts/mint-dev-token.ts` and
   set it as a cookie: DevTools → Application → Cookies → `http://localhost` → name `access_token`,
-  path `/` (cookies ignore the port, so it works on :3305 and on the edge :8080). `--set-cookie-header`
+  path `/` (cookies ignore the port, so it works on next dev :3000 and on the edge :8080). `--set-cookie-header`
   prints a `Set-Cookie` value instead (for curl: `-H "Cookie: access_token=…"`). The script never prints
   the secret; the email must pass `DASHBOARD_ALLOWED_EMAILS` / `DASHBOARD_ALLOWED_DOMAINS`.
   Without a valid cookie `apps/web/src/proxy.ts` redirects to `PORTAL_LOGIN_URL`.
@@ -75,29 +75,30 @@ npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (
 |---|---|
 | `apps/api/Dockerfile` | multi-stage (deps → build → prod-deps → runtime), repo-root context, non-root `app`, tini |
 | `apps/web/Dockerfile` | multi-stage (deps → build: `build:shared` + `next build` → runtime: `.next/standalone` + static + public), non-root `nextjs`, tini, `CMD node apps/web/server.js`; build ARG `NEXT_PUBLIC_SOCKET_PATH` |
-| `docker-compose.yml` | `postgres` (profile `localdb` only), `migrate` (one-shot), `api`, `pg-backup`, `web` (env allowlist, `127.0.0.1:3305:3000`, healthcheck `/traffic/healthz`), `edge` (profile `local`) |
-| `ops/nginx/nexus-traffic.conf` | location blocks the TL pastes into the gateway nginx |
-| `ops/nginx/local.conf` | the same blocks for the local `edge` service (`/traffic/api/` + `/traffic/socket.io/` → api, `/traffic/` and `= /traffic` → web) |
+| `docker-compose.yml` | `postgres` (profile `localdb` only), `migrate` (one-shot), `api`, `pg-backup`, `web` (env allowlist, not published, healthcheck `/traffic/healthz`), `edge` (the ONE published port `${NEXUS_BIND_ADDRESS}:${NEXUS_PORT}` → 80, ADR 0004) |
+| `ops/nginx/nexus-traffic.conf` | location blocks the TL pastes into the gateway nginx: `/traffic/…` → `http://NEXUS_HOST:NEXUS_PORT`, path kept |
+| `ops/nginx/edge.conf` | the `edge` service, production AND local (`/traffic/api/` + `/traffic/socket.io/` → api:4000, `/traffic/` and `= /traffic` → web:3000) |
 | `ops/backup/run.sh` | nightly `pg_dump "$BACKUP_DATABASE_URL" -Fc` at `BACKUP_AT_IST` (01:30 IST), keeps `BACKUP_KEEP` (14) (`--once` for a manual dump) |
 | `ops/backup/restore.sh` | restore a dump into `BACKUP_DATABASE_URL` (schema `traffic` only, all-or-nothing) |
-| `scripts/preflight.sh` | checks Compose ≥ 2.20, `.env` completeness per `DB_APP_ROLE_MODE`, hex secrets, URL-encoded passwords, TCP reachability of the database, ports 3305/4005, disk ≥ 5 GB (`--localdb` for the local stack) |
-| `scripts/deploy.sh` | preflight → `git pull --ff-only` → `docker compose up -d --build --remove-orphans` → health checks |
+| `scripts/preflight.sh` | checks Compose ≥ 2.20, `.env` completeness per `DB_APP_ROLE_MODE`, hex secrets, URL-encoded passwords, TCP reachability of the database, `NEXUS_PORT` free, disk ≥ 5 GB (`--localdb` for the local stack) |
+| `scripts/deploy.sh` | preflight → `git pull --ff-only` (skipped without `.git`, i.e. from the handoff zip) → `docker compose up -d --build --remove-orphans` → health checks through the edge port |
+| `scripts/handoff/make-handoff-zip.ps1` | the zip for the TL: tracked + untracked-not-ignored files + `.env.production` as `.env` (refuses `change-me` / localdb values) — TL steps in `HANDOFF.md` |
 
 Two ways to run the stack ([ADR 0002](decisions/0002-external-database.md)):
 
 | | Command | Database | `.env` |
 |---|---|---|---|
 | production (TL server) | `docker compose up -d --build` (via `bash scripts/deploy.sh`) | external 10.150.0.5 / `nexus_traffic` | `DB_APP_ROLE_MODE=owner`, `DATABASE_URL` = `MIGRATION_DATABASE_URL`, password URL-encoded (`@` → `%40`) |
-| fully local (laptop / CI) | `docker compose --profile localdb --profile local up -d --build` | `postgres:18-alpine` container | `DB_APP_ROLE_MODE=separate`, `POSTGRES_*`, `NEXUS_APP_DB_PASSWORD`; check with `bash scripts/preflight.sh --localdb` |
+| fully local (laptop / CI) | `docker compose --profile localdb up -d --build` | `postgres:18-alpine` container | `DB_APP_ROLE_MODE=separate`, `POSTGRES_*`, `NEXUS_APP_DB_PASSWORD`; check with `bash scripts/preflight.sh --localdb` |
 
 ```bash
-docker compose --profile localdb --profile local up -d --build  # full local stack + gateway on :8080
+docker compose --profile localdb up -d --build  # full local stack, edge on :${NEXUS_PORT:-8080}
 #   http://localhost:8080/traffic/api/health        → 200
 #   http://localhost:8080/traffic/api/docs/         → the guide
 #   http://localhost:8080/traffic/                  → the dashboard (needs the access_token cookie, see above)
 #   NEXUS_URL=http://localhost:8080/traffic NEXUS_SECRET_KEY=nx_sk_… bash docs/snippets/curl.sh
 docker compose logs -f api migrate
-docker compose --profile localdb --profile local down  # keeps the data volume (add -v ONLY on a dev machine)
+docker compose --profile localdb down  # keeps the data volume (add -v ONLY on a dev machine)
 ```
 
 - Order on every `up`: (`postgres` healthy, localdb only) → `migrate` exits 0 → `api` healthy → `web` healthy → `edge`.
@@ -106,7 +107,7 @@ docker compose --profile localdb --profile local down  # keeps the data volume (
   external database.
 - The localdb volume is mounted at `/var/lib/postgresql` (the PG18 image layout). A volume created by
   the old `postgres:17` service cannot be reused: on a dev machine,
-  `docker compose --profile localdb --profile local down -v` and start fresh.
+  `docker compose --profile localdb down -v` and start fresh.
 - The api image also runs `migrate` (`node dist/db/migrate.js`); compose tags it
   `nexus-traffic-api:local` and never pulls it.
 - **Lockfile:** `package-lock.json` must contain the Linux (musl) optional binaries. After changing
@@ -141,7 +142,7 @@ RUN_DB_TESTS=1 npm run test:db      # default URL = nexus-traffic-testdb (postgr
 **Smoke** (Playwright, Chromium) against `http://localhost:8080/traffic` (override: `SMOKE_BASE_URL`):
 
 ```bash
-docker compose --profile localdb --profile local up -d --build
+docker compose --profile localdb up -d --build
 npx playwright install chromium     # once per machine
 npm run test:smoke                  # auth redirect, Overview, endpoint detail, Live tick, Apps as admin
 ```

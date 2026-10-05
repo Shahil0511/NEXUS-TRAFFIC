@@ -18,7 +18,7 @@ for status.
 | `apps/api/src/http/routes/index.ts` | THE route table: path → middleware chain → controller method. |
 | `apps/api/src/db/migrate.ts` | The `migrate` CLI (compose `migrate` service), see `apps/api/migrations/README.md`. Config + `DB_APP_ROLE_MODE`: `apps/api/src/db/migrate-config.ts`. |
 | `apps/api/src/db/migration-runner/runner.ts` | One migrate run: bootstrap (`bootstrap.ts`) → plan → apply → `nexus_app` grants (`grants.ts`, separate mode only) → partitions. |
-| `docker-compose.yml`, `apps/api/Dockerfile` | (postgres, `--profile localdb` only) → migrate → api → edge (`--profile local`), pg-backup. Production DB: external server (ADR 0002). |
+| `docker-compose.yml`, `apps/api/Dockerfile` | (postgres, `--profile localdb` only) → migrate → api → web → edge (the one published port, `ops/nginx/edge.conf`), pg-backup. Production DB: external server (ADR 0002). |
 
 ## 2. Folder → layer map (`apps/api/src`)
 

@@ -10,8 +10,8 @@
 # owner mode: DATABASE_URL == MIGRATION_DATABASE_URL · separate mode: DATABASE_URL carries
 # NEXUS_APP_DB_PASSWORD · --localdb: POSTGRES_* filled and MIGRATION_DATABASE_URL carries
 # POSTGRES_PASSWORD · passwords inside URLs are URL-encoded (no raw @) · the database host:port from
-# MIGRATION_DATABASE_URL answers on TCP (skipped for the compose service `postgres`) · host ports
-# 3305/4005 are free (or already ours) · ≥ 5 GB free disk.
+# MIGRATION_DATABASE_URL answers on TCP (skipped for the compose service `postgres`) · the ONE host
+# port NEXUS_PORT (default 8080, ADR 0004) is free (or already ours) · ≥ 5 GB free disk.
 # Exit code 0 = ready; 1 = at least one FAIL (every problem is listed, not just the first).
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -20,7 +20,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
 MIN_COMPOSE_VERSION="2.20.0"
 MIN_FREE_GB=5
-PORTS=(4005 3305) # api, web (host side, 127.0.0.1)
+DEFAULT_NEXUS_PORT=8080 # the edge nginx — the only published port (docker-compose.yml)
 COMPOSE_PROJECT="nexus-traffic"
 DB_TCP_TIMEOUT_SECONDS=5
 LOCAL_DB_HOST="postgres" # the compose service name of profile localdb
@@ -284,22 +284,26 @@ listening_sockets() {
 
 check_ports() {
   echo 'Ports'
-  local sockets ours port
+  local sockets ours port=''
+  [ -f "$ENV_FILE" ] && port="$(env_value NEXUS_PORT)"
+  port="${port:-$DEFAULT_NEXUS_PORT}"
+  if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    fail "NEXUS_PORT \"${port}\" is not a port number (1–65535)"
+    return
+  fi
   sockets="$(listening_sockets || true)"
   ours="$(docker ps --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" --format '{{.Ports}}' 2>/dev/null || true)"
   if [ -z "$sockets" ]; then
     warn 'neither ss nor netstat is available — cannot check ports'
     return
   fi
-  for port in "${PORTS[@]}"; do
-    if ! grep -Eq "[:.]${port}([^0-9]|$)" <<<"$sockets"; then
-      pass "port ${port} is free"
-    elif grep -q ":${port}->" <<<"$ours"; then
-      pass "port ${port} is used by this stack (redeploy)"
-    else
-      fail "port ${port} is already in use by another process"
-    fi
-  done
+  if ! grep -Eq "[:.]${port}([^0-9]|$)" <<<"$sockets"; then
+    pass "NEXUS_PORT ${port} is free"
+  elif grep -q ":${port}->" <<<"$ours"; then
+    pass "NEXUS_PORT ${port} is used by this stack (redeploy)"
+  else
+    fail "NEXUS_PORT ${port} is already in use by another process — pick another in .env"
+  fi
 }
 
 # ─── Disk ────────────────────────────────────────────────────────────────────
@@ -339,7 +343,7 @@ main() {
     exit 1
   fi
   if [ "$LOCALDB" = 1 ]; then
-    echo 'Preflight OK — next: docker compose --profile localdb --profile local up -d --build'
+    echo 'Preflight OK — next: docker compose --profile localdb up -d --build'
   else
     echo 'Preflight OK — next: bash scripts/deploy.sh'
   fi

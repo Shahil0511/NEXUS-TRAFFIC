@@ -5,7 +5,7 @@
  * (/traffic → web, /traffic/api → api, /traffic/socket.io websocket) and the SSO cookie together.
  * NOT part of `npm test` — it needs the stack:
  *
- *   docker compose --profile localdb --profile local up -d --build
+ *   docker compose --profile localdb up -d --build
  *   npx playwright install chromium        # once per machine
  *   npm run test:smoke                     # repo root
  *

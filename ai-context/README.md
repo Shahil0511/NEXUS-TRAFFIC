@@ -20,7 +20,8 @@ folder before touching the code, read this one.
 10. **Style:** SOLID, one function = one job, and VS Code ctrl-click navigation from a UI click down to SQL.
 
 > **Hard rule:** never create, edit or delete anything in `D:\server` (the other teams' projects).
-> We publish an API + guide; *they* wire it in.
+> We publish an API + guide; *they* wire it in. The one exception is `D:\server\EBO_SALES` (the
+> user's own app, integrated by us as the reference integration — [ADR 0003](decisions/0003-ebo-sales-reference-integration.md)).
 
 ## Reading order
 

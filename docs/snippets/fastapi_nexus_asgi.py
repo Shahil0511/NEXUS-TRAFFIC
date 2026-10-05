@@ -133,6 +133,22 @@ def _optional_int(value: Optional[str]) -> Optional[int]:
     return n if n is not None and n >= 0 else None
 
 
+def _restore_router_prefix(scope: Scope, template: str) -> str:
+    """
+    Newer FastAPI (0.13x+) composes nested routers lazily: scope["route"] then carries the route's
+    path RELATIVE to its own router (e.g. "/filters/options" for GET /api/v1/filters/options), the
+    outer include prefixes dropped. Rebuild the prefix from the real path: render the template with
+    the matched path params, and if the request path ends with it, whatever precedes is the prefix.
+    Older FastAPI already gives the full template, which renders to the whole path - kept as is.
+    """
+    path = str(scope.get("path", ""))
+    params = scope.get("path_params") or {}
+    rendered = ROUTE_PARAM.sub(lambda m: str(params.get(m.group(1), m.group(0))), template)
+    if rendered and rendered != path and path.endswith(rendered):
+        return path[: len(path) - len(rendered)] + template
+    return template
+
+
 def _default_skip(scope: Scope) -> bool:
     path = scope.get("path", "")
     return scope.get("method") == "OPTIONS" or path.endswith(SKIP_SUFFIXES) or bool(SKIP_EXTENSIONS.search(path))
@@ -342,6 +358,7 @@ class NexusASGIMiddleware:
         template = getattr(route, "path_format", None) or getattr(route, "path", None)
         if not isinstance(template, str):
             return None  # unmatched route: the server guesses
+        template = _restore_router_prefix(scope, template)
         # Same style as the Express snippets: {store_id} / {path:path} -> :store_id / :path
         full = ROUTE_PARAM.sub(r":\1", scope.get("root_path", "") + template)
         return _with_base_path(self.base_path, full)[:MAX_ROUTE_TEMPLATE]
@@ -350,7 +367,9 @@ class NexusASGIMiddleware:
         self, scope: Scope, response: dict[str, Any], occurred_at: str, duration_ms: float
     ) -> dict[str, Any]:
         client_addr = scope.get("client")
-        error_code = self._safe(lambda: self.get_error_code(scope), None) if self.get_error_code else None
+        # Local copies so type checkers (mypy --strict) can narrow them inside the lambdas.
+        get_user, get_error_code = self.get_user, self.get_error_code
+        error_code = self._safe(lambda: get_error_code(scope), None) if get_error_code else None
         path = scope.get("root_path", "") + scope.get("path", "/")  # ASGI path never has the query
         event: dict[str, Any] = {
             "eventId": str(uuid.uuid4()),
@@ -366,8 +385,8 @@ class NexusASGIMiddleware:
                 client_addr[0] if client_addr else None,
                 self.trust_proxy_hops,
             ),
-            "userEmail": _optional_str(self._safe(lambda: self.get_user(scope), None), MAX_EMAIL)
-            if self.get_user
+            "userEmail": _optional_str(self._safe(lambda: get_user(scope), None), MAX_EMAIL)
+            if get_user
             else None,
             "requestId": _optional_str(_header(scope, b"x-request-id"), MAX_REQUEST_ID),
             "userAgent": _optional_str(_header(scope, b"user-agent"), MAX_USER_AGENT),

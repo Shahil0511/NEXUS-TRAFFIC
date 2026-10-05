@@ -22,6 +22,9 @@ the publishable key in the frontend build (chapter 9).
 
 ## EBO_SALES
 
+**Integrated** (reference integration, 2026-10-05) — its repo's `docs/NEXUS_TRAFFIC.md` describes the
+switches and keys. The hints below are what it follows.
+
 | | Hint |
 |---|---|
 | Backend stack | FastAPI, Python 3.12 → [fastapi_nexus_asgi.py](files/snippets/fastapi_nexus_asgi.py) |

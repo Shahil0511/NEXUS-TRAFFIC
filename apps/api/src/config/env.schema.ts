@@ -18,7 +18,7 @@ export const apiEnvSchema = z.object({
   // ─── Runtime ──────────────────────────────────────────────────────────────
   /** production | development | test */
   NODE_ENV: z.enum(['production', 'development', 'test']).default('development'),
-  /** Port the api listens on inside the container (compose maps 127.0.0.1:4005 → 4000). */
+  /** Port the api listens on inside the container (internal; the compose edge nginx proxies to it). */
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   /** debug | info | warn | error */
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -65,7 +65,10 @@ export const apiEnvSchema = z.object({
   RAW_RETENTION_MONTHS: z.coerce.number().int().min(1).max(60).default(6),
 
   // ─── Network & ingest ─────────────────────────────────────────────────────
-  /** Proxies in front of the api (gateway nginx = 1). Used for req.ip on browser beacons. */
+  /**
+   * Proxies in front of the api. Docker deploy: gateway nginx → edge nginx = 2 (.env.example);
+   * `npm run dev` (Next dev rewrite only) = 1, the default. Used for req.ip on browser beacons.
+   */
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
   /** Extra browser origins allowed in development (comma-separated). */
   CORS_DEV_ORIGINS: csv,

@@ -7,6 +7,8 @@ order, where to start in the code, and the current status ([ai-context/PROGRESS.
 
 1. **NEVER create, edit or delete anything under `D:\server`.** Those are other teams' apps. We deliver
    the ingest API, the public guide (`docs/integration/`) and reference snippets/SDKs; they integrate.
+   **One exception:** `D:\server\EBO_SALES` is the user's own app and may be edited for the Nexus
+   integration only ([ADR 0003](ai-context/decisions/0003-ebo-sales-reference-integration.md)).
 2. **`packages/shared` is the contract.** Change it first (routes, schemas, enums, DTOs), then migrations,
    then api/web, then docs. Never hand-type an API path, socket event name, header or enum value.
 3. **Follow [ai-context/05-conventions.md](ai-context/05-conventions.md):** SOLID, one function = one job,

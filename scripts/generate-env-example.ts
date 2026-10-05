@@ -33,6 +33,8 @@ export const COMPOSE_ONLY_KEYS = [
   'BACKUP_DATABASE_URL',
   'BACKUP_AT_IST',
   'BACKUP_KEEP',
+  'NEXUS_PORT',
+  'NEXUS_BIND_ADDRESS',
 ] as const;
 
 /** Read ONLY by the web container (apps/web/src/env.schema.ts + its test). */
@@ -83,11 +85,34 @@ interface Section {
 /** Every key, grouped. A key in apiEnvSchema without an entry here fails the script. */
 export const SECTIONS: readonly Section[] = [
   {
+    title: 'Hosting — the ONE host port (ADR 0004)',
+    notes: [
+      'Only the `edge` nginx container is published; api and web stay on the internal Docker network.',
+      'The nexus.libas.in gateway forwards /traffic/… to http://<this host>:NEXUS_PORT with the path',
+      'kept (ops/nginx/nexus-traffic.conf). Changing either value needs `docker compose up -d`.',
+    ],
+    keys: [
+      {
+        key: 'NEXUS_PORT',
+        description: 'Host port of the edge nginx — the port the Team Lead assigns to Nexus Traffic.',
+        value: '8080',
+      },
+      {
+        key: 'NEXUS_BIND_ADDRESS',
+        description: [
+          'Host interface for NEXUS_PORT. 0.0.0.0 = reachable from the gateway on another machine;',
+          '127.0.0.1 = only when the gateway nginx runs on THIS host (safer: nobody can bypass it).',
+        ].join('\n'),
+        value: '0.0.0.0',
+      },
+    ],
+  },
+  {
     title: 'Database (ADR 0002)',
     notes: [
       'Production: the EXTERNAL company Postgres server 10.150.0.5 (PostgreSQL 18), database',
       'nexus_traffic, schema traffic — no postgres container (plain `docker compose up -d --build`).',
-      'Local laptop / CI: `docker compose --profile localdb --profile local up -d --build` and the',
+      'Local laptop / CI: `docker compose --profile localdb up -d --build` and the',
       'localdb values shown in each description below.',
       'Connection strings: postgres://<login>:<password>@<host>:<port>/<database>',
       'URL-ENCODE the password inside a URL: @ → %40, : → %3A, / → %2F, # → %23, % → %25',
@@ -265,8 +290,11 @@ export const SECTIONS: readonly Section[] = [
     keys: [
       {
         key: 'TRUST_PROXY_HOPS',
-        description:
-          'Proxies in front of the api (gateway nginx = 1). Never applies to the body `ip`.',
+        description: [
+          'Proxies in front of the api: gateway nginx → edge nginx (compose) = 2.',
+          'Used to find the real client IP in X-Forwarded-For. Never applies to the body `ip`.',
+        ].join('\n'),
+        value: '2',
       },
       {
         key: 'CORS_DEV_ORIGINS',
@@ -321,7 +349,7 @@ export const SECTIONS: readonly Section[] = [
       { key: 'NODE_ENV', description: 'production in the image; development when unset.' },
       {
         key: 'PORT',
-        description: 'Port inside the container (compose maps 127.0.0.1:4005 → 4000).',
+        description: 'Port inside the container (internal only; the edge nginx reaches api:4000).',
       },
       {
         key: 'DOCS_DIR',

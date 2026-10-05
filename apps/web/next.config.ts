@@ -16,7 +16,7 @@
  * - experimental.authInterrupts: src/app/no-access/page.tsx calls forbidden() so the no-access
  *   page is a real 403 (src/app/forbidden.tsx).
  *
- * @see ../../ops/nginx/local.conf
+ * @see ../../ops/nginx/edge.conf
  * @see ./src/env.schema.ts   API_INTERNAL_URL
  */
 import fs from 'node:fs';

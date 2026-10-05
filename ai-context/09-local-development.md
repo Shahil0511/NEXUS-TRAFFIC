@@ -31,7 +31,7 @@ written by `dev:setup`:
 `LIBAS_JWT_SECRET` (`@nexus/auth` `signAccessToken`) and sets it as a cookie. The api and the Live socket
 then verify it with the normal production code. `next start` / the Docker image never do this.
 
-Ports: **3000** dashboard, **4000** api, **55434** dev DB. The docker rehearsal uses 3305 / 4005 / 8080,
+Ports: **3000** dashboard, **4000** api, **55434** dev DB. The docker rehearsal publishes only the edge on 8080 (`NEXUS_PORT`),
 so both can run at the same time.
 
 ---
@@ -115,8 +115,8 @@ anywhere else, because the dev `LIBAS_JWT_SECRET` is random per laptop.
 | 3399 | Dev Launcher (next free port if busy) | 127.0.0.1 |
 
 Ports used by **other** setups, which `npm run dev` never touches: 55432 / 55433 (the DB test containers
-`nexus-traffic-testdb` / `nexus-traffic-testdb18`), and 4005 / 3305 / 8080 for the docker rehearsal.
-The dev dashboard uses 3000, so the rehearsal (3305) and `npm run dev` can run together.
+`nexus-traffic-testdb` / `nexus-traffic-testdb18`), and 8080 (`NEXUS_PORT`, the edge) for the docker rehearsal.
+The dev dashboard uses 3000, so the rehearsal (edge :8080) and `npm run dev` can run together.
 
 ## Stopping and resetting
 
@@ -159,7 +159,7 @@ The dev dashboard uses 3000, so the rehearsal (3305) and `npm run dev` can run t
 
 | | `npm run dev` (this page) | Docker rehearsal | Production (TL server) |
 |---|---|---|---|
-| Command | `npm run dev` | `docker compose --profile localdb --profile local up -d --build` | `bash scripts/deploy.sh` |
+| Command | `npm run dev` | `docker compose --profile localdb up -d --build` | `bash scripts/deploy.sh` |
 | Database | container `nexus-traffic-devdb`, `nexus_traffic_dev` on 127.0.0.1:55434 | compose `postgres` service (profile `localdb`), not published | external **10.150.0.5** / `nexus_traffic` |
 | Role mode | `separate` (api as `nexus_app`) | `separate` | `owner` |
 | Settings | `.env.dev` (generated, dev only) | root `.env` | root `.env` on the server |
