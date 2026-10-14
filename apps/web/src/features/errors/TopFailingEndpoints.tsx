@@ -49,7 +49,7 @@ export function TopFailingEndpoints({
             <MethodBadge method={endpoint.method} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-mono text-xs">{endpoint.routeTemplate}</span>
-              <span className="block truncate text-[11px] text-muted-foreground">
+              <span className="block truncate text-2xs text-muted-foreground">
                 {endpoint.app}
               </span>
             </span>
@@ -57,7 +57,7 @@ export function TopFailingEndpoints({
               <span className="block font-semibold">
                 {formatInteger(endpoint.errors4xx + endpoint.errors5xx)}
               </span>
-              <span className="block text-[11px] text-muted-foreground">
+              <span className="block text-2xs text-muted-foreground">
                 {formatPercent(endpoint.errorRate)}
               </span>
             </span>

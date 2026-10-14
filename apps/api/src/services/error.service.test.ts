@@ -61,6 +61,7 @@ describe('ErrorService.summary', () => {
       topAffectedUsers: [
         { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 4, last_seen_at: NOW },
       ],
+      byErrorCode: [],
     };
     const dto = await service.summary({ range: '6h' });
     expect(dto).toMatchObject({ total: 9, errors4xx: 6, errors5xx: 3 });
@@ -144,6 +145,7 @@ describe('ErrorService (one user)', () => {
       topAffectedUsers: [
         { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 4, last_seen_at: NOW },
       ],
+      byErrorCode: [],
     };
     const dto = await service.summary({ range: '24h', userKey: key });
     expect(requests.argsOf('summarizeErrors')[0]?.[0]).toMatchObject({
@@ -153,5 +155,37 @@ describe('ErrorService (one user)', () => {
     expect(dto.topAffectedUsers).toEqual([
       { userKey: key, email: 'a@libas.in', count: 4, lastSeenAt: NOW.toISOString() },
     ]);
+  });
+});
+
+describe('ErrorService (error codes)', () => {
+  it('maps the failures per error code, keeping "no code" as null', async () => {
+    const { service, requests } = build();
+    requests.errorSummary = {
+      ...requests.errorSummary,
+      byErrorCode: [
+        { error_code: 'QUERY_TIMEOUT', count: 7, routes: 2 },
+        { error_code: null, count: 3, routes: 1 },
+      ],
+    };
+    const dto = await service.summary({ range: '24h' });
+    expect(dto.byErrorCode).toEqual([
+      { errorCode: 'QUERY_TIMEOUT', count: 7, routes: 2 },
+      { errorCode: null, count: 3, routes: 1 },
+    ]);
+  });
+
+  it('passes errorCode through to the summary AND the list (absent = every code)', async () => {
+    const { service, requests } = build();
+    await service.summary({ range: '24h', errorCode: 'SERVICE_UNAVAILABLE' });
+    await service.list(listQuery({ errorCode: 'SERVICE_UNAVAILABLE' }), ADMIN_VIEWER);
+    await service.summary({ range: '24h' });
+    expect(requests.argsOf('summarizeErrors')[0]?.[0]).toMatchObject({
+      errorCode: 'SERVICE_UNAVAILABLE',
+    });
+    expect(requests.argsOf('listFailures')[0]?.[0]).toMatchObject({
+      errorCode: 'SERVICE_UNAVAILABLE',
+    });
+    expect(requests.argsOf('summarizeErrors')[1]?.[0]).toMatchObject({ errorCode: undefined });
   });
 });

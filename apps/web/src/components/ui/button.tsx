@@ -15,7 +15,7 @@ export const buttonVariants = cva(
           'border-border bg-card hover:bg-muted hover:text-foreground aria-expanded:bg-muted dark:border-input dark:bg-input/20 dark:hover:bg-input/40',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-muted hover:text-foreground aria-expanded:bg-muted',
-        link: 'text-primary underline-offset-4 hover:underline',
+        link: 'text-link underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-8 px-3',

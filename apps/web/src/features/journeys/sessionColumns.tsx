@@ -31,7 +31,7 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
       cell: (row) => (
         <Link
           href={withQuery(PAGES.sessionDetail(row.app, row.sessionId), linkQuery)}
-          className="flex min-w-0 flex-col gap-0.5 rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="flex min-w-0 flex-col gap-0.5 rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <span className="flex min-w-0 items-center gap-1.5 font-mono text-xs">
             <span className="min-w-0 truncate">{row.entryPath ?? EMPTY_VALUE}</span>
@@ -43,7 +43,7 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
               </>
             ) : null}
           </span>
-          <span className="truncate text-[11px] text-muted-foreground">{row.app}</span>
+          <span className="truncate text-2xs text-muted-foreground">{row.app}</span>
         </Link>
       ),
     },

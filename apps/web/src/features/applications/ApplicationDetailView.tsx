@@ -3,7 +3,6 @@
 import type { AppTrafficDto, TimeWindowDto, TimeWindowQuery } from '@nexus/shared';
 import {
   Activity,
-  ArrowLeft,
   ArrowRight,
   Eye,
   Gauge,
@@ -17,6 +16,7 @@ import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { UserLink } from '@/components/ActorCell';
+import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { TrafficChart } from '@/components/charts/TrafficChart';
 import { EmptyState } from '@/components/EmptyState';
 import { PageLink, ToolLink } from '@/components/EntityLinks';
@@ -47,6 +47,7 @@ import {
   formatPercent,
   formatWindowCaption,
 } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -72,12 +73,7 @@ export function ApplicationDetailView({ app }: { app: string }) {
   useDocumentTitle(row?.displayName ?? app);
 
   const backLink = (
-    <Link
-      href={withQuery(PAGES.applications(), { ...linkQuery, app: undefined })}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> Applications
-    </Link>
+    <Breadcrumbs items={[applicationCrumbs(app, linkQuery)[0]!, { label: row?.displayName ?? app }]} />
   );
 
   if (traffic.isError) {
@@ -97,7 +93,7 @@ export function ApplicationDetailView({ app }: { app: string }) {
         <AppHeader row={row} window={traffic.data!.window} eyebrow={backLink} />
       ) : (
         <div className="space-y-2" aria-busy="true">
-          <div className="text-xs text-muted-foreground">{backLink}</div>
+          {backLink}
           <Skeleton className="h-7 w-64" />
         </div>
       )}
@@ -172,6 +168,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
     >
       <KpiCard
         label="Users"
+        info={metricInfo('uniqueUsers')}
         icon={UserCheck}
         loading={loading}
         value={formatInteger(row?.users.value)}
@@ -181,6 +178,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
       />
       <KpiCard
         label="API calls"
+        info={metricInfo('requests')}
         icon={Activity}
         loading={loading}
         value={formatCompact(row?.requests.value)}
@@ -189,6 +187,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
       />
       <KpiCard
         label="Error rate"
+        info={metricInfo('errorRate')}
         icon={TriangleAlert}
         loading={loading}
         value={formatPercent(row?.errorRate.value)}
@@ -198,6 +197,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
       />
       <KpiCard
         label="p95 latency"
+        info={metricInfo('p95')}
         icon={Gauge}
         loading={loading}
         value={formatDuration(row?.p95Ms)}
@@ -205,6 +205,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
       />
       <KpiCard
         label="Page views"
+        info={metricInfo('pageViews')}
         icon={Eye}
         loading={loading}
         value={formatCompact(row?.pageViews.value)}
@@ -213,6 +214,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
       />
       <KpiCard
         label="Sessions"
+        info={metricInfo('sessions')}
         icon={Waypoints}
         loading={loading}
         value={formatInteger(row?.sessions)}
@@ -306,7 +308,7 @@ function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
               <li key={user.userKey} className="flex items-center justify-between gap-3 py-2">
                 <span className="flex min-w-0 flex-col">
                   <UserLink userKey={user.userKey} email={user.email} linkQuery={linkQuery} />
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-2xs text-muted-foreground">
                     {formatInteger(user.requests)} API calls · {formatInteger(user.pageViews)} page
                     views · {formatInteger(user.sessions)} sessions
                   </span>
@@ -349,7 +351,7 @@ function RoutesPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQue
               label: (
                 <Link
                   href={withQuery(PAGES.endpointDetail(route.endpointId), linkQuery)}
-                  className="inline-flex min-w-0 items-center gap-1.5 rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className="inline-flex min-w-0 items-center gap-1.5 rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
                 >
                   <MethodBadge method={route.method} />
                   <span className="truncate font-mono">{route.routeTemplate}</span>

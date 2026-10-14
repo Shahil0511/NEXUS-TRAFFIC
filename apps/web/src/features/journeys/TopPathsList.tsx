@@ -36,14 +36,14 @@ export function TopPathsList({ paths }: { paths: readonly TopPathDto[] }) {
                     </>
                   ) : null}
                   <span
-                    className="max-w-64 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px]"
+                    className="max-w-64 truncate rounded-md bg-muted px-1.5 py-0.5 font-mono text-2xs"
                     title={step}
                   >
                     {step}
                   </span>
                 </Fragment>
               ))}
-              <span className="ml-1 text-[11px] text-muted-foreground">{path.app}</span>
+              <span className="ml-1 text-2xs text-muted-foreground">{path.app}</span>
             </span>
             <span className="block h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
               <span
@@ -57,7 +57,7 @@ export function TopPathsList({ paths }: { paths: readonly TopPathDto[] }) {
           </span>
           <span className="text-right text-xs tabular">
             <span className="block font-semibold">{formatInteger(path.sessions)}</span>
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-2xs text-muted-foreground">
               {path.sessions === 1 ? 'session' : 'sessions'}
             </span>
           </span>

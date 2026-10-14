@@ -47,7 +47,7 @@ export function TopUsersList({
           <div className="flex items-end justify-between gap-3 text-xs">
             <span className="flex min-w-0 flex-col">
               <UserLink userKey={user.userKey} email={user.email} linkQuery={linkQuery} />
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-2xs text-muted-foreground">
                 last seen <RelativeTime iso={user.lastSeenAt} />
               </span>
             </span>

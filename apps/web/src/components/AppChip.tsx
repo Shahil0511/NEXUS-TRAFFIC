@@ -21,7 +21,7 @@ export function AppChip({ app, linkQuery = {}, className }: AppChipProps) {
       href={withQuery(PAGES.applicationDetail(app), { ...linkQuery, app: undefined })}
       title={`Open ${app}`}
       className={cn(
-        'inline-flex max-w-full items-center rounded-md bg-muted px-1.5 py-0.5 font-mono text-[11px] leading-none text-muted-foreground ring-1 ring-border ring-inset transition-colors outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/60',
+        'inline-flex max-w-full items-center rounded-md bg-muted px-1.5 py-0.5 font-mono text-2xs leading-none text-muted-foreground ring-1 ring-border ring-inset transition-colors outline-none hover:bg-accent hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60',
         className,
       )}
     >
@@ -48,7 +48,7 @@ export function AppChipList({
         <AppChip key={app} app={app} linkQuery={linkQuery} />
       ))}
       {hidden > 0 ? (
-        <span className="text-[11px] text-muted-foreground" title={apps.slice(max).join(', ')}>
+        <span className="text-2xs text-muted-foreground" title={apps.slice(max).join(', ')}>
           +{hidden}
         </span>
       ) : null}

@@ -5,7 +5,10 @@
  *
  * INVARIANTS
  * - Every query is bounded by `occurred_at >= from AND occurred_at < to` (partition pruning on the
- *   monthly partitions) plus the optional app / endpoint scope — see `scopeConditions`.
+ *   monthly partitions) plus the optional app / endpoint / user scope — see `scopeConditions`.
+ * - The optional app error code (FailureFilter.errorCode) narrows FAILURE rows only — see
+ *   `errorCodeCondition`. Statements mixing all calls with failures (endpoint stats, timeseries)
+ *   apply it inside the failure FILTERs, never to the whole WHERE.
  * - Latency (percentiles, avg, slowest calls) uses kind = 'http' ONLY; streams would skew p95.
  * - Failure filters emit the partial-index predicate LITERALLY (`FAILURE_PREDICATES`), never as a
  *   parameter: the planner can use `idx_api_requests_occurred_at_failed` only when it can prove at
@@ -23,6 +26,7 @@ import { bucketExpr, keysetTimeExpr, likeContains, orderByClause, ParamList } fr
 import type {
   EndpointListOptions,
   EndpointStatsOrder,
+  FailureFilter,
   FailureListOptions,
   TrafficFilter,
 } from '../domain/filters';
@@ -32,6 +36,7 @@ import type {
   EndpointDetailRows,
   PageApiCallRow,
   EndpointStatsRow,
+  ErrorCodeCountRow,
   ErrorSummaryRows,
   ErrorTotalsRow,
   StatusCountRow,
@@ -49,6 +54,8 @@ export const SLOWEST_SAMPLES_LIMIT = 20;
 export const TOP_FAILING_ENDPOINTS_LIMIT = 10;
 /** How many users the "top callers" / "most affected users" panels list. */
 export const TOP_USERS_LIMIT = 10;
+/** How many app error codes the Errors page "Error codes" panel lists. */
+export const TOP_ERROR_CODES_LIMIT = 10;
 
 /** The only kind that counts for latency (SERVER_EVENT_KIND_VALUES; streams are excluded). */
 const LATENCY_KIND: ServerEventKind = 'http';
@@ -91,7 +98,11 @@ const SAMPLE_COLUMNS = `r.occurred_at, ${keysetTimeExpr('r.occurred_at')} AS occ
   r.claimed_email, r.identity_source, host(r.ip) AS ip, r.ip_class, r.geo_country, r.geo_region,
   r.geo_city`;
 
-/** The time window (partition pruning) + optional app / endpoint / user scope, as AND-able conditions. */
+/**
+ * The time window (partition pruning) + optional app / endpoint / user scope, as AND-able
+ * conditions. Every value is a bound parameter (never interpolated). Takes a TrafficFilter on
+ * purpose: the error code is NOT a scope of all calls — see `errorCodeCondition`.
+ */
 export function scopeConditions(filter: TrafficFilter, params: ParamList): string[] {
   const conditions = [
     `r.occurred_at >= ${params.add(filter.from)}`,
@@ -104,28 +115,50 @@ export function scopeConditions(filter: TrafficFilter, params: ParamList): strin
   return conditions;
 }
 
+/**
+ * `r.error_code = $n` when the filter names ONE app error code, else null. The value is always a
+ * bound parameter.
+ * WHY separate from scopeConditions: a code describes a FAILURE. AND-ed into the WHERE of a
+ * statement that also counts all calls (endpoint stats → "Top failing routes"), it would shrink
+ * `calls` to the coded failures and every errorRate would read ~100 %. So failure-only statements
+ * AND it into their WHERE, mixed statements into their failure FILTERs (both via failureCondition).
+ */
+export function errorCodeCondition(filter: FailureFilter, params: ParamList): string | null {
+  return filter.errorCode === undefined ? null : `r.error_code = ${params.add(filter.errorCode)}`;
+}
+
+/** A literal FAILURE_PREDICATES entry, narrowed to the error code when there is one. */
+function failureCondition(predicate: string, codeCondition: string | null): string {
+  return codeCondition === null ? predicate : `${predicate} AND ${codeCondition}`;
+}
+
 /** Extra knobs of the shared endpoint-stats statement. */
 interface EndpointStatsQuery extends EndpointListOptions {
   /** Keep only endpoints with at least one failure (Errors page). */
   onlyFailing?: boolean;
 }
 
-/** One statement for the Routes list, the detail header and the top failing endpoints. */
+/**
+ * One statement for the Routes list, the detail header and the top failing endpoints.
+ * `calls` (and latency) always span ALL the route's requests in scope; an error code narrows only
+ * the 4xx / 5xx counts and the onlyFailing HAVING, so errorRate = coded failures / all calls.
+ */
 function endpointStatsStatement(
-  filter: TrafficFilter,
+  filter: FailureFilter,
   query: EndpointStatsQuery,
 ): { text: string; values: unknown[] } {
   const params = new ParamList();
   const where = scopeConditions(filter, params);
+  const code = errorCodeCondition(filter, params);
   if (query.search) where.push(`r.route_template ILIKE ${params.add(likeContains(query.search))}`);
   const having = query.onlyFailing
-    ? `HAVING count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) > 0`
+    ? `HAVING count(*) FILTER (WHERE ${failureCondition(FAILURE_PREDICATES.all, code)}) > 0`
     : '';
   const text = `WITH stats AS (
     SELECT r.endpoint_id, r.app_id, r.method, r.route_template,
            count(*) AS calls,
-           count(*) FILTER (WHERE ${FAILURE_PREDICATES['4xx']}) AS errors_4xx,
-           count(*) FILTER (WHERE ${FAILURE_PREDICATES['5xx']}) AS errors_5xx,
+           count(*) FILTER (WHERE ${failureCondition(FAILURE_PREDICATES['4xx'], code)}) AS errors_4xx,
+           count(*) FILTER (WHERE ${failureCondition(FAILURE_PREDICATES['5xx'], code)}) AS errors_5xx,
            ${latencyPercentile(0.5)} AS p50_ms,
            ${latencyPercentile(0.95)} AS p95_ms,
            ${latencyPercentile(0.99)} AS p99_ms,
@@ -192,21 +225,27 @@ export class ApiRequestQueryRepository {
     return rows;
   }
 
-  /** Requests / 4xx / 5xx / p95 per IST-aligned bucket; only buckets with rows (gaps filled later). */
+  /**
+   * Requests / 4xx / 5xx / p95 per IST-aligned bucket; only buckets with rows (gaps filled later).
+   * An error code (Errors page) narrows only the 4xx / 5xx counts: `requests` and p95 stay over
+   * every call in scope, so the series never claims the window had fewer requests than it did.
+   */
   async timeseries(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     grain: Grain,
     exec: Executor = this.db,
   ): Promise<TrafficBucketRow[]> {
     const params = new ParamList();
+    const where = scopeConditions(filter, params);
+    const code = errorCodeCondition(filter, params);
     const { rows } = await exec.query<TrafficBucketRow>(
       `SELECT ${bucketExpr(grain, 'r.occurred_at')} AS bucket,
               count(*) AS requests,
-              count(*) FILTER (WHERE ${FAILURE_PREDICATES['4xx']}) AS errors_4xx,
-              count(*) FILTER (WHERE ${FAILURE_PREDICATES['5xx']}) AS errors_5xx,
+              count(*) FILTER (WHERE ${failureCondition(FAILURE_PREDICATES['4xx'], code)}) AS errors_4xx,
+              count(*) FILTER (WHERE ${failureCondition(FAILURE_PREDICATES['5xx'], code)}) AS errors_5xx,
               ${latencyPercentile(0.95)} AS p95_ms
          FROM traffic.api_requests r
-        WHERE ${scopeConditions(filter, params).join(' AND ')}
+        WHERE ${where.join(' AND ')}
         GROUP BY 1
         ORDER BY 1`,
       params.values,
@@ -251,44 +290,67 @@ export class ApiRequestQueryRepository {
   }
 
   /**
-   * Failure totals, failures per status, the request/error series, the top failing endpoints and
-   * the verified users hit by failures (count + the most affected).
+   * Failure totals, failures per status, the request/error series, the top failing endpoints, the
+   * verified users hit by failures (count + the most affected) and the most frequent error codes.
+   * `filter.errorCode` narrows the failures only: top endpoints keep `calls` over all their calls.
    */
   async summarizeErrors(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     grain: Grain,
     exec: Executor = this.db,
   ): Promise<ErrorSummaryRows> {
-    const [totals, byStatus, timeseries, topEndpoints, usersAffected, topAffectedUsers] =
-      await Promise.all([
-        this.countFailures(filter, exec),
-        this.countByStatus(filter, 'all', exec),
-        this.timeseries(filter, grain, exec),
-        this.queryEndpointStats(
-          filter,
-          {
-            sort: 'errors',
-            dir: 'desc',
-            limit: TOP_FAILING_ENDPOINTS_LIMIT,
-            offset: 0,
-            onlyFailing: true,
-          },
-          exec,
-        ),
-        this.countUsers(filter, true, exec),
-        this.listTopUsers(filter, true, TOP_USERS_LIMIT, exec),
-      ]);
-    return { totals, byStatus, timeseries, topEndpoints, usersAffected, topAffectedUsers };
+    const [
+      totals,
+      byStatus,
+      timeseries,
+      topEndpoints,
+      usersAffected,
+      topAffectedUsers,
+      byErrorCode,
+    ] = await Promise.all([
+      this.countFailures(filter, exec),
+      this.countByStatus(filter, 'all', exec),
+      this.timeseries(filter, grain, exec),
+      this.queryEndpointStats(
+        filter,
+        {
+          sort: 'errors',
+          dir: 'desc',
+          limit: TOP_FAILING_ENDPOINTS_LIMIT,
+          offset: 0,
+          onlyFailing: true,
+        },
+        exec,
+      ),
+      this.countUsers(filter, true, exec),
+      this.listTopUsers(filter, true, TOP_USERS_LIMIT, exec),
+      this.countByErrorCode(filter, TOP_ERROR_CODES_LIMIT, exec),
+    ]);
+    return {
+      totals,
+      byStatus,
+      timeseries,
+      topEndpoints,
+      usersAffected,
+      topAffectedUsers,
+      byErrorCode,
+    };
   }
 
-  /** Failed requests (status class), newest first, keyset-paged on (occurred_at, event_id) DESC. */
+  /**
+   * Failed requests (status class, optional error code), newest first, keyset-paged on
+   * (occurred_at, event_id) DESC.
+   */
   async listFailures(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     options: FailureListOptions,
     exec: Executor = this.db,
   ): Promise<ApiRequestRow[]> {
     const params = new ParamList();
-    const where = [...scopeConditions(filter, params), FAILURE_PREDICATES[options.statusClass]];
+    const where = scopeConditions(filter, params);
+    where.push(
+      failureCondition(FAILURE_PREDICATES[options.statusClass], errorCodeCondition(filter, params)),
+    );
     if (options.after) {
       where.push(
         `(r.occurred_at, r.event_id) < (${params.add(options.after.occurredAt)}::timestamptz, ${params.add(options.after.eventId)}::uuid)`,
@@ -369,15 +431,19 @@ export class ApiRequestQueryRepository {
 
   // ─── Building blocks of the composite methods ─────────────────────────────
 
-  /** Distinct verified users in scope; `failedOnly` = only those who got a failure. */
+  /**
+   * Distinct verified users in scope; `failedOnly` = only those who got a failure (of the error
+   * code, when given). Without failedOnly the code is ignored: it describes failures only.
+   */
   private async countUsers(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     failedOnly: boolean,
     exec: Executor,
   ): Promise<number> {
     const params = new ParamList();
     const where = [...scopeConditions(filter, params), 'r.user_key IS NOT NULL'];
-    if (failedOnly) where.push(FAILURE_PREDICATES.all);
+    if (failedOnly)
+      where.push(failureCondition(FAILURE_PREDICATES.all, errorCodeCondition(filter, params)));
     const { rows } = await exec.query<{ users: number }>(
       `SELECT count(DISTINCT r.user_key) AS users
          FROM traffic.api_requests r
@@ -387,16 +453,20 @@ export class ApiRequestQueryRepository {
     return rows[0]?.users ?? 0;
   }
 
-  /** Verified users by calls in scope, most first; `failedOnly` counts failures instead. */
+  /**
+   * Verified users by calls in scope, most first; `failedOnly` counts failures (of the error code,
+   * when given) instead. Without failedOnly the code is ignored, as in countUsers.
+   */
   private async listTopUsers(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     failedOnly: boolean,
     limit: number,
     exec: Executor,
   ): Promise<UserUsageRow[]> {
     const params = new ParamList();
     const where = [...scopeConditions(filter, params), 'r.user_key IS NOT NULL'];
-    if (failedOnly) where.push(FAILURE_PREDICATES.all);
+    if (failedOnly)
+      where.push(failureCondition(FAILURE_PREDICATES.all, errorCodeCondition(filter, params)));
     const { rows } = await exec.query<UserUsageRow>(
       `SELECT r.user_key, min(r.user_email) AS user_email, count(*) AS count,
               max(r.occurred_at) AS last_seen_at
@@ -412,7 +482,7 @@ export class ApiRequestQueryRepository {
 
   /** Runs the shared endpoint-stats statement (list, detail header, top failing). */
   private async queryEndpointStats(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     query: EndpointStatsQuery,
     exec: Executor,
   ): Promise<EndpointStatsRow[]> {
@@ -421,29 +491,61 @@ export class ApiRequestQueryRepository {
     return rows;
   }
 
-  /** Totals over failed requests only (uses the partial index). */
-  private async countFailures(filter: TrafficFilter, exec: Executor): Promise<ErrorTotalsRow> {
+  /** Totals over failed requests (of the error code, when given) only (uses the partial index). */
+  private async countFailures(filter: FailureFilter, exec: Executor): Promise<ErrorTotalsRow> {
     const params = new ParamList();
+    const where = scopeConditions(filter, params);
+    where.push(failureCondition(FAILURE_PREDICATES.all, errorCodeCondition(filter, params)));
     const { rows } = await exec.query<ErrorTotalsRow>(
       `SELECT count(*) AS total,
               count(*) FILTER (WHERE r.status_code < 500) AS errors_4xx,
               count(*) FILTER (WHERE r.status_code >= 500) AS errors_5xx
          FROM traffic.api_requests r
-        WHERE ${[...scopeConditions(filter, params), FAILURE_PREDICATES.all].join(' AND ')}`,
+        WHERE ${where.join(' AND ')}`,
       params.values,
     );
     return rows[0] ?? { total: 0, errors_4xx: 0, errors_5xx: 0 };
   }
 
-  /** Rows per status code, most frequent first; `statusClass` null = every status. */
+  /**
+   * Failures per app error code (NULL = no code sent), most frequent first, with the distinct routes
+   * hit. FAILURE_PREDICATES.all is emitted literally so the partial failed-rows index applies.
+   */
+  private async countByErrorCode(
+    filter: FailureFilter,
+    limit: number,
+    exec: Executor,
+  ): Promise<ErrorCodeCountRow[]> {
+    const params = new ParamList();
+    const where = scopeConditions(filter, params);
+    where.push(failureCondition(FAILURE_PREDICATES.all, errorCodeCondition(filter, params)));
+    const { rows } = await exec.query<ErrorCodeCountRow>(
+      `SELECT r.error_code, count(*) AS count, count(DISTINCT r.endpoint_id) AS routes
+         FROM traffic.api_requests r
+        WHERE ${where.join(' AND ')}
+        GROUP BY r.error_code
+        ORDER BY count DESC, r.error_code ASC NULLS LAST
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * Rows per status code, most frequent first; `statusClass` null = every status. The error code
+   * (when given) applies only with a statusClass: it narrows failures, never the full breakdown.
+   */
   private async countByStatus(
-    filter: TrafficFilter,
+    filter: FailureFilter,
     statusClass: StatusClass | null,
     exec: Executor,
   ): Promise<StatusCountRow[]> {
     const params = new ParamList();
     const where = scopeConditions(filter, params);
-    if (statusClass) where.push(FAILURE_PREDICATES[statusClass]);
+    if (statusClass)
+      where.push(
+        failureCondition(FAILURE_PREDICATES[statusClass], errorCodeCondition(filter, params)),
+      );
     const { rows } = await exec.query<StatusCountRow>(
       `SELECT r.status_code, count(*) AS count
          FROM traffic.api_requests r

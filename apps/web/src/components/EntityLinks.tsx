@@ -5,9 +5,13 @@ import { cn } from '@/lib/utils';
 
 type LinkQuery = Readonly<Record<string, string | undefined>>;
 
-/** Inline link style of an entity inside a table cell or a ranked list row. */
+/**
+ * Inline link style of an entity inside a table cell or a ranked list row.
+ * WHY `text-link`: --primary is under 4.5:1 on the dark card; --link meets AA in both themes, and
+ * the underline (not the colour alone) marks the hover.
+ */
 export const ENTITY_LINK_CLASS =
-  'rounded-sm underline-offset-2 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/60';
+  'rounded-sm underline-offset-2 outline-none hover:text-link hover:underline focus-visible:text-link focus-visible:ring-2 focus-visible:ring-ring/60';
 
 /**
  * WHY: a page template anywhere opens that page's detail. The URL carries the app slug + OPAQUE

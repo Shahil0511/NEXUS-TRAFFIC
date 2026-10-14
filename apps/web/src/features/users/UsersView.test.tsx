@@ -89,7 +89,7 @@ describe('UsersView', () => {
     renderWithProviders(<UsersView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
     await screen.findByText('buyer@libas.in');
 
-    await user.click(screen.getByRole('button', { name: /API calls/ }));
+    await user.click(screen.getByRole('button', { name: 'API calls' }));
     await waitFor(() => expect(calls.at(-1)?.get('sort')).toBe('requests'));
     expect(calls.at(-1)?.get('dir')).toBe('desc');
     expect(urls.at(-1)).toContain('sort=requests');

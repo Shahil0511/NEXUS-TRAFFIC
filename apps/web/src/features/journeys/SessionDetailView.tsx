@@ -1,22 +1,16 @@
 'use client';
 
-import type { SessionDetailDto, SessionSummaryDto, TimeWindowQuery } from '@nexus/shared';
-import {
-  ArrowLeft,
-  ArrowLeftRight,
-  Clock,
-  Eye,
-  Hourglass,
-  MousePointerClick,
-  UserRound,
-} from 'lucide-react';
+import type { SessionDetailDto, SessionSummaryDto } from '@nexus/shared';
+import { ArrowLeftRight, Clock, Eye, Hourglass, MousePointerClick, UserRound } from 'lucide-react';
 import Link from 'next/link';
-import { type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
 import { ClaimedBadge } from '@/components/ClaimedBadge';
+import { CopyableText } from '@/components/CopyButton';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { AppChip } from '@/components/AppChip';
+import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { KpiCard } from '@/components/KpiCard';
 import { PageHeader } from '@/components/PageHeader';
 import { ListSkeleton, Panel } from '@/components/Panel';
@@ -37,19 +31,25 @@ const CLIENT_ERROR_MIN = 400;
 /**
  * One browser session replayed: who, how long, and every page in order with its visible time,
  * the tools used on it and the API calls it made. Reached ONLY through
- * PAGES.sessionDetail(app, sessionId) — the registered app slug and the session uuid.
+ * PAGES.sessionDetail(app, sessionId) — the registered app slug and the session uuid. The title
+ * shows a short id; the header carries the full one with a copy button for support tickets.
  */
 export function SessionDetailView({ app, sessionId }: { app: string; sessionId: string }) {
-  const { filters } = useGlobalFilters();
+  const { filters: globalFilters } = useGlobalFilters();
+  // The session belongs to ONE app: its slug (from the path) is the app scope of every link —
+  // a stale ?app=other must not send "Journeys", the profile or the replay links elsewhere.
+  const filters = useMemo(() => ({ ...globalFilters, app }), [globalFilters, app]);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const detail = useSessionDetail(app, sessionId, filters);
   const title = `Session ${sessionId.slice(0, SESSION_ID_PREVIEW)}`;
   const backLink = (
-    <Link
-      href={withQuery(PAGES.journeys(), filterLinkQuery(filters))}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> Journeys
-    </Link>
+    <Breadcrumbs
+      items={[
+        ...applicationCrumbs(app, linkQuery),
+        { label: 'Journeys', href: withQuery(PAGES.journeys(), linkQuery) },
+        { label: title },
+      ]}
+    />
   );
 
   if (detail.isError) {
@@ -65,7 +65,7 @@ export function SessionDetailView({ app, sessionId }: { app: string; sessionId: 
   return detail.isPending ? (
     <DetailSkeleton eyebrow={backLink} />
   ) : (
-    <DetailContent title={title} detail={detail.data} filters={filters} eyebrow={backLink} />
+    <DetailContent title={title} detail={detail.data} linkQuery={linkQuery} eyebrow={backLink} />
   );
 }
 
@@ -73,7 +73,7 @@ function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">{eyebrow}</div>
+        {eyebrow}
         <Skeleton className="h-7 w-64" />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
@@ -106,19 +106,22 @@ function SessionIdentity({ session }: { session: SessionSummaryDto }) {
       ) : (
         <span className="italic">anonymous</span>
       )}
-      {where ? <span className="font-mono text-[11px]">· {where}</span> : null}
+      {where ? <span className="font-mono text-2xs">· {where}</span> : null}
     </span>
   );
 }
 
+type LinkQuery = Readonly<Record<string, string | undefined>>;
+
 interface DetailContentProps {
   title: string;
   detail: SessionDetailDto;
-  filters: TimeWindowQuery;
+  /** The global filters scoped to the session's app — every link on the page carries it. */
+  linkQuery: LinkQuery;
   eyebrow: ReactNode;
 }
 
-function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) {
+function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps) {
   const { summary, events } = detail;
   const apiCalls = events.filter((event) => event.kind === 'api');
   const failedCalls = apiCalls.filter(
@@ -131,7 +134,12 @@ function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) 
         title={title}
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <AppChip app={summary.app} linkQuery={filterLinkQuery(filters)} />
+            <AppChip app={summary.app} linkQuery={linkQuery} />
+            <CopyableText
+              value={summary.sessionId}
+              label="session id"
+              className="max-w-72 text-xs"
+            />
             <span>Started {formatDateTime(summary.startedAt)} IST</span>
             <SessionIdentity session={summary} />
           </span>
@@ -139,7 +147,7 @@ function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) 
         actions={
           summary.userKey ? (
             <Button asChild variant="outline">
-              <Link href={withQuery(PAGES.userDetail(summary.userKey), filterLinkQuery(filters))}>
+              <Link href={withQuery(PAGES.userDetail(summary.userKey), linkQuery)}>
                 <UserRound aria-hidden="true" /> User profile
               </Link>
             </Button>
@@ -177,11 +185,7 @@ function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) 
         description="Each page with its visible time, then the tools used and API calls made on it"
       >
         {events.length > 0 ? (
-          <SessionReplay
-            events={events}
-            startedAt={summary.startedAt}
-            linkQuery={filterLinkQuery(filters)}
-          />
+          <SessionReplay events={events} startedAt={summary.startedAt} linkQuery={linkQuery} />
         ) : (
           <EmptyState title="No events recorded" />
         )}

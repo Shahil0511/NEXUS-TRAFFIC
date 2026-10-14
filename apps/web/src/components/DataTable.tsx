@@ -4,6 +4,7 @@ import type { SortDirection } from '@nexus/shared';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { InfoTip } from '@/components/InfoTip';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Table,
@@ -24,6 +25,8 @@ export interface DataTableColumn<T, S extends string = never> {
   sortKey?: S;
   align?: 'left' | 'right';
   className?: string;
+  /** What the column means, in plain words (metricInfo(key)); shown behind an (i) in the header. */
+  hint?: string;
 }
 
 export interface DataTableSort<S extends string> {
@@ -75,6 +78,36 @@ function SortIcon({ state }: { state: 'ascending' | 'descending' | 'none' | unde
 }
 
 /**
+ * WHY: a header's (i) explanation sits BESIDE the sort button, never inside it (a button in a
+ * button is invalid and unusable by keyboard). The header text is always FIRST in the DOM, so the
+ * column's accessible name — announced with every cell — starts with "p95", not "What is p95?".
+ * On right-aligned columns the (i) is drawn on the left (flex-row-reverse) so the header text
+ * stays flush with the numbers below it.
+ */
+function HeaderWithHint({
+  column,
+  alignRight,
+  children,
+}: {
+  column: { header: string; hint?: string };
+  alignRight: boolean;
+  children: ReactNode;
+}) {
+  if (!column.hint) return children;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 align-middle',
+        alignRight && 'flex-row-reverse',
+      )}
+    >
+      {children}
+      <InfoTip label={column.header} text={column.hint} side="bottom" />
+    </span>
+  );
+}
+
+/**
  * WHY: one table for every list page. Sorting is SERVER-side: a header click only reports the
  * whitelisted sort key upward (the page puts it in the URL → new query key → new request), so
  * the order always matches what the API ranked over the whole window, not just the loaded rows.
@@ -105,22 +138,24 @@ export function DataTable<T, S extends string = never>({
                 aria-sort={state}
                 className={cn(alignRight && 'text-right', column.className)}
               >
-                {column.sortKey && onSortChange ? (
-                  <button
-                    type="button"
-                    onClick={() => onSortChange(nextSort(sort, column.sortKey as S))}
-                    className={cn(
-                      'inline-flex cursor-pointer items-center gap-1 rounded-sm uppercase outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60',
-                      state !== 'none' && 'text-foreground',
-                      alignRight && 'flex-row-reverse',
-                    )}
-                  >
-                    {column.header}
-                    <SortIcon state={state} />
-                  </button>
-                ) : (
-                  column.header
-                )}
+                <HeaderWithHint column={column} alignRight={alignRight}>
+                  {column.sortKey && onSortChange ? (
+                    <button
+                      type="button"
+                      onClick={() => onSortChange(nextSort(sort, column.sortKey as S))}
+                      className={cn(
+                        'inline-flex cursor-pointer items-center gap-1 rounded-sm uppercase outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60',
+                        state !== 'none' && 'text-foreground',
+                        alignRight && 'flex-row-reverse',
+                      )}
+                    >
+                      {column.header}
+                      <SortIcon state={state} />
+                    </button>
+                  ) : (
+                    column.header
+                  )}
+                </HeaderWithHint>
               </TableHead>
             );
           })}

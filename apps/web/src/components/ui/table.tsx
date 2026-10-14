@@ -32,7 +32,7 @@ export function TableHead({ className, ...props }: ComponentProps<'th'>) {
   return (
     <th
       className={cn(
-        'h-9 px-3 text-left align-middle text-[11px] font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
+        'h-9 px-3 text-left align-middle text-2xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase',
         className,
       )}
       {...props}

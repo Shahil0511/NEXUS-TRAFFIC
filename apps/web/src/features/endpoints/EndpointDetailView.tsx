@@ -1,11 +1,12 @@
 'use client';
 
-import type { EndpointDetailDto, TimeWindowQuery } from '@nexus/shared';
-import { Activity, ArrowLeft, Gauge, Hourglass, TriangleAlert, Users, Zap } from 'lucide-react';
+import type { EndpointDetailDto } from '@nexus/shared';
+import { Activity, Gauge, Hourglass, TriangleAlert, Users, Zap } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { AppChip } from '@/components/AppChip';
+import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { ChartLegend } from '@/components/charts/ChartLegend';
 import { ERROR_SERIES, ErrorsChart } from '@/components/charts/ErrorsChart';
 import { LatencyChart } from '@/components/charts/LatencyChart';
@@ -25,6 +26,7 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -35,16 +37,29 @@ import { useEndpointDetail } from './useEndpointDetail';
  * Reached ONLY through PAGES.endpointDetail(endpointId) — the opaque id, never the template.
  */
 export function EndpointDetailView({ endpointId }: { endpointId: string }) {
-  const { filters } = useGlobalFilters();
-  const detail = useEndpointDetail(endpointId, filters);
-  const linkQuery = filterLinkQuery(filters);
+  const { filters: globalFilters } = useGlobalFilters();
+  // WHY: the endpointId is derived from (app, method, route) — it IS the app scope. A stale
+  // ?app=other from a deep link must not 404 the route, so the fetch ignores the app filter.
+  const fetchFilters = useMemo(() => ({ ...globalFilters, app: undefined }), [globalFilters]);
+  const detail = useEndpointDetail(endpointId, fetchFilters);
+  const endpoint = detail.data?.endpoint;
+  // Once loaded, the route's app is the app scope of every link (crumbs, failures, callers),
+  // like PageDetailView / ToolDetailView; until then the user's own filters are all we know.
+  const endpointApp = endpoint?.app;
+  const filters = useMemo(
+    () => (endpointApp ? { ...globalFilters, app: endpointApp } : globalFilters),
+    [globalFilters, endpointApp],
+  );
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  // Where the route sits: its app (once known) › API Routes › the route itself.
   const backLink = (
-    <Link
-      href={withQuery(PAGES.endpoints(), linkQuery)}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> API Routes
-    </Link>
+    <Breadcrumbs
+      items={[
+        ...(endpoint ? applicationCrumbs(endpoint.app, linkQuery) : []),
+        { label: 'API Routes', href: withQuery(PAGES.endpoints(), linkQuery) },
+        { label: endpoint ? `${endpoint.method} ${endpoint.routeTemplate}` : 'Route' },
+      ]}
+    />
   );
 
   if (detail.isError) {
@@ -60,7 +75,7 @@ export function EndpointDetailView({ endpointId }: { endpointId: string }) {
   return detail.isPending ? (
     <DetailSkeleton eyebrow={backLink} />
   ) : (
-    <DetailContent detail={detail.data} filters={filters} eyebrow={backLink} />
+    <DetailContent detail={detail.data} linkQuery={linkQuery} eyebrow={backLink} />
   );
 }
 
@@ -68,7 +83,7 @@ function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">{eyebrow}</div>
+        {eyebrow}
         <Skeleton className="h-7 w-80" />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6">
@@ -88,19 +103,21 @@ function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   );
 }
 
+type LinkQuery = Readonly<Record<string, string | undefined>>;
+
 interface DetailContentProps {
   detail: EndpointDetailDto;
-  filters: TimeWindowQuery;
+  /** The global filters scoped to the route's app — every link on the page carries it. */
+  linkQuery: LinkQuery;
   eyebrow: ReactNode;
 }
 
-function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
+function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
   const { endpoint, window } = detail;
-  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => requestSampleColumns({ showRoute: false, linkQuery }), [linkQuery]);
   useDocumentTitle(`${endpoint.method} ${endpoint.routeTemplate}`);
   const failuresHref = withQuery(PAGES.errors(), {
-    ...filterLinkQuery(filters),
+    ...linkQuery,
     endpointId: endpoint.endpointId,
   });
   return (
@@ -130,27 +147,45 @@ function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
         aria-label="Route metrics"
         className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6"
       >
-        <KpiCard label="Calls" icon={Activity} value={formatInteger(endpoint.calls)} />
+        <KpiCard
+          label="Calls"
+          icon={Activity}
+          value={formatInteger(endpoint.calls)}
+          info={metricInfo('requests')}
+        />
         <KpiCard
           label="Error rate"
           icon={TriangleAlert}
           value={formatPercent(endpoint.errorRate)}
           hint={`${formatInteger(endpoint.errors4xx)} 4xx · ${formatInteger(endpoint.errors5xx)} 5xx`}
+          info={metricInfo('errorRate')}
         />
         <KpiCard
           label="Users"
           icon={Users}
           value={formatInteger(detail.uniqueUsers)}
           hint="verified callers"
+          info={metricInfo('uniqueUsers')}
         />
         <KpiCard
           label="p50"
           icon={Zap}
           value={formatDuration(endpoint.p50Ms)}
           hint={`avg ${formatDuration(endpoint.avgMs)}`}
+          info={metricInfo('p50')}
         />
-        <KpiCard label="p95" icon={Gauge} value={formatDuration(endpoint.p95Ms)} />
-        <KpiCard label="p99" icon={Hourglass} value={formatDuration(endpoint.p99Ms)} />
+        <KpiCard
+          label="p95"
+          icon={Gauge}
+          value={formatDuration(endpoint.p95Ms)}
+          info={metricInfo('p95')}
+        />
+        <KpiCard
+          label="p99"
+          icon={Hourglass}
+          value={formatDuration(endpoint.p99Ms)}
+          info={metricInfo('p99')}
+        />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">

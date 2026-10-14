@@ -55,6 +55,19 @@ describe('CommandPalette', () => {
     expect(push).toHaveBeenCalledWith('/errors?range=7d');
   });
 
+  it('opens with Cmd+K too, from a search button that announces its shortcuts', async () => {
+    useHandlers();
+    const user = userEvent.setup();
+    renderWithProviders(<CommandPalette />);
+
+    // Below sm the button shows only an icon, so its name must not depend on the visible text.
+    expect(
+      screen.getByRole('button', { name: 'Search pages, apps, users, routes…' }),
+    ).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K /');
+    await user.keyboard('{Meta>}k{/Meta}');
+    expect(await screen.findByRole('combobox', { name: 'Search' })).toHaveFocus();
+  });
+
   it('finds users by email through a POST body and opens them by opaque key', async () => {
     const bodies = useHandlers();
     const user = userEvent.setup();

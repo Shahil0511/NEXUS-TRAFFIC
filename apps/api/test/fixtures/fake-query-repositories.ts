@@ -6,6 +6,7 @@ import type { Grain } from '@nexus/shared';
 
 import type {
   EndpointListOptions,
+  FailureFilter,
   FailureListOptions,
   SessionListOptions,
   TimelineOptions,
@@ -80,6 +81,7 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     topEndpoints: [],
     usersAffected: 0,
     topAffectedUsers: [],
+    byErrorCode: [],
   };
   failures: ApiRequestRow[] = [];
   /** Returned in call order (current window first, then previous). */
@@ -116,12 +118,12 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     return this.detail;
   }
 
-  async summarizeErrors(filter: TrafficFilter, grain: Grain): Promise<ErrorSummaryRows> {
+  async summarizeErrors(filter: FailureFilter, grain: Grain): Promise<ErrorSummaryRows> {
     this.calls.push({ method: 'summarizeErrors', args: [filter, grain] });
     return this.errorSummary;
   }
 
-  async listFailures(filter: TrafficFilter, options: FailureListOptions): Promise<ApiRequestRow[]> {
+  async listFailures(filter: FailureFilter, options: FailureListOptions): Promise<ApiRequestRow[]> {
     this.calls.push({ method: 'listFailures', args: [filter, options] });
     return this.failures;
   }

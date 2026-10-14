@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
 
 /** The slice of a React Query result this component reads (works for useQuery and useInfiniteQuery). */
 export interface QueryStatusLike {
@@ -19,7 +20,10 @@ export interface QueryStateProps {
   skeleton: ReactNode;
   /** True when the loaded data has nothing to show. */
   isEmpty?: boolean;
-  /** Replaces the default empty state. */
+  /**
+   * Replaces the default empty state: "No data in this window" + WidenRangeButton (a wider range,
+   * or Integration health once none fits — so the copy must not promise a longer range).
+   */
   empty?: ReactNode;
   errorTitle?: string;
   /** Render prop, so the data is only touched once it exists. */
@@ -50,7 +54,8 @@ export function QueryState({
         {empty ?? (
           <EmptyState
             title="No data in this window"
-            description="Try a longer range or another app."
+            description="Nothing was recorded for the selected app and range."
+            action={<WidenRangeButton />}
           />
         )}
       </>

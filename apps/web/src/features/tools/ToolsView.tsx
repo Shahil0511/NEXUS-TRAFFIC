@@ -1,7 +1,7 @@
 'use client';
 
 import type { Grain, ToolUsageDto } from '@nexus/shared';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { AppChip } from '@/components/AppChip';
 import { ToolLink } from '@/components/EntityLinks';
@@ -14,8 +14,16 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { RankedList } from '@/components/RankedList';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { PagesToolsTabs } from '@/features/pages/PagesToolsTabs';
+import {
+  cappedListNote,
+  FilterMatchCount,
+  filterLoadedRows,
+  LoadedRowsFilter,
+  NoFilterMatch,
+} from '@/components/LoadedRowsFilter';
 import { formatDateTime, formatInteger, formatWindowCaption, GRAIN_LABELS } from '@/lib/format';
 
 import { useToolUsage } from './useToolUsage';
@@ -121,6 +129,19 @@ export function ToolsView() {
   const reach = useMemo(() => widestReach(items ?? []), [items]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => toolColumns(grain, linkQuery), [grain, linkQuery]);
+  const [filterText, setFilterText] = useState('');
+  const filterInputRef = useRef<HTMLInputElement>(null);
+  // WHY focus the search box: "Clear filter" unmounts itself, which would drop focus to <body>.
+  const clearFilter = useCallback(() => {
+    setFilterText('');
+    filterInputRef.current?.focus();
+  }, []);
+  const filtering = filterText.trim() !== '';
+  const rows = useMemo(
+    () => filterLoadedRows(items, filterText, (tool) => tool.tool),
+    [items, filterText],
+  );
+  const capped = cappedListNote(items?.length ?? 0, TOOL_LIMIT, 'tools');
 
   return (
     <div className="space-y-6">
@@ -195,23 +216,51 @@ export function ToolsView() {
         </Panel>
       </div>
 
-      <Panel title="Tools" description="Most used first" contentClassName="px-0 pb-0">
+      <Panel
+        title="Tools"
+        description={capped ? `Most used first · ${capped}` : 'Most used first'}
+        contentClassName="px-0 pb-0"
+        aside={
+          items && items.length > 0 ? (
+            <LoadedRowsFilter
+              value={filterText}
+              onChange={setFilterText}
+              inputRef={filterInputRef}
+              label="Filter loaded tools by name"
+              placeholder="Filter by tool name…"
+            />
+          ) : null
+        }
+      >
         {tools.isError ? (
           <ErrorState error={tools.error} onRetry={() => void tools.refetch()} />
         ) : (
-          <DataTable
-            caption="Tools"
-            columns={columns}
-            rows={items}
-            rowKey={toolKey}
-            loading={tools.isPending}
-            empty={
-              <EmptyState
-                title="No tool usage in this window"
-                description="Tools appear once an app tracks them. Try a longer range."
-              />
-            }
-          />
+          <>
+            <FilterMatchCount
+              active={filtering && items !== undefined}
+              shown={rows?.length ?? 0}
+              loaded={items?.length ?? 0}
+              noun="tools"
+            />
+            <DataTable
+              caption="Tools"
+              columns={columns}
+              rows={rows}
+              rowKey={toolKey}
+              loading={tools.isPending}
+              empty={
+                filtering && items && items.length > 0 ? (
+                  <NoFilterMatch noun="tools" onClear={clearFilter} />
+                ) : (
+                  <EmptyState
+                    title="No tool usage in this window"
+                    description="Tools appear once an app tracks them. Try a longer range."
+                    action={<WidenRangeButton />}
+                  />
+                )
+              }
+            />
+          </>
         )}
       </Panel>
     </div>

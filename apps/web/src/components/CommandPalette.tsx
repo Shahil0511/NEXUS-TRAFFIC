@@ -33,6 +33,10 @@ const MIN_SERVER_SEARCH = 2;
 const GROUP_LIMIT = 5;
 /** Range presets offered as palette actions. */
 const RANGE_ACTIONS: readonly Exclude<RangePreset, 'custom'>[] = ['1h', '24h', '7d', '30d'];
+/** Name of the search button; below sm it is the ONLY name (the visible text is hidden). */
+const SEARCH_BUTTON_LABEL = 'Search pages, apps, users, routes…';
+/** aria-keyshortcuts of the search button: Ctrl+K, ⌘K and "/" all open the palette. */
+const PALETTE_SHORTCUTS = 'Control+K Meta+K /';
 
 export interface PaletteItem {
   id: string;
@@ -100,12 +104,20 @@ export function CommandPalette() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-8 w-full max-w-64 cursor-pointer items-center gap-2 rounded-lg bg-muted/60 px-2.5 text-xs text-muted-foreground ring-1 ring-border transition-colors ring-inset outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-        aria-keyshortcuts="Control+K Meta+K"
+        aria-label={SEARCH_BUTTON_LABEL}
+        aria-keyshortcuts={PALETTE_SHORTCUTS}
+        className="@container flex size-8 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-muted/60 px-2.5 text-xs text-muted-foreground ring-1 ring-border transition-colors ring-inset outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 sm:w-auto sm:max-w-64 sm:min-w-8 sm:flex-1"
       >
+        {/* The button is only as wide as the top bar leaves it, so the text and the hint follow
+            the button's own width (container queries), not the viewport: an icon when narrow. */}
         <Search className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="flex-1 truncate text-left">Search pages, apps, users, routes…</span>
-        <kbd className="hidden rounded border border-border bg-background px-1.5 font-mono text-[10px] sm:inline">
+        <span aria-hidden="true" className="hidden flex-1 truncate text-left @min-[8rem]:block">
+          {SEARCH_BUTTON_LABEL}
+        </span>
+        <kbd
+          aria-hidden="true"
+          className="hidden shrink-0 rounded border border-border bg-background px-1.5 font-mono text-2xs whitespace-nowrap @min-[13rem]:inline"
+        >
           Ctrl K
         </kbd>
       </button>
@@ -184,7 +196,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
         onChoose={choose}
         status={status}
       />
-      <p className="flex items-center gap-3 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+      <p className="flex items-center gap-3 border-t border-border px-4 py-2 text-2xs text-muted-foreground">
         <span>↑↓ to move</span>
         <span className="inline-flex items-center gap-1">
           <CornerDownLeft className="size-3" aria-hidden="true" /> to open
@@ -231,7 +243,7 @@ function PaletteResults({
             {first ? (
               <p
                 role="presentation"
-                className="px-2 pt-2 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase"
+                className="px-2 pt-2 pb-1 text-2xs font-semibold tracking-[0.12em] text-muted-foreground uppercase"
               >
                 {item.group}
               </p>
@@ -254,7 +266,7 @@ function PaletteResults({
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{item.label}</span>
                 {item.sublabel ? (
-                  <span className="block truncate text-[11px] text-muted-foreground">
+                  <span className="block truncate text-2xs text-muted-foreground">
                     {item.sublabel}
                   </span>
                 ) : null}

@@ -25,6 +25,9 @@ describe('IntegrationView', () => {
     const warnings = within(sales).getByRole('list', { name: 'Warnings for EBO Sales' });
     expect(within(warnings).getByText('Secret key exposed')).toBeInTheDocument();
     expect(within(warnings).getByText('Proxy IPs instead of users')).toBeInTheDocument();
+    // The proxy-IP warning says what it costs on the dashboard, not only how to fix it.
+    expect(within(warnings).getByText(/Geography and location stay empty/)).toBeInTheDocument();
+    expect(within(sales).getByRole('button', { name: 'Copy app slug' })).toBeInTheDocument();
     expect(within(warnings).getByText('Events rejected')).toBeInTheDocument();
     const fixes = within(warnings).getAllByRole('link', { name: /How to fix/ });
     expect(fixes.map((link) => link.getAttribute('href'))).toEqual([

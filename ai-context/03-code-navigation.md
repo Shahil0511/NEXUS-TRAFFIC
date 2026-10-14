@@ -206,8 +206,8 @@ apps/api/src/domain/mappers.ts                         mapEndpointStats → Endp
 | `overview.timeseries` | `OverviewController.timeseries` / `OverviewService.timeseries` | `ApiRequestQueryRepository.timeseries`, `WebEventQueryRepository.pageViewTimeseries` | `bucketExpr` (IST) in `apps/api/src/db/sql.ts`; gaps → `domain/timeseries-gaps.ts` |
 | `endpoints.list` | `EndpointController.list` / `EndpointService.list` | `listEndpointStats` | offset cursor (`encodeOffsetCursor`) |
 | `endpoints.detail` | `EndpointController.detail` / `EndpointService.detail` | `getEndpointDetail` | by stored `endpoint_id`; 404 when no rows; slowest samples role-masked; unique users + top callers (`listTopUsers`) |
-| `errors.summary` | `ErrorController.summary` / `ErrorService.summary` | `summarizeErrors` | totals, by status, series, top failing endpoints, users affected; optional `endpointId` / `userKey` scope |
-| `errors.list` | `ErrorController.list` / `ErrorService.list` | `listFailures` | keyset `(occurred_at, event_id)` DESC; counts cap `MAX_COUNT_RANGE_MS` |
+| `errors.summary` | `ErrorController.summary` / `ErrorService.summary` | `summarizeErrors` | totals, by status, by app error code (`byErrorCode`), series, top failing endpoints, users affected; optional `endpointId` / `userKey` / `errorCode` scope (`FailureFilter` in `domain/filters.ts`) |
+| `errors.list` | `ErrorController.list` / `ErrorService.list` | `listFailures` | keyset `(occurred_at, event_id)` DESC; counts cap `MAX_COUNT_RANGE_MS`; optional `endpointId` / `userKey` / `errorCode` scope (`FailureFilter`) |
 
 Read-side rules (all in `apps/api/src/repositories/api-request-query.repository.ts`): every query is
 bounded by `occurred_at >= from AND < to` (partition pruning); failure filters emit the partial-index
@@ -268,16 +268,23 @@ Web half (page → View → hook → `api.*`; every View reads the global filter
 | `users/[userKey]/` | `users/UserDetailView.tsx` | `useUserProfile` → `users.profile`, `useUserTimeline` → `users.timeline` | `userKeyParamsSchema` → 404; timeline columns in `userTimelineColumns.tsx` |
 | `journeys/` | `journeys/JourneysView.tsx` | `useTopPaths` → `journeys.topPaths`, `useSessionList` → `journeys.sessions` | `?userKey=` (`useSessionListParams`, from a profile's "View sessions"); `ClaimedBadge` via `ActorCell` |
 | `journeys/[app]/[sessionId]/` | `journeys/SessionDetailView.tsx` | `useSessionDetail` → `journeys.session` | see the chain above |
-| `pages/` · `tools/` | `pages/PagesView.tsx` · `tools/ToolsView.tsx` | `usePageStats` → `pages.list` · `useToolUsage` → `tools.usage` | ONE nav entry ("Pages & Tools", `alsoActiveOn`); `PagesToolsTabs` switches routes |
+| `pages/` · `tools/` | `pages/PagesView.tsx` · `tools/ToolsView.tsx` | `usePageStats` → `pages.list` · `useToolUsage` → `tools.usage` | ONE nav entry ("Pages & Tools", `alsoActiveOn`); `PagesToolsTabs` switches routes; loaded-rows text filter (`components/LoadedRowsFilter.tsx`, never sent to the API or the URL) |
 | `pages/[app]/[pageId]/` · `tools/[app]/[toolId]/` | `pages/PageDetailView.tsx` · `tools/ToolDetailView.tsx` | `usePageDetail` → `pages.detail` · `useToolDetail` → `tools.detail` | params validated with the API's schemas → 404; `PageLink` / `ToolLink` (`components/EntityLinks.tsx`) link every listed page/tool here |
-| `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution |
+| `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution; `?metric=` (nuqs); "no location" notice when every row is unlocated (private network / proxy) |
 
 | `applications/` | `applications/ApplicationsView.tsx` | `useAppTraffic` → `overview.apps` | per-app table (`appTrafficColumns.tsx`); the app filter is hidden here |
 | `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file |
 
 Drill-down helpers: `components/TopUsersList.tsx` (any `UserUsageDto[]`), `components/charts/CountChart.tsx`
-(one count over time), `features/users/useUserListParams.ts` (`?sort=&dir=`), `?userKey=` on Errors
-(`features/errors/useErrorListParams.ts`).
+(one count over time), `features/users/useUserListParams.ts` (`?sort=&dir=`), `?userKey=` and `?errorCode=`
+on Errors (`features/errors/useErrorListParams.ts`; the "Error codes" panel is `features/errors/ErrorCodesList.tsx`).
+
+Wave 3 UI helpers: `components/Breadcrumbs.tsx` (detail-page trails; `applicationCrumbs`; emails masked),
+`components/WidenRangeButton.tsx` (next wider preset the page accepts, else a link to Integration),
+`components/InfoTip.tsx` + `components/ui/tooltip.tsx` + `lib/metricCopy.ts` (metric definitions; `KpiCard info`,
+`DataTable` column `hint`), `components/CopyButton.tsx` (`CopyButton`, `CopyableText`), `components/MobileNav.tsx`
+(nav sheet below md), `components/LoadedRowsFilter.tsx`; tokens in `app/globals.css` (checked by
+`app/designTokens.test.ts`).
 
 Navigation helpers: `components/CommandPalette.tsx` (Ctrl/⌘+K, mounted in `AppShell` TopBar),
 `components/AppChip.tsx` (app → its page), `UserLink` in `components/ActorCell.tsx` (verified user → profile),

@@ -78,8 +78,7 @@ function fieldErrorsOf<F extends string>(issues: ZodError['issues']): FieldError
 }
 
 export type FormResult<B, F extends string> =
-  | { ok: true; body: B }
-  | { ok: false; errors: FieldErrors<F> };
+  { ok: true; body: B } | { ok: false; errors: FieldErrors<F> };
 
 export function toCreateAppBody(values: AppFormValues): FormResult<CreateAppBody, AppFormField> {
   const result = createAppBodySchema.safeParse({
@@ -157,6 +156,18 @@ export function currentPublishableKey(app: AppDto, nowMs: number): ApiKeyDto | n
       .filter((key) => key.kind === 'publishable' && isUsableKey(key, nowMs))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null
   );
+}
+
+/**
+ * The `.env` lines a team can paste as-is (the Apps page's "Copy env snippet") — only the values
+ * Nexus actually knows; null when it knows none. Never the secret key: it is shown once only.
+ */
+export function envSnippet(nexusUrl: string | null, publishableKey: string | null): string | null {
+  const lines = [
+    nexusUrl ? `NEXUS_URL=${nexusUrl}` : null,
+    publishableKey ? `NEXT_PUBLIC_NEXUS_KEY=${publishableKey}` : null,
+  ].filter((line): line is string => line !== null);
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 // ─── Expiry (rotation grace) ────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import type {
   AppDto,
   AppTrafficDto,
   EndpointStatsDto,
+  ErrorCodeCountDto,
   ExposedKeyDto,
   GeoCityDto,
   GeoCountryDto,
@@ -45,6 +46,7 @@ import type {
   AppRow,
   AppTrafficRow,
   EndpointStatsRow,
+  ErrorCodeCountRow,
   ExposedKeyRow,
   GeoCityRow,
   GeoCountryRow,
@@ -163,6 +165,15 @@ export function mapEndpointStats(row: EndpointStatsRow): EndpointStatsDto {
 
 export function mapStatusCount(row: StatusCountRow): StatusCountDto {
   return { status: row.status_code, count: row.count };
+}
+
+/**
+ * WHY: one "Error codes" row of the Errors page. The code is the CHECK-constrained app code
+ * (ERROR_CODE_PATTERN — never a message); NULL stays null = "sent without a code".
+ * @see ../../migrations/0004_api_requests.sql
+ */
+export function mapErrorCodeCount(row: ErrorCodeCountRow): ErrorCodeCountDto {
+  return { errorCode: row.error_code, count: row.count, routes: row.routes };
 }
 
 /** WHY: an all-null location is "unknown", rendered as one dash rather than three. */

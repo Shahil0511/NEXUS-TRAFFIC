@@ -25,6 +25,8 @@ export const ALL_APPS_VALUE = '__all__';
  * WHY: the global app filter. Options come from api.apps.list (slugs are the public app ids,
  * ADR 0001); the choice lands in the URL (`?app=`) through useGlobalFilters. While the list loads
  * or fails, the control still shows the current selection and "All apps" keeps working.
+ * It may shrink to any width the top bar leaves it (min-w-0); below xl the trigger shows only the
+ * app's display name, the list keeps the slug.
  */
 export function AppSelect({ className }: { className?: string }) {
   const { filters, setApp } = useGlobalFilters();
@@ -37,7 +39,7 @@ export function AppSelect({ className }: { className?: string }) {
       value={current}
       onValueChange={(value) => setApp(value === ALL_APPS_VALUE ? null : value)}
     >
-      <SelectTrigger aria-label="App filter" className={cn('w-48', className)}>
+      <SelectTrigger aria-label="App filter" className={cn('w-48 min-w-0', className)}>
         <AppWindow className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <SelectValue placeholder="All apps" />
       </SelectTrigger>
@@ -47,9 +49,11 @@ export function AppSelect({ className }: { className?: string }) {
         {filters.app && !known ? <SelectItem value={filters.app}>{filters.app}</SelectItem> : null}
         {apps.data?.map((app) => (
           <SelectItem key={app.slug} value={app.slug}>
-            <span className="flex items-center gap-2">
+            <span className="flex min-w-0 items-center gap-2">
               <span className="truncate">{app.displayName}</span>
-              <span className="font-mono text-[11px] text-muted-foreground">{app.slug}</span>
+              <span className="font-mono text-2xs text-muted-foreground in-data-[slot=select-trigger]:max-xl:hidden">
+                {app.slug}
+              </span>
             </span>
           </SelectItem>
         ))}

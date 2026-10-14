@@ -6,11 +6,25 @@
  * variable so components, Tailwind utilities AND recharts (fill="var(--chart-…)") switch with the
  * theme class set by next-themes. Chart colours were checked with the dataviz palette validator
  * (lightness band, CVD separation, contrast) against the card surface of each mode.
+ *
+ * Contrast floors (WCAG 2.x, checked against --background AND --card of each mode):
+ *   text tokens (--link, --info, --success, --warning, --destructive, --method-*) >= 4.5:1, also
+ *   on their own 10-12 % tint (the pill backgrounds); chart marks (--chart-*) >= 3:1 on --card.
  */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
+
+/*
+ * Type scale extension. WHY: dense table metadata (chips, pills, IP/geo lines, legends) is 11px
+ * everywhere; one `text-2xs` token replaces the scattered arbitrary text-[11px]/text-[10px].
+ * Interactive small text (breadcrumbs, back links) stays at text-xs so it remains easy to hit/read.
+ */
+@theme {
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -32,6 +46,13 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-link: var(--link);
+  --color-method-get: var(--method-get);
+  --color-method-post: var(--method-post);
+  --color-method-put: var(--method-put);
+  --color-method-patch: var(--method-patch);
+  --color-method-delete: var(--method-delete);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -64,9 +85,14 @@
   --muted-foreground: #5c5a6e;
   --accent: #f0eaff;
   --accent-foreground: #6d28d9;
-  --destructive: #dc2626;
-  --success: #15803d;
-  --warning: #b45309;
+  /* Status text hues: >= 4.5:1 on card/background AND on their own 12 % tint (status pills). */
+  --destructive: #c81e1e;
+  --success: #137333;
+  --warning: #a14a07;
+  /* 1xx/3xx (informational, redirect): blue, so 2xx/3xx/4xx/5xx are four distinct hues. */
+  --info: #1d4ed8;
+  /* Inline entity links (hover/focus colour): 7.1:1 on card, 6.8:1 on background. */
+  --link: #6d28d9;
   --border: rgba(13, 12, 20, 0.08);
   --input: rgba(13, 12, 20, 0.12);
   --ring: #7c3aed;
@@ -77,10 +103,21 @@
   --sidebar-accent-foreground: #6d28d9;
   --sidebar-border: rgba(13, 12, 20, 0.08);
 
+  /* HTTP verbs (MethodBadge): text colour; the pill fills with the same hue at 10 %. */
+  --method-get: #0369a1;
+  --method-post: #047857;
+  --method-put: #a14a07;
+  --method-patch: #6d28d9;
+  --method-delete: #be123c;
+
   /* Charts: series identity + reserved status hues (4xx = warning, 5xx = critical). */
   --chart-requests: #7c3aed;
-  --chart-4xx: #eda100;
-  --chart-5xx: #dc2626;
+  /*
+   * 4xx 3.4:1 on card (was #eda100 at 2.2:1, under the 3:1 floor for graphical marks); 5xx
+   * deepened with it so the stacked 4xx/5xx bars keep a 1.9:1 lightness step (CVD-safe).
+   */
+  --chart-4xx: #c27c00;
+  --chart-5xx: #b91c1c;
   --chart-grid: rgba(13, 12, 20, 0.07);
   --chart-axis: #5c5a6e;
   --chart-cursor: rgba(124, 58, 237, 0.08);
@@ -104,6 +141,8 @@
   --destructive: #f87171;
   --success: #4ade80;
   --warning: #fbbf24;
+  --info: #60a5fa;
+  --link: #a78bfa;
   --border: rgba(255, 255, 255, 0.08);
   --input: rgba(255, 255, 255, 0.12);
   --ring: #8b5cf6;
@@ -112,6 +151,12 @@
   --sidebar-accent: #1c1430;
   --sidebar-accent-foreground: #c084fc;
   --sidebar-border: rgba(255, 255, 255, 0.06);
+
+  --method-get: #7dd3fc;
+  --method-post: #6ee7b7;
+  --method-put: #fcd34d;
+  --method-patch: #c4b5fd;
+  --method-delete: #fda4af;
 
   --chart-requests: #8b5cf6;
   --chart-4xx: #c98500;

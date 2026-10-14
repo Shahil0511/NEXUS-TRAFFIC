@@ -54,6 +54,23 @@ describe('AppsView — admin', () => {
     expect(values).toHaveTextContent(`NEXUS_URL=${NEXUS_URL}`);
     expect(values).toHaveTextContent(`NEXT_PUBLIC_NEXUS_KEY=${PUBLISHABLE_KEY}`);
     expect(values).toHaveTextContent('nx_sk_… (shown once, at creation)');
+    // Known values copy one by one or as a snippet; the never-shown secret has no copy button.
+    expect(within(values).getByRole('button', { name: 'Copy NEXUS_URL' })).toBeInTheDocument();
+    expect(
+      within(values).getByRole('button', { name: 'Copy NEXT_PUBLIC_NEXUS_KEY' }),
+    ).toBeInTheDocument();
+    expect(
+      within(values).queryByRole('button', { name: 'Copy NEXUS_SECRET_KEY' }),
+    ).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Copy app slug' })).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await user.click(within(values).getByRole('button', { name: 'Copy env snippet' }));
+    expect(writeText).toHaveBeenCalledWith(
+      `NEXUS_URL=${NEXUS_URL}\nNEXT_PUBLIC_NEXUS_KEY=${PUBLISHABLE_KEY}`,
+    );
 
     const keys = within(card).getByRole('table', { name: 'Keys of EBO Sales' });
     expect(within(keys).getByText('nx_sk_AbCd1234…')).toBeInTheDocument();
@@ -93,9 +110,9 @@ describe('AppsView — admin', () => {
     // No ✕: the reveal closes only through the explicit acknowledgement.
     expect(within(reveal).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
 
-    await user.click(within(reveal).getByRole('button', { name: 'Copy' }));
+    await user.click(within(reveal).getByRole('button', { name: 'Copy key' }));
     expect(writeText).toHaveBeenCalledWith(NEW_SECRET);
-    expect(await within(reveal).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(await within(reveal).findByRole('button', { name: 'Copied key' })).toBeInTheDocument();
 
     await user.click(within(reveal).getByRole('button', { name: 'I have stored the key' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -113,7 +130,10 @@ describe('AppsView — admin', () => {
       http.delete(routeUrl(ROUTES.apps.revokeKey), ({ params, request }) => {
         expect(request.headers.get(INGEST_HEADERS.dashboard)).toBe('1');
         revoked.push(String(params.keyId));
-        return HttpResponse.json({ ...ADMIN_APPS[0]!.keys[0], revokedAt: '2026-10-01T10:00:00.000Z' });
+        return HttpResponse.json({
+          ...ADMIN_APPS[0]!.keys[0],
+          revokedAt: '2026-10-01T10:00:00.000Z',
+        });
       }),
     );
     const confirmSpy = vi.spyOn(window, 'confirm');
@@ -162,7 +182,10 @@ describe('AppsView — admin', () => {
     server.use(
       http.post(routeUrl(ROUTES.apps.create), async ({ request }) => {
         created = await request.json();
-        return HttpResponse.json({ ...ADMIN_APPS[0], slug: 'hr-portal', displayName: 'HR', keys: [] }, { status: 201 });
+        return HttpResponse.json(
+          { ...ADMIN_APPS[0], slug: 'hr-portal', displayName: 'HR', keys: [] },
+          { status: 201 },
+        );
       }),
     );
 

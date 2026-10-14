@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+import { CopyableText } from '@/components/CopyButton';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { Badge } from '@/components/ui/badge';
@@ -143,7 +144,7 @@ function SourceStats({
           <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           {SOURCE_LABELS[counter.source]}
         </h3>
-        <p className="text-right text-[11px] text-muted-foreground">
+        <p className="text-right text-2xs text-muted-foreground">
           {lastEventAt ? (
             <>
               <time dateTime={lastEventAt}>{formatDateTime(lastEventAt)}</time>
@@ -159,7 +160,7 @@ function SourceStats({
           const value = counter[field.key];
           return (
             <div key={field.key} className="min-w-0">
-              <dt className="truncate text-[11px] text-muted-foreground">{field.label}</dt>
+              <dt className="truncate text-2xs text-muted-foreground">{field.label}</dt>
               <dd
                 className={cn(
                   'text-sm font-semibold tabular',
@@ -185,7 +186,8 @@ export interface AppHealthCardProps {
 /**
  * WHY: everything a team needs to know about ONE app's wiring on one card — status, what to fix
  * (with the guide chapter), per-source last event and counters, SDKs with clock skew, the proxy-IP
- * share and exposed keys. Strings from the API render as text only, never as href/src.
+ * share (and what it costs the dashboard) and exposed keys; the app slug is one click to copy.
+ * Strings from the API render as text only, never as href/src.
  */
 export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
   const status = STATUS_COPY[health.status];
@@ -203,7 +205,9 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
           <CardTitle id={headingId} className="truncate">
             {health.displayName}
           </CardTitle>
-          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{health.app}</p>
+          <p className="mt-0.5 flex min-w-0 text-2xs text-muted-foreground">
+            <CopyableText value={health.app} label="app slug" />
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <Link
@@ -265,11 +269,14 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
                 ? 'not enough data'
                 : `${formatPercent(health.privateIpRatio * 100, 0)} of server events`}
             </span>
+            {health.warnings.includes('private_ips') ? (
+              <span className="text-foreground"> · Geography and location stay empty</span>
+            ) : null}
           </span>
           {health.exposedKeys.length > 0 ? (
             <Link
               href={PAGES.apps()}
-              className="inline-flex items-center gap-1 font-medium text-destructive underline-offset-2 hover:underline"
+              className="inline-flex items-center gap-1 rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <KeyRound className="size-3.5" aria-hidden="true" />
               Rotate {health.exposedKeys.map((key) => key.keyPrefix).join(', ')} on the Apps page

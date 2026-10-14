@@ -46,7 +46,8 @@ export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   },
   app_disabled: {
     title: 'App disabled',
-    description: 'Every event from this app is refused (APP_DISABLED) until an admin re-enables it.',
+    description:
+      'Every event from this app is refused (APP_DISABLED) until an admin re-enables it.',
     tone: 'destructive',
     chapter: 'troubleshooting',
   },
@@ -65,7 +66,7 @@ export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   },
   private_ips: {
     title: 'Proxy IPs instead of users',
-    description: `More than ${percent(PRIVATE_IP_RATIO_THRESHOLD)} of server events carry a private IP — set trustProxyHops to the number of proxies in front of the app.`,
+    description: `More than ${percent(PRIVATE_IP_RATIO_THRESHOLD)} of server events carry a private IP (your proxy, not the user), so Geography and location stay empty for this app on the dashboard. Set trustProxyHops to the number of proxies in front of the app.`,
     tone: 'warning',
     chapter: 'clientIp',
   },
@@ -83,7 +84,8 @@ export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   },
   rate_limited: {
     title: 'Rate limited',
-    description: 'Some batches were refused with 429. Batch more events per request and honour Retry-After.',
+    description:
+      'Some batches were refused with 429. Batch more events per request and honour Retry-After.',
     tone: 'warning',
     chapter: 'responses',
   },

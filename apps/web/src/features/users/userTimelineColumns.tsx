@@ -41,7 +41,7 @@ export function userTimelineColumns(filters: TimeWindowQuery): DataTableColumn<T
         <span className="flex min-w-0 flex-col items-start gap-0.5">
           <AppChip app={row.app} linkQuery={linkQuery} />
           {row.ip ? (
-            <span className="truncate font-mono text-[11px] text-muted-foreground">{row.ip}</span>
+            <span className="truncate font-mono text-2xs text-muted-foreground">{row.ip}</span>
           ) : null}
         </span>
       ),

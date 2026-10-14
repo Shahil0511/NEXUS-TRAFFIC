@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode, type Ref } from 'react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,13 +13,25 @@ export interface PanelProps {
   aside?: ReactNode;
   className?: string;
   contentClassName?: string;
+  /**
+   * Makes the heading a programmatic focus target (tabIndex -1). WHY: when a control inside the
+   * panel removes itself (a filter chip), focus moves here instead of falling to <body>.
+   */
+  headingRef?: Ref<HTMLHeadingElement>;
   children: ReactNode;
 }
 
 /**
  * WHY: every chart/list block on a page has the same frame — a titled card whose heading names
  * the region for screen readers (aria-labelledby) — so pages compose panels instead of
- * re-styling cards.
+ * re-styling cards. The heading id comes from useId, NOT the title: two panels with the same
+ * title on one page (e.g. "Countries") must still label their own region.
+ *
+ * Header layout: title left, aside right; when both do not fit (360px phone, a wide filter row)
+ * the aside WRAPS onto its own line and stays shrinkable (min-w-0, max-w-full) — a `shrink-0`
+ * aside overflowed the card and squeezed the title to 0 width. The title's huge grow factor keeps
+ * the aside at its content width on a shared line; alone on its line the aside takes the full
+ * width, so a `w-full sm:w-56` filter really is full width on a phone.
  */
 export function Panel({
   title,
@@ -27,17 +39,33 @@ export function Panel({
   aside,
   className,
   contentClassName,
+  headingRef,
   children,
 }: PanelProps) {
-  const headingId = `panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const headingId = `panel-${useId()}`;
   return (
     <Card className={className} aria-labelledby={headingId}>
-      <CardHeader>
-        <div className="min-w-0">
-          <CardTitle id={headingId}>{title}</CardTitle>
+      <CardHeader className="flex-wrap">
+        <div data-slot="panel-title" className="min-w-0 grow-[999] basis-48">
+          <CardTitle
+            id={headingId}
+            ref={headingRef}
+            tabIndex={headingRef ? -1 : undefined}
+            className={
+              headingRef
+                ? 'rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60'
+                : undefined
+            }
+          >
+            {title}
+          </CardTitle>
           {description ? <CardDescription>{description}</CardDescription> : null}
         </div>
-        {aside ? <div className="shrink-0">{aside}</div> : null}
+        {aside ? (
+          <div data-slot="panel-aside" className="flex min-w-0 max-w-full grow justify-end">
+            {aside}
+          </div>
+        ) : null}
       </CardHeader>
       <CardContent className={cn('flex-1', contentClassName)}>{children}</CardContent>
     </Card>

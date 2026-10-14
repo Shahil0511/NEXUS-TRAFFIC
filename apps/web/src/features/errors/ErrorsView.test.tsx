@@ -98,4 +98,88 @@ describe('ErrorsView', () => {
     expect(summaryCalls.every((params) => params.get('userKey') === key)).toBe(true);
     await waitFor(() => expect(listCalls[0]?.get('userKey')).toBe(key));
   });
+
+  it('a click on an error code scopes the summary AND the list, named in a removable chip', async () => {
+    const listCalls = useErrorHandlers();
+    const summaryCalls: URLSearchParams[] = [];
+    server.use(
+      http.get(routeUrl(ROUTES.errors.summary), ({ request }) => {
+        summaryCalls.push(new URL(request.url).searchParams);
+        return HttpResponse.json(ERROR_SUMMARY);
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ErrorsView />);
+    const codes = await screen.findByRole('list', { name: 'Error codes' });
+    // "No code sent" is listed (counts add up) but is not a filter.
+    expect(within(codes).getByText('No code sent')).toBeInTheDocument();
+    expect(within(codes).getAllByRole('button')).toHaveLength(2);
+
+    await user.click(
+      within(codes).getByRole('button', { name: /^QUERY_TIMEOUT: 9 failed, 2 routes/ }),
+    );
+    const chip = await screen.findByRole('button', {
+      name: 'Remove error code filter Code: QUERY_TIMEOUT',
+    });
+    await waitFor(() => expect(listCalls.at(-1)?.get('errorCode')).toBe('QUERY_TIMEOUT'));
+    await waitFor(() => expect(summaryCalls.at(-1)?.get('errorCode')).toBe('QUERY_TIMEOUT'));
+    expect(
+      within(codes).getByRole('button', { name: /^QUERY_TIMEOUT/, pressed: true }),
+    ).toBeInTheDocument();
+
+    // Removing the chip returns to the unscoped page (served from the cache of the first load).
+    await user.click(chip);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /Remove error code filter/ }),
+      ).not.toBeInTheDocument(),
+    );
+    // The chip unmounted with focus on it: focus lands on the panel heading, not <body>.
+    expect(screen.getByRole('heading', { name: 'Failed requests', level: 2 })).toHaveFocus();
+    expect(
+      within(codes).getByRole('button', { name: /^QUERY_TIMEOUT/, pressed: false }),
+    ).toBeInTheDocument();
+  });
+
+  it('a click on the selected code in the panel toggles the scope off', async () => {
+    useErrorHandlers();
+    const user = userEvent.setup();
+    renderWithProviders(<ErrorsView />, { searchParams: '?errorCode=QUERY_TIMEOUT' });
+    const codes = await screen.findByRole('list', { name: 'Error codes' });
+    await user.click(within(codes).getByRole('button', { name: /^QUERY_TIMEOUT/, pressed: true }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /Remove error code filter/ }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it('?errorCode= from the URL scopes the summary AND the list (a shareable link)', async () => {
+    const listCalls = useErrorHandlers();
+    const summaryCalls: URLSearchParams[] = [];
+    server.use(
+      http.get(routeUrl(ROUTES.errors.summary), ({ request }) => {
+        summaryCalls.push(new URL(request.url).searchParams);
+        return HttpResponse.json(ERROR_SUMMARY);
+      }),
+    );
+    renderWithProviders(<ErrorsView />, { searchParams: '?errorCode=SERVICE_UNAVAILABLE' });
+    expect(
+      await screen.findByRole('button', {
+        name: 'Remove error code filter Code: SERVICE_UNAVAILABLE',
+      }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(listCalls[0]?.get('errorCode')).toBe('SERVICE_UNAVAILABLE'));
+    await waitFor(() => expect(summaryCalls[0]?.get('errorCode')).toBe('SERVICE_UNAVAILABLE'));
+  });
+
+  it('ignores a hand-edited, invalid ?errorCode= (falls back to every code, no 400)', async () => {
+    const listCalls = useErrorHandlers();
+    renderWithProviders(<ErrorsView />, { searchParams: '?errorCode=drop%20table' });
+    await screen.findByText(`req-${FIRST_ID.slice(0, 4)}`);
+    expect(listCalls[0]?.get('errorCode')).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: /Remove error code filter/ }),
+    ).not.toBeInTheDocument();
+  });
 });

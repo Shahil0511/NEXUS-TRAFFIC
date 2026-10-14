@@ -11,7 +11,11 @@ export interface EmptyStateProps {
   className?: string;
 }
 
-/** WHY: "no data for this window" must look intentional and different from an error or a 0. */
+/**
+ * WHY: "no data for this window" must look intentional and different from an error or a 0 — and,
+ * where there is one, offer the next step (`action`, e.g. WidenRangeButton or a guide link). Keep
+ * `description` true whatever the action renders (WidenRangeButton may link to Integration health).
+ */
 export function EmptyState({
   title,
   description,
@@ -34,7 +38,8 @@ export function EmptyState({
       {description ? (
         <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">{description}</p>
       ) : null}
-      {action ? <div className="mt-2">{action}</div> : null}
+      {/* empty:hidden — an action that renders nothing (e.g. WidenRangeButton on a page without a range) leaves no gap. */}
+      {action ? <div className="mt-2 empty:hidden">{action}</div> : null}
     </div>
   );
 }

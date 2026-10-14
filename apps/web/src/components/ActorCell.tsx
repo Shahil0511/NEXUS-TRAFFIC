@@ -2,7 +2,9 @@ import type { ActorDto } from '@nexus/shared';
 import Link from 'next/link';
 
 import { ClaimedBadge } from '@/components/ClaimedBadge';
+import { ENTITY_LINK_CLASS } from '@/components/EntityLinks';
 import { PAGES, withQuery } from '@/lib/pages';
+import { cn } from '@/lib/utils';
 
 /** "Mumbai, IN" from the approximate geo, or null. */
 function placeOf(actor: ActorDto): string | null {
@@ -23,7 +25,7 @@ export function UserLink({ userKey, email, linkQuery = {} }: UserLinkProps) {
   return (
     <Link
       href={withQuery(PAGES.userDetail(userKey), linkQuery)}
-      className="truncate rounded-sm underline-offset-2 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+      className={cn('truncate', ENTITY_LINK_CLASS)}
     >
       {email}
     </Link>
@@ -60,7 +62,7 @@ export function ActorCell({
         <span className="text-muted-foreground italic">anonymous</span>
       )}
       {secondary ? (
-        <span className="truncate font-mono text-[11px] text-muted-foreground">{secondary}</span>
+        <span className="truncate font-mono text-2xs text-muted-foreground">{secondary}</span>
       ) : null}
     </div>
   );

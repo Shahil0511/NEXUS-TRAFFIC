@@ -7,6 +7,7 @@ import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { useState, type ReactNode } from 'react';
 import { Toaster } from 'sonner';
 
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { createQueryClient } from '@/lib/query/client';
 
 export interface AppProvidersProps {
@@ -20,8 +21,9 @@ export interface AppProvidersProps {
  *
  * WHY: the root layout stays a Server Component; this is the single client boundary that owns
  * the React Query cache (one per tab — `useState(createQueryClient)`), URL state (nuqs), the
- * theme (class strategy, follows the OS until the user picks), toasts and the motion policy
- * (`reducedMotion="user"` honours prefers-reduced-motion everywhere).
+ * theme (class strategy, follows the OS until the user picks), toasts, the shared tooltip delay
+ * (one TooltipProvider, so moving between (i) tips opens the next one instantly) and the motion
+ * policy (`reducedMotion="user"` honours prefers-reduced-motion everywhere).
  */
 export function AppProviders({ nonce, children }: AppProvidersProps) {
   const [queryClient] = useState(createQueryClient);
@@ -35,7 +37,9 @@ export function AppProviders({ nonce, children }: AppProvidersProps) {
     >
       <QueryClientProvider client={queryClient}>
         <NuqsAdapter>
-          <MotionConfig reducedMotion="user">{children}</MotionConfig>
+          <MotionConfig reducedMotion="user">
+            <TooltipProvider>{children}</TooltipProvider>
+          </MotionConfig>
         </NuqsAdapter>
       </QueryClientProvider>
       <Toaster position="bottom-right" richColors closeButton theme="system" />

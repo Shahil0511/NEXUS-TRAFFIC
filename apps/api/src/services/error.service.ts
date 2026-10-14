@@ -14,6 +14,7 @@ import {
 import { encodeKeysetCursor } from '../db/sql';
 import {
   mapEndpointStats,
+  mapErrorCodeCount,
   mapRequestSample,
   mapStatusCount,
   mapTimeseriesPoint,
@@ -23,6 +24,7 @@ import { pageFetchSize, parseKeysetCursor, toCursorPage } from '../domain/pagina
 import { fillTimeseriesGaps } from '../domain/timeseries-gaps';
 import type { Viewer } from '../domain/viewer';
 import { userKeyFromHex } from '../enrichment/user-key.hasher';
+import type { FailureFilter } from '../domain/filters';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
@@ -37,18 +39,20 @@ export class ErrorService {
   ) {}
 
   /**
-   * Totals (4xx / 5xx), failures per status, the gap-filled series and the top failing endpoints,
-   * and the users hit, optionally of ONE route (`endpointId`) and/or ONE user (`userKey`) — so the
-   * numbers above the list describe the same requests as the list.
+   * Totals (4xx / 5xx), failures per status, the gap-filled series, the top failing endpoints, the
+   * users hit and the most frequent error codes, optionally of ONE route (`endpointId`), ONE user
+   * (`userKey`) and/or ONE app error code (`errorCode`) — so the numbers above the list describe the
+   * same requests as the list.
    * The top endpoints carry latency percentiles → capped at MAX_PERCENTILE_RANGE_MS.
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeErrors
    */
   async summary(query: ErrorSummaryQuery): Promise<ErrorSummaryDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = {
+    const filter: FailureFilter = {
       ...currentFilter(window, await this.appSlugs.resolve(query.app)),
       endpointId: query.endpointId,
       userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
+      errorCode: query.errorCode,
     };
 
     const rows = await this.requests.summarizeErrors(filter, window.grain);
@@ -65,6 +69,7 @@ export class ErrorService {
       topEndpoints: rows.topEndpoints.map(mapEndpointStats),
       usersAffected: rows.usersAffected,
       topAffectedUsers: rows.topAffectedUsers.map(mapUserUsage),
+      byErrorCode: rows.byErrorCode.map(mapErrorCodeCount),
     };
   }
 
@@ -83,6 +88,7 @@ export class ErrorService {
         ...currentFilter(window, appId),
         endpointId: query.endpointId,
         userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
+        errorCode: query.errorCode,
       },
       { statusClass: query.statusClass, after, limit: pageFetchSize(query.limit) },
     );

@@ -2,7 +2,7 @@
 
 import { STATUS_CLASS_VALUES, type StatusClass } from '@nexus/shared';
 import { Ban, ServerCrash, TriangleAlert, UserX, X } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 
 import { ChartLegend } from '@/components/charts/ChartLegend';
 import { ERROR_SERIES, ErrorsChart } from '@/components/charts/ErrorsChart';
@@ -22,7 +22,9 @@ import { SegmentedControl, type SegmentedOption } from '@/components/ui/segmente
 import { useEndpointDetail } from '@/features/endpoints/useEndpointDetail';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatInteger, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 
+import { ErrorCodesList } from './ErrorCodesList';
 import { TopFailingEndpoints } from './TopFailingEndpoints';
 import { useErrorListParams } from './useErrorListParams';
 import { useErrorSummary } from './useErrorSummary';
@@ -44,14 +46,14 @@ const STATUS_CLASS_OPTIONS: readonly SegmentedOption<StatusClass>[] = STATUS_CLA
 /**
  * The Errors page: failure totals, how many people were hit, 4xx/5xx over time, status codes, the
  * routes that fail most, the users hit most and the newest failed requests (keyset-paged, "Load
- * more"), with the user, geo and — for admins — the IP of each. `?endpointId=` / `?userKey=` scope
- * EVERYTHING on the page to one route / one user.
+ * more"), with the user, geo and — for admins — the IP of each. `?endpointId=` / `?userKey=` /
+ * `?errorCode=` scope EVERYTHING on the page to one route / one user / one app error code.
  */
 export function ErrorsView() {
   const { filters } = useGlobalFilters();
-  const { endpointId, userKey } = useErrorListParams();
+  const { endpointId, userKey, errorCode, setErrorCode, clearErrorCode } = useErrorListParams();
   // Scoped like the list below: every number describes the same requests as the list.
-  const summary = useErrorSummary({ ...filters, endpointId, userKey });
+  const summary = useErrorSummary({ ...filters, endpointId, userKey, errorCode });
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
 
   return (
@@ -68,24 +70,28 @@ export function ErrorsView() {
       <section aria-label="Failure totals" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Failed requests"
+          info={metricInfo('failedRequests')}
           icon={TriangleAlert}
           loading={summary.isPending}
           value={formatInteger(summary.data?.total)}
         />
         <KpiCard
           label="Server errors (5xx)"
+          info={metricInfo('errors5xx')}
           icon={ServerCrash}
           loading={summary.isPending}
           value={formatInteger(summary.data?.errors5xx)}
         />
         <KpiCard
           label="Client errors (4xx)"
+          info={metricInfo('errors4xx')}
           icon={Ban}
           loading={summary.isPending}
           value={formatInteger(summary.data?.errors4xx)}
         />
         <KpiCard
           label="Users affected"
+          info={metricInfo('usersAffected')}
           icon={UserX}
           loading={summary.isPending}
           value={formatInteger(summary.data?.usersAffected)}
@@ -128,7 +134,18 @@ export function ErrorsView() {
         </Panel>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Panel title="Error codes" description="App error codes by failed requests">
+          <QueryState query={summary} skeleton={<ListSkeleton />}>
+            {() => (
+              <ErrorCodesList
+                items={summary.data!.byErrorCode}
+                selected={errorCode}
+                onSelect={(code) => (code === errorCode ? clearErrorCode() : setErrorCode(code))}
+              />
+            )}
+          </QueryState>
+        </Panel>
         <Panel title="Top failing routes" description="Most 4xx + 5xx responses">
           <QueryState query={summary} skeleton={<ListSkeleton />}>
             {() => <TopFailingEndpoints endpoints={summary.data!.topEndpoints} filters={filters} />}
@@ -171,7 +188,7 @@ function RouteFilterChip({ endpointId, onClear }: { endpointId: string; onClear:
       variant="secondary"
       size="sm"
       onClick={onClear}
-      className="max-w-72"
+      className="max-w-[min(18rem,100%)]"
       aria-label={`Remove route filter ${label}`}
     >
       <span className="truncate font-mono text-xs">{label}</span>
@@ -194,7 +211,7 @@ function UserFilterChip({ userKey, onClear }: { userKey: string; onClear: () => 
       variant="secondary"
       size="sm"
       onClick={onClear}
-      className="max-w-72"
+      className="max-w-[min(18rem,100%)]"
       aria-label={`Remove user filter ${label}`}
     >
       <span className="truncate">{label}</span>
@@ -203,30 +220,77 @@ function UserFilterChip({ userKey, onClear }: { userKey: string; onClear: () => 
   );
 }
 
+/**
+ * WHY: "Code: X ×" names the error code the page is scoped to. The code is a validated app code
+ * (ERROR_CODE_PATTERN, never a message or an email), so the URL value itself is safe to show.
+ */
+function ErrorCodeFilterChip({ errorCode, onClear }: { errorCode: string; onClear: () => void }) {
+  const label = `Code: ${errorCode}`;
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onClear}
+      className="max-w-[min(18rem,100%)]"
+      aria-label={`Remove error code filter ${label}`}
+    >
+      <span className="truncate font-mono text-xs">{label}</span>
+      <X aria-hidden="true" />
+    </Button>
+  );
+}
+
 function FailedRequestsPanel() {
   const { filters } = useGlobalFilters();
-  const { statusClass, endpointId, userKey, setStatusClass, clearEndpoint, clearUser } =
-    useErrorListParams();
+  const {
+    statusClass,
+    endpointId,
+    userKey,
+    errorCode,
+    setStatusClass,
+    clearEndpoint,
+    clearUser,
+    clearErrorCode,
+  } = useErrorListParams();
   const failures = useFailedRequests({
     ...filters,
     statusClass,
     endpointId,
     userKey,
+    errorCode,
     limit: PAGE_SIZE,
   });
   const rows = useMemo(() => failures.data?.pages.flatMap((page) => page.items), [failures.data]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => requestSampleColumns({ showRoute: true, linkQuery }), [linkQuery]);
+  // WHY: a removed scope chip unmounts with focus on it; land on the panel heading (which the
+  // screen reader announces as the list being re-scoped) instead of <body>.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusHeadingAfter = (clear: () => void) => () => {
+    clear();
+    headingRef.current?.focus();
+  };
 
   return (
     <Panel
       title="Failed requests"
       description="Newest first"
       contentClassName="px-0 pb-0"
+      headingRef={headingRef}
       aside={
-        <div className="flex items-center gap-2">
-          {endpointId ? <RouteFilterChip endpointId={endpointId} onClear={clearEndpoint} /> : null}
-          {userKey ? <UserFilterChip userKey={userKey} onClear={clearUser} /> : null}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {endpointId ? (
+            <RouteFilterChip endpointId={endpointId} onClear={focusHeadingAfter(clearEndpoint)} />
+          ) : null}
+          {userKey ? (
+            <UserFilterChip userKey={userKey} onClear={focusHeadingAfter(clearUser)} />
+          ) : null}
+          {errorCode ? (
+            <ErrorCodeFilterChip
+              errorCode={errorCode}
+              onClear={focusHeadingAfter(clearErrorCode)}
+            />
+          ) : null}
           <SegmentedControl
             ariaLabel="Status class"
             value={statusClass}

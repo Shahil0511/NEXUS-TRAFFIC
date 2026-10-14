@@ -34,7 +34,7 @@ export function RankedList({ items, ariaLabel, format = formatInteger }: RankedL
             <span className="min-w-0">
               <span className="block truncate">{item.label}</span>
               {item.sublabel ? (
-                <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="block truncate text-2xs text-muted-foreground">
                   {item.sublabel}
                 </span>
               ) : null}

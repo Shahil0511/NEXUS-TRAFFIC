@@ -1,9 +1,10 @@
 'use client';
 
 import { KEY_KIND_VALUES, type AppDto, type KeyCreatedDto, type KeyKind } from '@nexus/shared';
-import { Check, Copy, Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, ShieldAlert } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 
+import { CopyButton } from '@/components/CopyButton';
 import { FormField } from '@/components/FormField';
 import { InlineError } from '@/components/InlineError';
 import { Button } from '@/components/ui/button';
@@ -39,9 +40,6 @@ const KIND_ENV: Record<KeyKind, string> = {
   publishable: 'NEXT_PUBLIC_NEXUS_KEY / VITE_NEXUS_KEY (build time)',
 };
 
-/** How long the "Copied" confirmation stays. */
-const COPIED_FEEDBACK_MS = 2000;
-
 export interface CreateKeyDialogProps {
   app: AppDto;
   open: boolean;
@@ -54,20 +52,8 @@ export interface CreateKeyDialogProps {
  * closes through the explicit acknowledgement (no ✕, no Escape, no outside click).
  */
 function KeyReveal({ created, onDone }: { created: KeyCreatedDto; onDone: () => void }) {
-  const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const kind = created.key.kind;
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(created.plaintextKey);
-      setCopied(true);
-      setCopyFailed(false);
-      setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
-    } catch {
-      setCopyFailed(true);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -92,15 +78,17 @@ function KeyReveal({ created, onDone }: { created: KeyCreatedDto; onDone: () => 
               spellCheck={false}
               autoComplete="off"
             />
-            <Button type="button" variant="outline" onClick={() => void copy()}>
-              {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
+            <CopyButton
+              value={created.plaintextKey}
+              label="key"
+              showText
+              onCopyResult={(ok) => setCopyFailed(!ok)}
+            />
           </div>
         )}
       </FormField>
       {copyFailed ? (
-        <p role="alert" className="text-[11px] text-destructive">
+        <p role="alert" className="text-2xs text-destructive">
           The browser blocked the clipboard — select the key and copy it manually.
         </p>
       ) : null}
@@ -154,7 +142,9 @@ function KeyForm({
           options={KIND_OPTIONS}
           onValueChange={(kind) => setValues((current) => ({ ...current, kind }))}
         />
-        <p className="text-[11px] leading-relaxed text-muted-foreground">{KIND_HINTS[values.kind]}</p>
+        <p className="text-2xs leading-relaxed text-muted-foreground">
+          {KIND_HINTS[values.kind]}
+        </p>
       </div>
       <FormField
         label="Label"
@@ -165,7 +155,9 @@ function KeyForm({
           <Input
             {...control}
             value={values.label}
-            onChange={(event) => setValues((current) => ({ ...current, label: event.target.value }))}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, label: event.target.value }))
+            }
             autoComplete="off"
             placeholder="prod backend"
           />

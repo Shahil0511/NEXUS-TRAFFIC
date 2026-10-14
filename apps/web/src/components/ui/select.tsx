@@ -61,7 +61,7 @@ export function SelectLabel({ className, ...props }: ComponentProps<typeof Selec
   return (
     <SelectPrimitive.Label
       className={cn(
-        'px-2 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase',
+        'px-2 py-1.5 text-2xs font-semibold text-muted-foreground uppercase',
         className,
       )}
       {...props}

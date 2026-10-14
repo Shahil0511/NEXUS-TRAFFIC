@@ -38,7 +38,7 @@ export function keyColumns({ nowMs, onAction }: KeyColumnOptions): DataTableColu
       cell: (key) => (
         <span className="block min-w-0">
           <span className="block truncate font-mono text-xs">{key.keyPrefix}…</span>
-          <span className="block truncate text-[11px] text-muted-foreground">{key.label}</span>
+          <span className="block truncate text-2xs text-muted-foreground">{key.label}</span>
         </span>
       ),
     },
@@ -79,7 +79,7 @@ export function keyColumns({ nowMs, onAction }: KeyColumnOptions): DataTableColu
             <span className="text-muted-foreground">never</span>
           )}
           {key.lastSdk ? (
-            <span className="block font-mono text-[11px] text-muted-foreground">{key.lastSdk}</span>
+            <span className="block font-mono text-2xs text-muted-foreground">{key.lastSdk}</span>
           ) : null}
         </span>
       ),

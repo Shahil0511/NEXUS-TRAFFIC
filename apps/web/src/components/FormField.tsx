@@ -31,12 +31,12 @@ export function FormField({ label, hint, error, className, children }: FormField
       </label>
       {children({ id, 'aria-describedby': describedBy, 'aria-invalid': Boolean(error) })}
       {error ? (
-        <p id={errorId} className="text-[11px] text-destructive">
+        <p id={errorId} className="text-2xs text-destructive">
           {error}
         </p>
       ) : null}
       {hint ? (
-        <p id={hintId} className="text-[11px] leading-relaxed text-muted-foreground">
+        <p id={hintId} className="text-2xs leading-relaxed text-muted-foreground">
           {hint}
         </p>
       ) : null}

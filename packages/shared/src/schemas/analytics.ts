@@ -5,6 +5,7 @@
  */
 import { z } from 'zod';
 
+import { ERROR_CODE_PATTERN } from '../constants/ingest';
 import {
   appSlugSchema,
   pageQueryShape,
@@ -48,12 +49,20 @@ export type StatusClass = (typeof STATUS_CLASS_VALUES)[number];
 export const userKeySchema = z.string().regex(/^[0-9a-f]{64}$/, 'invalid user key');
 
 /**
- * `endpointId` / `userKey` scope the totals, chart and status codes to one route / one user
- * (Errors opened from a route or from a user's "View failures").
+ * One app error code (`error_code` as ingested: ERROR_CODE_PATTERN, the DB CHECK of 0004) — the
+ * same rule as the ingest, so a code shown on the dashboard is always a valid filter value.
+ */
+export const errorCodeSchema = z.string().regex(ERROR_CODE_PATTERN, 'invalid error code');
+
+/**
+ * `endpointId` / `userKey` / `errorCode` scope the totals, chart and status codes to one route /
+ * one user / one app error code (Errors opened from a route or from a user's "View failures", or
+ * a click on an error code).
  */
 export const errorSummaryQuerySchema = timeWindowQuerySchema.safeExtend({
   endpointId: z.uuid().optional(),
   userKey: userKeySchema.optional(),
+  errorCode: errorCodeSchema.optional(),
 });
 export type ErrorSummaryQuery = z.infer<typeof errorSummaryQuerySchema>;
 
@@ -61,6 +70,7 @@ export const errorListQuerySchema = timeWindowQuerySchema.safeExtend({
   statusClass: z.enum(STATUS_CLASS_VALUES).default('all'),
   endpointId: z.uuid().optional(),
   userKey: userKeySchema.optional(),
+  errorCode: errorCodeSchema.optional(),
   ...pageQueryShape,
 });
 export type ErrorListQuery = z.infer<typeof errorListQuerySchema>;

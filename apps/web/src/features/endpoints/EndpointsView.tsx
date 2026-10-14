@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDateTime, formatDuration, formatInteger, formatPercent } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
@@ -26,6 +27,18 @@ const SEARCH_DEBOUNCE_MS = 300;
 const PAGE_SIZE = 50;
 /** An error rate above this is highlighted in the table. */
 const HIGH_ERROR_RATE_PCT = 5;
+
+/**
+ * WHY: a bare "12 · 3" under an error rate meant nothing to readers. Each count now names its
+ * class ("12 4xx · 3 5xx", as on the route page); the column's (i) explains client vs server.
+ */
+function ErrorClassSplit({ errors4xx, errors5xx }: { errors4xx: number; errors5xx: number }) {
+  return (
+    <span className="text-2xs whitespace-nowrap text-muted-foreground">
+      {formatInteger(errors4xx)} 4xx · {formatInteger(errors5xx)} 5xx
+    </span>
+  );
+}
 
 /** The table columns; `sortKey` values are the API whitelist (ENDPOINT_SORT_VALUES). */
 export function endpointColumns(
@@ -40,12 +53,12 @@ export function endpointColumns(
       cell: (row) => (
         <Link
           href={withQuery(PAGES.endpointDetail(row.endpointId), linkQuery)}
-          className="flex min-w-0 items-center gap-2.5 rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="flex min-w-0 items-center gap-2.5 rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <MethodBadge method={row.method} />
           <span className="min-w-0">
             <span className="block truncate font-mono text-xs">{row.routeTemplate}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">{row.app}</span>
+            <span className="block truncate text-2xs text-muted-foreground">{row.app}</span>
           </span>
         </Link>
       ),
@@ -53,6 +66,7 @@ export function endpointColumns(
     {
       id: 'calls',
       header: 'Calls',
+      hint: metricInfo('requests'),
       sortKey: 'calls',
       align: 'right',
       cell: (row) => formatInteger(row.calls),
@@ -60,6 +74,7 @@ export function endpointColumns(
     {
       id: 'errorRate',
       header: 'Errors',
+      hint: metricInfo('errorRate'),
       sortKey: 'errorRate',
       align: 'right',
       cell: (row) => (
@@ -69,16 +84,14 @@ export function endpointColumns(
           >
             {formatPercent(row.errorRate)}
           </span>
-          <span className="text-[11px] text-muted-foreground">
-            {formatInteger(row.errors4xx)} · {formatInteger(row.errors5xx)}
-            <span className="sr-only"> (4xx · 5xx)</span>
-          </span>
+          <ErrorClassSplit errors4xx={row.errors4xx} errors5xx={row.errors5xx} />
         </span>
       ),
     },
     {
       id: 'p50',
       header: 'p50',
+      hint: metricInfo('p50'),
       sortKey: 'p50',
       align: 'right',
       cell: (row) => formatDuration(row.p50Ms),
@@ -86,6 +99,7 @@ export function endpointColumns(
     {
       id: 'p95',
       header: 'p95',
+      hint: metricInfo('p95'),
       sortKey: 'p95',
       align: 'right',
       cell: (row) => formatDuration(row.p95Ms),
@@ -93,6 +107,7 @@ export function endpointColumns(
     {
       id: 'p99',
       header: 'p99',
+      hint: metricInfo('p99'),
       sortKey: 'p99',
       align: 'right',
       cell: (row) => formatDuration(row.p99Ms),
@@ -100,6 +115,7 @@ export function endpointColumns(
     {
       id: 'avg',
       header: 'Avg',
+      hint: metricInfo('avgLatency'),
       sortKey: 'avg',
       align: 'right',
       cell: (row) => formatDuration(row.avgMs),

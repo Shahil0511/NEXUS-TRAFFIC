@@ -15,9 +15,10 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatCompact, formatInteger, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
-import { appTrafficColumns, COVERAGE_WARN_PCT, isSilent } from './appTrafficColumns';
+import { appTrafficColumns, isSilent } from './appTrafficColumns';
 import { useAppTraffic } from './useAppTraffic';
 
 /** Totals across apps for the header cards (users are NOT summed: one person uses several apps). */
@@ -59,14 +60,6 @@ export function ApplicationsView() {
             : 'Every app side by side: who uses it, how much, and how well it works'
         }
       />
-      <p className="-mt-3 text-xs text-muted-foreground">
-        <strong className="font-medium text-foreground">Identified</strong> = share of events with a
-        verified user (low → users are missing from Users).{' '}
-        <strong className="font-medium text-foreground">Linked</strong> = share of API calls tied to
-        a browser page (low → page → API drill-downs are incomplete). Below {COVERAGE_WARN_PCT} % is
-        highlighted.
-      </p>
-
       <section aria-label="Totals" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard
           label="Registered apps"
@@ -80,6 +73,7 @@ export function ApplicationsView() {
           loading={query.isPending}
           value={totals ? `${totals.active} of ${items?.length ?? 0}` : ''}
           hint="in this range"
+          info={metricInfo('sendingData')}
           href={withQuery(PAGES.integration(), {})}
         />
         <KpiCard
@@ -87,10 +81,12 @@ export function ApplicationsView() {
           icon={Activity}
           loading={query.isPending}
           value={formatCompact(totals?.requests)}
+          info={metricInfo('requests')}
           href={withQuery(PAGES.endpoints(), linkQuery)}
         />
         <KpiCard
-          label="Error rate ≥ 5 %"
+          label={`Error rate ≥ ${FAILING_ERROR_RATE} %`}
+          info={`Apps where ${FAILING_ERROR_RATE} % or more of the API calls failed in this range. ${metricInfo('errorRate')}`}
           icon={TriangleAlert}
           loading={query.isPending}
           value={totals ? `${totals.failing} ${totals.failing === 1 ? 'app' : 'apps'}` : ''}

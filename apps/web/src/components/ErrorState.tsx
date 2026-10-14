@@ -85,7 +85,7 @@ export function ErrorState({
       <p className="text-sm font-semibold">{title}</p>
       <p className="max-w-md text-xs leading-relaxed text-muted-foreground">{message}</p>
       {code || requestId ? (
-        <p className="font-mono text-[11px] text-muted-foreground">
+        <p className="font-mono text-2xs text-muted-foreground">
           {code ? <span>{code}</span> : null}
           {code && requestId ? <span aria-hidden="true"> · </span> : null}
           {requestId ? <span>Request ID {requestId}</span> : null}

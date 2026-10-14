@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { METRIC_COPY } from '@/lib/metricCopy';
 import { ENDPOINT_PAGE } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
@@ -43,7 +44,7 @@ describe('EndpointsView', () => {
     expect(calls[0]?.get('sort')).toBe('calls');
     expect(calls[0]?.get('dir')).toBe('desc');
 
-    await user.click(screen.getByRole('button', { name: /p95/i }));
+    await user.click(screen.getByRole('button', { name: 'p95' }));
     await waitFor(() => expect(calls.at(-1)?.get('sort')).toBe('p95'));
     expect(calls.at(-1)?.get('dir')).toBe('desc');
     expect(screen.getByRole('columnheader', { name: /p95/i })).toHaveAttribute(
@@ -51,7 +52,7 @@ describe('EndpointsView', () => {
       'descending',
     );
 
-    await user.click(screen.getByRole('button', { name: /p95/i }));
+    await user.click(screen.getByRole('button', { name: 'p95' }));
     await waitFor(() => expect(calls.at(-1)?.get('dir')).toBe('asc'));
   });
 
@@ -63,5 +64,19 @@ describe('EndpointsView', () => {
     );
     renderWithProviders(<EndpointsView />);
     expect(await screen.findByText('No API traffic in this window')).toBeInTheDocument();
+  });
+
+  it('explains the metric columns and names the 4xx / 5xx counts', async () => {
+    recordListCalls();
+    const user = userEvent.setup();
+    renderWithProviders(<EndpointsView />);
+    const row = (await screen.findByRole('link', { name: /\/api\/orders\/:id/ })).closest('tr')!;
+    expect(row).toHaveTextContent(/12\s*4xx\s*·\s*3\s*5xx/);
+
+    for (const header of ['Errors', 'p50', 'p95', 'p99']) {
+      expect(screen.getByRole('button', { name: `What is ${header}?` })).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole('button', { name: 'What is p95?' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(METRIC_COPY.p95.short);
   });
 });

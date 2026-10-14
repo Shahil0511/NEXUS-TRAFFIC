@@ -13,6 +13,7 @@ import { LatencyChart } from '@/components/charts/LatencyChart';
 import { TrafficChart } from '@/components/charts/TrafficChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { InfoTip } from '@/components/InfoTip';
 import { KpiCard } from '@/components/KpiCard';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
@@ -30,6 +31,7 @@ import {
   formatPercent,
   formatWindowCaption,
 } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 import { useOverviewSummary } from './useOverviewSummary';
@@ -192,11 +194,17 @@ function ActiveUsersPanel({
         activity.data ? (
           <dl className="flex items-center gap-4 text-right text-xs">
             <div>
-              <dt className="text-muted-foreground">Last 7 days</dt>
+              <dt className="inline-flex items-center gap-1 text-muted-foreground">
+                Last 7 days
+                <InfoTip label="weekly active users" text={metricInfo('wau')} />
+              </dt>
               <dd className="font-semibold tabular">{formatInteger(activity.data.wau)}</dd>
             </div>
             <div>
-              <dt className="text-muted-foreground">Last 30 days</dt>
+              <dt className="inline-flex items-center gap-1 text-muted-foreground">
+                Last 30 days
+                <InfoTip label="monthly active users" text={metricInfo('mau')} />
+              </dt>
               <dd className="font-semibold tabular">{formatInteger(activity.data.mau)}</dd>
             </div>
             <Button asChild variant="ghost" size="sm">
@@ -274,7 +282,7 @@ function AppsPanel({
                       ...linkQuery,
                       app: undefined,
                     })}
-                    className="truncate rounded-sm font-medium outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="truncate rounded-sm font-medium outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     {app.displayName}
                   </Link>
@@ -322,6 +330,7 @@ function KpiGrid({
     >
       <KpiCard
         label="Requests"
+        info={metricInfo('requests')}
         icon={Activity}
         loading={loading}
         value={formatCompact(summary?.requests.value)}
@@ -331,6 +340,7 @@ function KpiGrid({
       />
       <KpiCard
         label="Error rate"
+        info={metricInfo('errorRate')}
         icon={TriangleAlert}
         loading={loading}
         value={formatPercent(summary?.errorRate.value)}
@@ -340,6 +350,7 @@ function KpiGrid({
       />
       <KpiCard
         label="p95 latency"
+        info={metricInfo('p95')}
         icon={Gauge}
         loading={loading}
         value={formatDuration(summary?.p95Ms.value)}
@@ -349,6 +360,7 @@ function KpiGrid({
       />
       <KpiCard
         label="Active users now"
+        info={metricInfo('activeUsersNow')}
         icon={Radio}
         loading={loading}
         value={formatInteger(summary?.activeUsersNow)}
@@ -357,6 +369,7 @@ function KpiGrid({
       />
       <KpiCard
         label="Page views"
+        info={metricInfo('pageViews')}
         icon={Eye}
         loading={loading}
         value={formatCompact(summary?.pageViews.value)}
@@ -365,6 +378,7 @@ function KpiGrid({
       />
       <KpiCard
         label="Identified users"
+        info={metricInfo('identifiedUsers')}
         icon={UserCheck}
         loading={loading}
         value={formatInteger(summary?.identifiedUsers.value)}

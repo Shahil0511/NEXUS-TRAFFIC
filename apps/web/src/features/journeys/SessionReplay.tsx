@@ -25,7 +25,7 @@ function Offset({ occurredAt, startMs }: { occurredAt: string; startMs: number }
     <time
       dateTime={occurredAt}
       title={`${formatDateTime(occurredAt)} IST`}
-      className="shrink-0 text-[11px] text-muted-foreground tabular"
+      className="shrink-0 text-2xs text-muted-foreground tabular"
     >
       {formatElapsed(Date.parse(occurredAt) - startMs)}
     </time>
@@ -34,8 +34,10 @@ function Offset({ occurredAt, startMs }: { occurredAt: string; startMs: number }
 
 /**
  * WHY: a session read as a story — each page in order with the time it was actually visible, and
- * under it the tools used and the API calls it made. Every ingested value is rendered as text;
- * an API call additionally links to its route through the opaque endpointId.
+ * under it the tools used and the API calls it made. Every ingested value is rendered as text
+ * (long paths truncate with the full path as the tooltip, while the visible-time badge, offset and
+ * "Route" link keep their size); an API call additionally links to its route through the opaque
+ * endpointId.
  */
 export function SessionReplay({ events, startedAt, linkQuery }: SessionReplayProps) {
   const steps = useMemo(() => groupSessionSteps(events), [events]);
@@ -79,7 +81,7 @@ function ReplayStep({ step, pageNumber, isLast, startMs, linkQuery }: ReplayStep
       ) : null}
       <span
         className={cn(
-          'flex size-7 items-center justify-center rounded-full text-[11px] font-semibold tabular',
+          'flex size-7 items-center justify-center rounded-full text-2xs font-semibold tabular',
           page ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground',
         )}
       >
@@ -95,12 +97,12 @@ function ReplayStep({ step, pageNumber, isLast, startMs, linkQuery }: ReplayStep
               {page.path}
             </span>
             {page.visibleMs !== null ? (
-              <Badge variant="muted" className="tabular">
+              <Badge variant="muted" className="shrink-0 tabular">
                 <Hourglass aria-hidden="true" />
                 {formatDuration(page.visibleMs)} visible
               </Badge>
             ) : null}
-            <span className="ml-auto">
+            <span className="ml-auto shrink-0">
               <Offset occurredAt={page.occurredAt} startMs={startMs} />
             </span>
           </div>

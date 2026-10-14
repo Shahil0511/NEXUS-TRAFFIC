@@ -1,11 +1,12 @@
 'use client';
 
-import type { TimeWindowQuery, UserProfileDto } from '@nexus/shared';
-import { Activity, ArrowLeft, Eye, TriangleAlert, Waypoints } from 'lucide-react';
+import { type AppDto, ERROR_CODES, type TimeWindowQuery, type UserProfileDto } from '@nexus/shared';
+import { Activity, Eye, TriangleAlert, UserX, Waypoints } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { AppChip, AppChipList } from '@/components/AppChip';
+import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -20,8 +21,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
+import { useAppList } from '@/features/apps/useAppList';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { ApiError } from '@/lib/apiError';
 import { formatCountry, formatDateTime, formatInteger, formatPercent } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { maskEmail, useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -32,10 +37,11 @@ import { useUserTimeline } from './useUserTimeline';
 /** Timeline rows per "Load more". */
 const TIMELINE_PAGE_SIZE = 50;
 const PERCENT = 100;
+const HTTP_NOT_FOUND = 404;
 const PROFILE_PANELS = ['Top pages', 'Top tools', 'Countries'] as const;
 /** Inline link inside a ranked list row. */
 const ROW_LINK =
-  'rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60';
+  'rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60';
 
 /**
  * One verified user: totals, the pages and tools they use most, where they connect from, and a
@@ -45,21 +51,31 @@ const ROW_LINK =
 export function UserDetailView({ userKey }: { userKey: string }) {
   const { filters } = useGlobalFilters();
   const profile = useUserProfile(userKey, filters);
-  const backLink = (
-    <Link
-      href={withQuery(PAGES.users(), filterLinkQuery(filters))}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> Users
-    </Link>
+  const apps = useAppList();
+  const usersHref = withQuery(PAGES.users(), filterLinkQuery(filters));
+  // The trail names the user by MASKED email only (it reads like a title; ADR 0006).
+  const email = profile.data?.summary.email;
+  const breadcrumbs = (
+    <Breadcrumbs
+      items={[{ label: 'Users', href: usersHref }, { label: email ? maskEmail(email) : 'User' }]}
+    />
   );
 
   if (profile.isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="User" eyebrow={backLink} />
+        <PageHeader title="User" eyebrow={breadcrumbs} />
         <Card>
-          <ErrorState error={profile.error} onRetry={() => void profile.refetch()} />
+          {isNoActivity(profile.error, filters.app, apps.data) ? (
+            <EmptyState
+              icon={UserX}
+              title="No activity for this user in this range"
+              description="This user has no recorded activity in the selected window."
+              action={<WidenRangeButton />}
+            />
+          ) : (
+            <ErrorState error={profile.error} onRetry={() => void profile.refetch()} />
+          )}
         </Card>
       </div>
     );
@@ -67,13 +83,13 @@ export function UserDetailView({ userKey }: { userKey: string }) {
   return (
     <div className="space-y-6">
       {profile.isPending ? (
-        <ProfileSkeleton eyebrow={backLink} />
+        <ProfileSkeleton eyebrow={breadcrumbs} />
       ) : (
         <ProfileContent
           userKey={userKey}
           profile={profile.data}
           filters={filters}
-          eyebrow={backLink}
+          eyebrow={breadcrumbs}
         />
       )}
       <TimelinePanel userKey={userKey} filters={filters} />
@@ -81,11 +97,32 @@ export function UserDetailView({ userKey }: { userKey: string }) {
   );
 }
 
+/**
+ * Whether a profile error means "no activity in this window" (pure; unit-tested). The API answers
+ * 404 NOT_FOUND both when the user did nothing in the window AND when `?app=` names an unknown app
+ * (a stale or mistyped slug). WHY the app check: the second is a real fault the user must see
+ * (ErrorState with the API message), not an invitation to widen the range. While the app list is
+ * unknown (loading or failed) the common case — no activity — wins.
+ */
+export function isNoActivity(
+  error: unknown,
+  app: string | undefined,
+  registeredApps: readonly AppDto[] | undefined,
+): boolean {
+  const notFound =
+    error instanceof ApiError &&
+    error.status === HTTP_NOT_FOUND &&
+    error.code === ERROR_CODES.NOT_FOUND;
+  if (!notFound) return false;
+  if (!app || !registeredApps) return true;
+  return registeredApps.some((registered) => registered.slug === app);
+}
+
 function ProfileSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">{eyebrow}</div>
+        {eyebrow}
         <Skeleton className="h-7 w-72" />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -152,17 +189,29 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
       />
 
       <section aria-label="User metrics" className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard label="API requests" icon={Activity} value={formatInteger(summary.requests)} />
+        <KpiCard
+          label="API requests"
+          info={metricInfo('requests')}
+          icon={Activity}
+          value={formatInteger(summary.requests)}
+        />
         <KpiCard
           label="Failed requests"
+          info={metricInfo('failedRequests')}
           icon={TriangleAlert}
           value={formatInteger(profile.failedRequests)}
           hint={failedShare !== null ? `${formatPercent(failedShare)} of requests` : undefined}
           href={profile.failedRequests > 0 ? failuresHref : undefined}
         />
-        <KpiCard label="Page views" icon={Eye} value={formatInteger(summary.pageViews)} />
+        <KpiCard
+          label="Page views"
+          info={metricInfo('pageViews')}
+          icon={Eye}
+          value={formatInteger(summary.pageViews)}
+        />
         <KpiCard
           label="Sessions"
+          info={metricInfo('sessions')}
           icon={Waypoints}
           value={formatInteger(summary.sessions)}
           hint="browser sessions"
@@ -286,7 +335,7 @@ function AppsUsedTable({
     <table className="w-full text-xs">
       <caption className="sr-only">Apps used</caption>
       <thead>
-        <tr className="text-[11px] text-muted-foreground uppercase">
+        <tr className="text-2xs text-muted-foreground uppercase">
           <th scope="col" className="pb-2 text-left font-medium">
             App
           </th>
@@ -345,7 +394,7 @@ function TimelinePanel({ userKey, filters }: { userKey: string; filters: TimeWin
             rows={rows}
             rowKey={(row) => row.eventId}
             loading={timeline.isPending}
-            empty={<EmptyState title="No activity in this window" />}
+            empty={<EmptyState title="No activity in this window" action={<WidenRangeButton />} />}
           />
           {rows && rows.length > 0 ? (
             <LoadMoreButton

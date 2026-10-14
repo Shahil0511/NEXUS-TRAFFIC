@@ -104,7 +104,7 @@ Sent by an app's server middleware to `POST /v1/ingest/server`. One row per requ
 | `status_code` | HTTP status 100–599 (the wire field is `status`). |
 | `duration_ms` | response time, 0 – 3 600 000. |
 | `request_bytes`, `response_bytes` | body sizes when known. |
-| `error_code` | the app's error **code** (e.g. `VALIDATION_ERROR`, `^[A-Z0-9_]{1,64}$`). Error messages are never accepted. |
+| `error_code` | the app's error **code** (e.g. `VALIDATION_ERROR`, `^[A-Z0-9_]{1,64}$`). Error messages are never accepted. Grouped on the Errors page ("Error codes" panel, `?errorCode=` filter) — a reason for apps to send stable codes. |
 | `release` | the app's version/commit (≤ 64). |
 | `request_id` | the app's request id for cross-referencing its own logs (≤ 128). |
 | `session_id`, `page_view_id` | browser session / page view that triggered the call, when the frontend tracker propagates them (opt-in headers). |

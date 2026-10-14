@@ -74,6 +74,19 @@ Split it: `parseApiKey()` (pure) → `ApiKeyVerifier.matches()` → `AppKeyAuthe
 - Never log tokens, keys or full emails. Never store query strings, bodies or error messages.
 - Never build an `href`/`src` from ingested data on the dashboard.
 
+## 5b. Dashboard UI
+
+- Sizes and colours come from the tokens in `apps/web/src/app/globals.css` — never arbitrary values:
+  `text-2xs` (11 px) is the smallest text, links use `text-link` (AA in both themes; `--primary` is not
+  readable as text on the dark card), status codes use `statusToneOf()` (`components/StatusCode.tsx`),
+  methods the `--method-*` tokens. `apps/web/src/app/designTokens.test.ts` checks every token's contrast.
+- Every metric shown to people has a plain-language definition in ONE place, `apps/web/src/lib/metricCopy.ts`
+  (`metricInfo(key)`), surfaced through `KpiCard info`, `DataTable` column `hint` or `InfoTip`.
+- Entities link through the shared helpers only: `UserLink` (`components/ActorCell.tsx`), `AppChip`,
+  `PageLink` / `ToolLink` (`components/EntityLinks.tsx`), route links via `PAGES.endpointDetail`.
+- Detail pages open with `Breadcrumbs` (`components/Breadcrumbs.tsx`, emails masked); "no data in this
+  window" states offer `WidenRangeButton`; ids people quote get a `CopyButton` / `CopyableText`.
+
 ## 6. Testing
 
 - vitest everywhere. Unit-test pure functions and services with hand-written fakes

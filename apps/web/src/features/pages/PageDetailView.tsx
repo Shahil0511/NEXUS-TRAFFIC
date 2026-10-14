@@ -1,11 +1,12 @@
 'use client';
 
 import type { PageDetailDto, PageLinkDto } from '@nexus/shared';
-import { ArrowLeft, Clock, DoorOpen, Eye, Hourglass, UserCheck, Waypoints } from 'lucide-react';
+import { Clock, DoorOpen, Eye, Hourglass, UserCheck, Waypoints } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { AppChip } from '@/components/AppChip';
+import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { CountChart } from '@/components/charts/CountChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -19,6 +20,7 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -29,7 +31,7 @@ type LinkQuery = Record<string, string | undefined>;
 const PERCENT = 100;
 /** Inline link inside a list row. */
 const ROW_LINK =
-  'rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60';
+  'rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60';
 
 /**
  * One page of one app: how often and how long it is viewed, by whom, which tools are used on it,
@@ -44,34 +46,36 @@ export function PageDetailView({ app, pageId }: { app: string; pageId: string })
   const detail = usePageDetail(app, pageId, filters);
   useDocumentTitle(detail.data?.page.pathTemplate);
 
-  const backLink = (
-    <Link
-      href={withQuery(PAGES.pages(), linkQuery)}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> Pages & Tools
-    </Link>
+  // Applications › <app> › Pages › <template>: the template is link TEXT only, never a URL part.
+  const breadcrumbs = (
+    <Breadcrumbs
+      items={[
+        ...applicationCrumbs(app, linkQuery),
+        { label: 'Pages', href: withQuery(PAGES.pages(), linkQuery) },
+        { label: detail.data?.page.pathTemplate ?? 'Page' },
+      ]}
+    />
   );
 
   if (detail.isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Page" eyebrow={backLink} />
+        <PageHeader title="Page" eyebrow={breadcrumbs} />
         <Card>
           <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
         </Card>
       </div>
     );
   }
-  if (detail.isPending) return <DetailSkeleton eyebrow={backLink} />;
-  return <DetailContent detail={detail.data} linkQuery={linkQuery} eyebrow={backLink} />;
+  if (detail.isPending) return <DetailSkeleton eyebrow={breadcrumbs} />;
+  return <DetailContent detail={detail.data} linkQuery={linkQuery} eyebrow={breadcrumbs} />;
 }
 
 function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">{eyebrow}</div>
+        {eyebrow}
         <Skeleton className="h-7 w-80" />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6">
@@ -114,16 +118,28 @@ function DetailContent({
         aria-label="Page metrics"
         className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6"
       >
-        <KpiCard label="Views" icon={Eye} value={formatInteger(page.views)} />
+        <KpiCard
+          label="Views"
+          info={metricInfo('pageViews')}
+          icon={Eye}
+          value={formatInteger(page.views)}
+        />
         <KpiCard
           label="Users"
+          info={metricInfo('uniqueUsers')}
           icon={UserCheck}
           value={formatInteger(page.distinctUsers)}
           hint="verified"
         />
-        <KpiCard label="Sessions" icon={Waypoints} value={formatInteger(page.uniqueSessions)} />
+        <KpiCard
+          label="Sessions"
+          info={metricInfo('sessions')}
+          icon={Waypoints}
+          value={formatInteger(page.uniqueSessions)}
+        />
         <KpiCard
           label="Avg time visible"
+          info={metricInfo('visibleTime')}
           icon={Hourglass}
           value={formatDuration(page.avgVisibleMs)}
           hint="tab in foreground"
@@ -135,6 +151,7 @@ function DetailContent({
         />
         <KpiCard
           label="Exit rate"
+          info={metricInfo('exitRate')}
           icon={DoorOpen}
           value={formatPercent(exitRate)}
           hint={`${formatInteger(page.exits)} sessions ended here`}

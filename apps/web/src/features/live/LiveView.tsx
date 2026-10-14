@@ -194,7 +194,7 @@ function LiveActorCell({ event, linkQuery }: { event: LiveEventDto; linkQuery: L
         <span className="text-muted-foreground italic">anonymous</span>
       )}
       {secondary ? (
-        <span className="truncate font-mono text-[11px] text-muted-foreground">{secondary}</span>
+        <span className="truncate font-mono text-2xs text-muted-foreground">{secondary}</span>
       ) : null}
     </div>
   );

@@ -201,6 +201,11 @@ export const ERROR_SUMMARY: ErrorSummaryDto = {
       lastSeenAt: '2026-10-01T07:40:00.000Z',
     },
   ],
+  byErrorCode: [
+    { errorCode: 'QUERY_TIMEOUT', count: 9, routes: 2 },
+    { errorCode: 'SERVICE_UNAVAILABLE', count: 3, routes: 1 },
+    { errorCode: null, count: 3, routes: 1 },
+  ],
 };
 
 export const ENDPOINT_DETAIL: EndpointDetailDto = {

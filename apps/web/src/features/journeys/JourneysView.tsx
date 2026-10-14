@@ -11,6 +11,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatWindowCaption } from '@/lib/format';
 
@@ -112,6 +113,7 @@ function SessionsPanel() {
               <EmptyState
                 title="No sessions in this window"
                 description="Sessions appear once an app sends browser events. Try a longer range."
+                action={<WidenRangeButton />}
               />
             }
           />

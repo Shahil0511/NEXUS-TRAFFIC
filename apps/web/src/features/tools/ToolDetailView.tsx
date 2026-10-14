@@ -1,11 +1,12 @@
 'use client';
 
 import type { ToolDetailDto } from '@nexus/shared';
-import { ArrowLeft, Clock, MousePointerClick, UserCheck, Waypoints } from 'lucide-react';
+import { Clock, MousePointerClick, UserCheck, Waypoints } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { AppChip } from '@/components/AppChip';
+import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { CountChart } from '@/components/charts/CountChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -18,6 +19,7 @@ import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatAgo, formatDateTime, formatInteger, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -40,34 +42,36 @@ export function ToolDetailView({ app, toolId }: { app: string; toolId: string })
   const detail = useToolDetail(app, toolId, filters);
   useDocumentTitle(detail.data?.tool.tool);
 
-  const backLink = (
-    <Link
-      href={withQuery(PAGES.tools(), linkQuery)}
-      className="inline-flex items-center gap-1 rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-    >
-      <ArrowLeft className="size-3" aria-hidden="true" /> Tools
-    </Link>
+  // Applications › <app> › Tools › <tool>: the tool name is link TEXT only, never a URL part.
+  const breadcrumbs = (
+    <Breadcrumbs
+      items={[
+        ...applicationCrumbs(app, linkQuery),
+        { label: 'Tools', href: withQuery(PAGES.tools(), linkQuery) },
+        { label: detail.data?.tool.tool ?? 'Tool' },
+      ]}
+    />
   );
 
   if (detail.isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Tool" eyebrow={backLink} />
+        <PageHeader title="Tool" eyebrow={breadcrumbs} />
         <Card>
           <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
         </Card>
       </div>
     );
   }
-  if (detail.isPending) return <DetailSkeleton eyebrow={backLink} />;
-  return <DetailContent detail={detail.data} linkQuery={linkQuery} eyebrow={backLink} />;
+  if (detail.isPending) return <DetailSkeleton eyebrow={breadcrumbs} />;
+  return <DetailContent detail={detail.data} linkQuery={linkQuery} eyebrow={breadcrumbs} />;
 }
 
 function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
-        <div className="text-xs text-muted-foreground">{eyebrow}</div>
+        {eyebrow}
         <Skeleton className="h-7 w-64" />
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -106,14 +110,25 @@ function DetailContent({
       />
 
       <section aria-label="Tool metrics" className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard label="Uses" icon={MousePointerClick} value={formatInteger(tool.uses)} />
+        <KpiCard
+          label="Uses"
+          info={metricInfo('toolUses')}
+          icon={MousePointerClick}
+          value={formatInteger(tool.uses)}
+        />
         <KpiCard
           label="Users"
+          info={metricInfo('uniqueUsers')}
           icon={UserCheck}
           value={formatInteger(tool.distinctUsers)}
           hint="verified"
         />
-        <KpiCard label="Sessions" icon={Waypoints} value={formatInteger(tool.distinctSessions)} />
+        <KpiCard
+          label="Sessions"
+          info={metricInfo('sessions')}
+          icon={Waypoints}
+          value={formatInteger(tool.distinctSessions)}
+        />
         <KpiCard
           label="Last used"
           icon={Clock}
@@ -150,7 +165,7 @@ function DetailContent({
                 label: (
                   <Link
                     href={withQuery(PAGES.pageDetail(tool.app, page.pageId), linkQuery)}
-                    className="rounded-sm font-mono outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+                    className="rounded-sm font-mono outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
                   >
                     {page.pathTemplate}
                   </Link>

@@ -25,7 +25,7 @@ export function InlineError({ error }: { error: unknown }) {
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
       <div className="min-w-0">
         <p>{message}</p>
-        {detail ? <p className="font-mono text-[11px] opacity-80">{detail}</p> : null}
+        {detail ? <p className="font-mono text-2xs opacity-80">{detail}</p> : null}
       </div>
     </div>
   );

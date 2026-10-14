@@ -277,6 +277,17 @@ export interface EndpointDetailRows {
   topUsers: UserUsageRow[];
 }
 
+/**
+ * Failures grouped by app error code (NULL = sent without a code).
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeErrors
+ */
+export interface ErrorCodeCountRow {
+  error_code: string | null;
+  count: number;
+  /** count(DISTINCT endpoint_id) */
+  routes: number;
+}
+
 /** Everything the Errors page summary needs. */
 export interface ErrorSummaryRows {
   totals: ErrorTotalsRow;
@@ -285,6 +296,7 @@ export interface ErrorSummaryRows {
   topEndpoints: EndpointStatsRow[];
   usersAffected: number;
   topAffectedUsers: UserUsageRow[];
+  byErrorCode: ErrorCodeCountRow[];
 }
 
 /** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.pageViewTimeseries */

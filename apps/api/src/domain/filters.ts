@@ -23,6 +23,17 @@ export interface TrafficFilter {
 }
 
 /**
+ * The Errors page scope: TrafficFilter plus ONE app error code (`error_code`, ERROR_CODE_PATTERN —
+ * validated by errorSummaryQuerySchema / errorListQuerySchema). Always bound as a parameter.
+ * WHY a separate type: the code narrows FAILED rows only, never "all calls" (a route's call count
+ * must not shrink to its coded failures) — see errorCodeCondition in api-request-query.repository.
+ */
+export interface FailureFilter extends TrafficFilter {
+  /** Stored `error_code`; undefined = every code (and no code). */
+  errorCode?: string;
+}
+
+/**
  * Sort keys of the endpoint-stats query: the public ENDPOINT_SORT_VALUES plus `errors`, which only
  * the Errors page uses internally ("top failing endpoints") and is NOT accepted from the query string.
  */

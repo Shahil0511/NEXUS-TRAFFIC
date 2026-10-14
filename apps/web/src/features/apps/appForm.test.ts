@@ -5,6 +5,7 @@ import { ADMIN_APPS, apiKey, PUBLISHABLE_KEY } from '@/test/adminFixtures';
 import {
   appFormOf,
   currentPublishableKey,
+  envSnippet,
   expiresAtFor,
   keyStatusOf,
   parseOrigins,
@@ -38,7 +39,10 @@ describe('toUpdateAppBody', () => {
   });
 
   it('names the bad origin line', () => {
-    const result = toUpdateAppBody({ ...appFormOf(APP), allowedOrigins: 'https://ok.in\nnot-an-origin' }, APP);
+    const result = toUpdateAppBody(
+      { ...appFormOf(APP), allowedOrigins: 'https://ok.in\nnot-an-origin' },
+      APP,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.errors.allowedOrigins).toMatch(/^Origin 2: /);
   });
@@ -60,7 +64,10 @@ describe('key status', () => {
     expect(keyStatusOf(apiKey({ expiresAt: '2026-10-02T00:00:00.000Z' }), NOW)).toBe('expiring');
     expect(keyStatusOf(apiKey({ expiresAt: '2026-09-30T00:00:00.000Z' }), NOW)).toBe('expired');
     expect(
-      keyStatusOf(apiKey({ expiresAt: '2026-10-02T00:00:00.000Z', revokedAt: '2026-10-01T00:00:00.000Z' }), NOW),
+      keyStatusOf(
+        apiKey({ expiresAt: '2026-10-02T00:00:00.000Z', revokedAt: '2026-10-01T00:00:00.000Z' }),
+        NOW,
+      ),
     ).toBe('revoked');
   });
 
@@ -76,5 +83,15 @@ describe('key status', () => {
   it('expiresAtFor adds the grace period', () => {
     expect(expiresAtFor('now', NOW)).toBe('2026-10-01T10:00:00.000Z');
     expect(expiresAtFor('24h', NOW)).toBe('2026-10-02T10:00:00.000Z');
+  });
+});
+
+describe('envSnippet', () => {
+  it('lists only the known values, one NAME=value per line, never a secret', () => {
+    expect(envSnippet('https://nexus.libas.in/traffic', 'nx_pk_abc')).toBe(
+      'NEXUS_URL=https://nexus.libas.in/traffic\nNEXT_PUBLIC_NEXUS_KEY=nx_pk_abc',
+    );
+    expect(envSnippet(null, 'nx_pk_abc')).toBe('NEXT_PUBLIC_NEXUS_KEY=nx_pk_abc');
+    expect(envSnippet(null, null)).toBeNull();
   });
 });

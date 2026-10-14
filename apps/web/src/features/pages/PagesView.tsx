@@ -1,7 +1,7 @@
 'use client';
 
 import type { PageStatsDto } from '@nexus/shared';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { AppChip } from '@/components/AppChip';
 import { PageLink } from '@/components/EntityLinks';
@@ -13,6 +13,14 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { RankedList } from '@/components/RankedList';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
+import {
+  cappedListNote,
+  FilterMatchCount,
+  filterLoadedRows,
+  LoadedRowsFilter,
+  NoFilterMatch,
+} from '@/components/LoadedRowsFilter';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
 
@@ -24,6 +32,8 @@ const PAGE_LIMIT = 100;
 const CHART_BARS = 8;
 const EXIT_ROWS = 5;
 const PERCENT = 100;
+
+// ─── Pages ───────────────────────────────────────────────────────────────────
 
 function pageKey(page: PageStatsDto): string {
   return `${page.app}|${page.pathTemplate}`;
@@ -96,7 +106,7 @@ function pageColumns(
       cell: (row) => (
         <span className="flex flex-col items-end">
           <span>{formatInteger(row.exits)}</span>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-2xs text-muted-foreground">
             {formatPercent(
               row.uniqueSessions > 0 ? (row.exits / row.uniqueSessions) * PERCENT : null,
             )}
@@ -120,6 +130,19 @@ export function PagesView() {
   const columns = useMemo(() => pageColumns(linkQuery), [linkQuery]);
   const longest = useMemo(() => longestMedianPages(items ?? []), [items]);
   const exits = useMemo(() => topExitPages(items ?? []), [items]);
+  const [filterText, setFilterText] = useState('');
+  const filterInputRef = useRef<HTMLInputElement>(null);
+  // WHY focus the search box: "Clear filter" unmounts itself, which would drop focus to <body>.
+  const clearFilter = useCallback(() => {
+    setFilterText('');
+    filterInputRef.current?.focus();
+  }, []);
+  const filtering = filterText.trim() !== '';
+  const rows = useMemo(
+    () => filterLoadedRows(items, filterText, (page) => page.pathTemplate),
+    [items, filterText],
+  );
+  const capped = cappedListNote(items?.length ?? 0, PAGE_LIMIT, 'pages');
 
   return (
     <div className="space-y-6">
@@ -191,23 +214,51 @@ export function PagesView() {
         </Panel>
       </div>
 
-      <Panel title="Pages" description="Most viewed first" contentClassName="px-0 pb-0">
+      <Panel
+        title="Pages"
+        description={capped ? `Most viewed first · ${capped}` : 'Most viewed first'}
+        contentClassName="px-0 pb-0"
+        aside={
+          items && items.length > 0 ? (
+            <LoadedRowsFilter
+              value={filterText}
+              onChange={setFilterText}
+              inputRef={filterInputRef}
+              label="Filter loaded pages by template"
+              placeholder="Filter by template…"
+            />
+          ) : null
+        }
+      >
         {pages.isError ? (
           <ErrorState error={pages.error} onRetry={() => void pages.refetch()} />
         ) : (
-          <DataTable
-            caption="Pages"
-            columns={columns}
-            rows={items}
-            rowKey={pageKey}
-            loading={pages.isPending}
-            empty={
-              <EmptyState
-                title="No page views in this window"
-                description="Pages appear once an app sends browser events. Try a longer range."
-              />
-            }
-          />
+          <>
+            <FilterMatchCount
+              active={filtering && items !== undefined}
+              shown={rows?.length ?? 0}
+              loaded={items?.length ?? 0}
+              noun="pages"
+            />
+            <DataTable
+              caption="Pages"
+              columns={columns}
+              rows={rows}
+              rowKey={pageKey}
+              loading={pages.isPending}
+              empty={
+                filtering && items && items.length > 0 ? (
+                  <NoFilterMatch noun="pages" onClear={clearFilter} />
+                ) : (
+                  <EmptyState
+                    title="No page views in this window"
+                    description="Pages appear once an app sends browser events. Try a longer range."
+                    action={<WidenRangeButton />}
+                  />
+                )
+              }
+            />
+          </>
         )}
       </Panel>
     </div>

@@ -378,6 +378,84 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     });
   });
 
+  describe('ErrorService by error code', () => {
+    // The seed sends no codes; tag the six current-window failures for this block only:
+    // 500 ×2 (reportExport) + 503 (leaveList) → UPSTREAM_TIMEOUT, 401 ×2 (leaveList) →
+    // AUTH_EXPIRED, 404 (reportExport) stays NULL ("no code sent").
+    beforeAll(async () => {
+      await db.ownerPool.query(
+        `UPDATE traffic.api_requests
+            SET error_code = CASE WHEN status_code IN (500, 503) THEN 'UPSTREAM_TIMEOUT'
+                                  WHEN status_code = 401 THEN 'AUTH_EXPIRED' END
+          WHERE event_id = ANY($1::uuid[])`,
+        [seed.failureIds],
+      );
+    });
+
+    afterAll(async () => {
+      await db.ownerPool.query(
+        `UPDATE traffic.api_requests SET error_code = NULL WHERE event_id = ANY($1::uuid[])`,
+        [seed.failureIds],
+      );
+    });
+
+    it('groups the failures by code (most first, NULL last on ties) with distinct routes', async () => {
+      const dto = await errors.summary({ range: '24h' });
+      expect(dto.byErrorCode).toEqual([
+        { errorCode: 'UPSTREAM_TIMEOUT', count: 3, routes: 2 },
+        { errorCode: 'AUTH_EXPIRED', count: 2, routes: 1 },
+        { errorCode: null, count: 1, routes: 1 },
+      ]);
+    });
+
+    it('scopes the summary and the list to one code', async () => {
+      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' });
+      expect(dto).toMatchObject({ total: 3, errors4xx: 0, errors5xx: 3 });
+      expect(dto.byErrorCode).toEqual([{ errorCode: 'UPSTREAM_TIMEOUT', count: 3, routes: 2 }]);
+
+      const page = await errors.list(
+        { range: '24h', statusClass: 'all', limit: 50, errorCode: 'AUTH_EXPIRED' },
+        ADMIN,
+      );
+      expect(page.items.map((f) => [f.status, f.errorCode])).toEqual([
+        [401, 'AUTH_EXPIRED'],
+        [401, 'AUTH_EXPIRED'],
+      ]);
+      const none = await errors.list(
+        { range: '24h', statusClass: '5xx', limit: 50, errorCode: 'AUTH_EXPIRED' },
+        ADMIN,
+      );
+      expect(none.items).toEqual([]);
+    });
+
+    it("keeps each top failing route's calls over ALL its requests: errorRate = coded failures / calls", async () => {
+      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' });
+      const byId = new Map(dto.topEndpoints.map((e) => [e.endpointId, e]));
+      expect(new Set(byId.keys())).toEqual(
+        new Set([ENDPOINT_IDS.reportExport, ENDPOINT_IDS.leaveList]),
+      );
+      const report = byId.get(ENDPOINT_IDS.reportExport)!;
+      expect(report).toMatchObject({
+        calls: EXPECTED.calls.reportExport,
+        errors4xx: 0,
+        errors5xx: 2,
+      });
+      expect(report.errorRate).toBeCloseTo((2 / EXPECTED.calls.reportExport) * 100, 2);
+      const leave = byId.get(ENDPOINT_IDS.leaveList)!;
+      expect(leave).toMatchObject({ calls: EXPECTED.calls.leaveList, errors4xx: 0, errors5xx: 1 });
+      expect(leave.errorRate).toBeCloseTo((1 / EXPECTED.calls.leaveList) * 100, 2);
+
+      // onlyFailing honours the code: reportExport has no AUTH_EXPIRED failure → not listed.
+      const auth = await errors.summary({ range: '24h', errorCode: 'AUTH_EXPIRED' });
+      expect(auth.topEndpoints.map((e) => [e.endpointId, e.calls, e.errors4xx])).toEqual([
+        [ENDPOINT_IDS.leaveList, EXPECTED.calls.leaveList, 2],
+      ]);
+      // The series still counts every request; only its failure columns follow the code.
+      expect(auth.timeseries.reduce((sum, p) => sum + p.requests, 0)).toBe(EXPECTED.requests);
+      expect(auth.timeseries.reduce((sum, p) => sum + p.errors4xx + p.errors5xx, 0)).toBe(2);
+    });
+  });
+
   describe('ErrorService.list', () => {
     /** Follows nextCursor until the end; returns every page. */
     async function allPages(

@@ -14,8 +14,10 @@ import { PageHeader } from '@/components/PageHeader';
 import { RelativeTime } from '@/components/RelativeTime';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatInteger } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
@@ -43,14 +45,14 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
         <span className="flex min-w-0 items-center gap-2.5">
           <span
             aria-hidden="true"
-            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground uppercase"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground uppercase"
           >
             {row.email.slice(0, 2)}
           </span>
           <span className="min-w-0 space-y-1">
             <Link
               href={withQuery(PAGES.userDetail(row.userKey), linkQuery)}
-              className="block truncate rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="block truncate rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               {row.email}
             </Link>
@@ -62,6 +64,7 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
     {
       id: 'requests',
       header: 'API calls',
+      hint: metricInfo('requests'),
       sortKey: 'requests',
       align: 'right',
       cell: (row) => formatInteger(row.requests),
@@ -69,6 +72,7 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
     {
       id: 'failed',
       header: 'Failed',
+      hint: metricInfo('failedRequests'),
       sortKey: 'failed',
       align: 'right',
       cell: (row) =>
@@ -87,6 +91,7 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
     {
       id: 'pageViews',
       header: 'Page views',
+      hint: metricInfo('pageViews'),
       sortKey: 'pageViews',
       align: 'right',
       cell: (row) => formatInteger(row.pageViews),
@@ -94,6 +99,7 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
     {
       id: 'sessions',
       header: 'Sessions',
+      hint: metricInfo('sessions'),
       sortKey: 'sessions',
       align: 'right',
       cell: (row) => formatInteger(row.sessions),
@@ -191,6 +197,7 @@ export function UsersView() {
                       ? 'Search matches part of the email address, e.g. buyer@libas.in.'
                       : 'Users appear once an app sends verified identities (SSO cookie or app-attested). Try a longer range.'
                   }
+                  action={<WidenRangeButton />}
                 />
               }
             />

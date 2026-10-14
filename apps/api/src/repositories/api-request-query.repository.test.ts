@@ -8,9 +8,10 @@ import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
 import { likeContains, ParamList } from '../db/sql';
-import type { EndpointListOptions, TrafficFilter } from '../domain/filters';
+import type { EndpointListOptions, FailureFilter, TrafficFilter } from '../domain/filters';
 import {
   ApiRequestQueryRepository,
+  errorCodeCondition,
   FAILURE_PREDICATES,
   scopeConditions,
 } from './api-request-query.repository';
@@ -19,6 +20,8 @@ const FILTER: TrafficFilter = {
   from: new Date('2026-10-01T00:00:00Z'),
   to: new Date('2026-10-02T00:00:00Z'),
 };
+/** An app error code; must only ever reach SQL as a bound value. */
+const CODE = 'UPSTREAM_TIMEOUT';
 
 /** Records every statement; answers with no rows. */
 class RecordingExecutor {
@@ -63,6 +66,78 @@ describe('scopeConditions', () => {
       'r.endpoint_id = $4',
     ]);
     expect(scoped.values).toEqual([FILTER.from, FILTER.to, 'a', 'e']);
+  });
+
+  it('never scopes by error code (a code narrows failures only)', () => {
+    const params = new ParamList();
+    const coded: FailureFilter = { ...FILTER, errorCode: CODE };
+    expect(scopeConditions(coded, params).join(' ')).not.toContain('error_code');
+    expect(params.values).not.toContain(CODE);
+  });
+});
+
+describe('errorCodeCondition', () => {
+  it('binds the code as a parameter, and is null without one', () => {
+    const params = new ParamList();
+    params.add('first');
+    expect(errorCodeCondition({ ...FILTER, errorCode: CODE }, params)).toBe('r.error_code = $2');
+    expect(params.values).toEqual(['first', CODE]);
+    expect(errorCodeCondition(FILTER, new ParamList())).toBeNull();
+  });
+});
+
+describe('ApiRequestQueryRepository SQL with an error code', () => {
+  const CODED: FailureFilter = { ...FILTER, errorCode: CODE };
+
+  /** The statement whose text contains `marker`. */
+  function statementWith(exec: RecordingExecutor, marker: string) {
+    const statement = exec.statements.find((s) => s.text.includes(marker));
+    expect(statement, marker).toBeDefined();
+    return statement!;
+  }
+
+  it('summarizeErrors binds the code (never interpolates it) in every failure statement', async () => {
+    const { exec, repo } = build();
+    await repo.summarizeErrors(CODED, 'hour');
+    for (const statement of exec.statements) {
+      expect(statement.text).not.toContain(CODE);
+      expect(statement.values).toContain(CODE);
+      expect(statement.text).toMatch(/r\.error_code = \$\d+/);
+    }
+  });
+
+  it('top failing endpoints count calls over ALL requests; the code only narrows 4xx/5xx and HAVING', async () => {
+    const { exec, repo } = build();
+    await repo.summarizeErrors(CODED, 'hour');
+    const stats = statementWith(exec, 'WITH stats AS');
+    const where = /WHERE (r\.occurred_at.*?)\s+GROUP BY/s.exec(stats.text)?.[1] ?? '';
+    expect(where).toContain('r.occurred_at');
+    expect(where).not.toContain('error_code');
+    expect(stats.text).toContain('count(*) AS calls');
+    const n = stats.values.indexOf(CODE) + 1;
+    expect(stats.text).toContain(`${FAILURE_PREDICATES['4xx']} AND r.error_code = $${n}`);
+    expect(stats.text).toContain(`${FAILURE_PREDICATES['5xx']} AND r.error_code = $${n}`);
+    expect(stats.text).toContain(
+      `HAVING count(*) FILTER (WHERE ${FAILURE_PREDICATES.all} AND r.error_code = $${n}) > 0`,
+    );
+  });
+
+  it('the errors series keeps `requests` over all calls and narrows only the failure FILTERs', async () => {
+    const { exec, repo } = build();
+    await repo.timeseries(CODED, 'hour');
+    const [series] = exec.statements;
+    expect(series?.text).toMatch(/count\(\*\) AS requests/);
+    const where = /WHERE (r\.occurred_at.*?)\s+GROUP BY/s.exec(series?.text ?? '')?.[1] ?? '';
+    expect(where).toContain('r.occurred_at');
+    expect(where).not.toContain('error_code');
+    expect(series?.text).toContain(`${FAILURE_PREDICATES['4xx']} AND r.error_code = $3`);
+  });
+
+  it('listFailures ANDs the bound code into its WHERE, after the literal predicate', async () => {
+    const { exec, repo } = build();
+    await repo.listFailures(CODED, { statusClass: 'all', after: null, limit: 3 });
+    expect(exec.statements[0]?.text).toContain(`${FAILURE_PREDICATES.all} AND r.error_code = $3`);
+    expect(exec.statements[0]?.values[2]).toBe(CODE);
   });
 });
 

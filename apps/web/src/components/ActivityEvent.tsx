@@ -64,7 +64,7 @@ export function ActivityKindBadge({ kind }: { kind: TimelineItemKind }) {
   return (
     <span
       className={cn(
-        'inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-[11px] font-semibold whitespace-nowrap',
+        'inline-flex h-5 items-center gap-1 rounded-md px-1.5 text-2xs font-semibold whitespace-nowrap',
         KIND_TONE[kind],
       )}
     >
@@ -115,7 +115,7 @@ export function ActivityEventSummary({
 }) {
   const onPage = hidePagePath ? null : (
     <>
-      <span className="shrink-0 text-[11px] text-muted-foreground">on</span>
+      <span className="shrink-0 text-2xs text-muted-foreground">on</span>
       <PathText path={event.path} />
     </>
   );
@@ -126,19 +126,19 @@ export function ActivityEventSummary({
           {isHttpMethod(event.method) ? (
             <MethodBadge method={event.method} />
           ) : (
-            <span className="font-mono text-[10px] text-muted-foreground">{event.method}</span>
+            <span className="font-mono text-2xs text-muted-foreground">{event.method}</span>
           )}
           <PathText path={event.path} />
           {event.status !== null ? <StatusCode status={event.status} /> : null}
           {event.durationMs !== null ? (
-            <span className="shrink-0 text-[11px] text-muted-foreground tabular">
+            <span className="shrink-0 text-2xs text-muted-foreground tabular">
               {formatDuration(event.durationMs)}
             </span>
           ) : null}
           {event.endpointId && linkQuery ? (
             <Link
               href={withQuery(PAGES.endpointDetail(event.endpointId), linkQuery)}
-              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-[11px] text-muted-foreground outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-2xs text-muted-foreground outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               Route
               <ArrowUpRight className="size-3" aria-hidden="true" />
@@ -166,7 +166,7 @@ export function ActivityEventSummary({
         <span className="flex min-w-0 items-center gap-2">
           <PathText path={event.path} />
           {event.visibleMs !== null ? (
-            <span className="shrink-0 text-[11px] text-muted-foreground tabular">
+            <span className="shrink-0 text-2xs text-muted-foreground tabular">
               {formatDuration(event.visibleMs)} visible
             </span>
           ) : null}

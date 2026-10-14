@@ -17,6 +17,51 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-14 — UX Wave 3: polish (design tokens, explanations, copy, mobile, wayfinding) + error codes
+
+Built by a multi-agent workflow: six builders with disjoint file ownership, each followed by a
+reviewer-fixer, then integration and a cross-cutting review.
+
+**Done**
+- **Design tokens** (`apps/web/src/app/globals.css`): `text-2xs` (11 px minimum; every `text-[10/11px]`
+  replaced), `--link` (AA in both themes; all inline link hovers use it), `--info` (1xx/3xx), `--method-*`
+  (MethodBadge), darker light-mode success/warning/destructive and chart 4xx/5xx; `designTokens.test.ts`
+  checks contrast in both themes; PageHeader h1 `text-2xl`.
+- **Metric explanations**: `lib/metricCopy.ts` (one definition per metric), `components/ui/tooltip.tsx`,
+  `components/InfoTip.tsx`, `KpiCard info`, `DataTable` column `hint`; used on Overview, Applications,
+  API Routes, route/page/tool/user detail, Users and Errors. KpiCard links via the label + card overlay.
+- **Copy**: `components/CopyButton.tsx` (`CopyButton`, `CopyableText`, clipboard fallback) on request ids,
+  session ids, app slugs/keys/snippets (never the secret), Integration values; private-IP warning explains
+  that Geography stays empty.
+- **Responsive shell**: `components/MobileNav.tsx` sheet below md, compact range select below xl, search
+  collapses to an icon, viewer email from lg; checked at 360 px with Playwright (no horizontal overflow).
+- **Wayfinding & empty states**: `components/Breadcrumbs.tsx` on every detail page (route, app, session,
+  user, page, tool; emails masked), `components/WidenRangeButton.tsx` in empty states and the user 404,
+  Panel heading ids unique (`useId`), Geography "no location" notice + `?metric=`, Pages/Tools loaded-rows
+  filter + capped-list note (`components/LoadedRowsFilter.tsx`).
+- **Error codes (contract → SQL → UI)**: `ErrorSummaryDto.byErrorCode`, `errorCode` on both errors leaves,
+  grouped query + bound filter in `ApiRequestQueryRepository`, "Error codes" panel + `?errorCode=` chip.
+- **Review**: a cross-cutting review workflow (correctness, a11y/UX, conventions/PII; every finding
+  verified by a second agent) confirmed 13 findings — all fixed: error-code scope no longer skews route error
+  rates, breadcrumbs carry the entity's app, panel headers wrap on phones, empty states never dead-end
+  (next wider preset or Integration link), unknown-app 404 is not "no activity", Geography wording by metric,
+  focus kept after clearing filters, nav label contrast, neutral capped-list note.
+- **Tests**: see the counts in the commit; `npm run typecheck && npm test` and `RUN_DB_TESTS=1 npm run test:db`
+  (throwaway `postgres:18-alpine` on :55432) green.
+
+**Next**: retention cohorts, funnels and per-page/tool totals (`total` on WindowedListDto for an exact
+"of N"); a `--chart-info` token; axe checks in the Playwright smoke suite.
+
+**Notes / known issues**
+- Breadcrumbs are fixed trails per entity (`applicationCrumbs`), not `from=` links — this closes the Wave 2
+  "breadcrumb from=" note.
+- New shareable URL state: `?errorCode=` (Errors), `?metric=` (Geography).
+- The Error codes panel shows the top 10 codes (`TOP_ERROR_CODES_LIMIT`); "no code sent" can fall outside it.
+- The 360 px layout was checked with Playwright by the responsive builder; the browser used for the final
+  walkthrough could not shrink its window.
+
+---
+
 ## 2026-10-14 — UX Wave 2: users × apps × features drill-downs
 
 **Done** ([ADR 0007](decisions/0007-page-and-tool-ids-and-drill-downs.md))

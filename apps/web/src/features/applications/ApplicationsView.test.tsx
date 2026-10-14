@@ -1,8 +1,10 @@
 import { ROUTES } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { COVERAGE_WARN_PCT, METRIC_COPY } from '@/lib/metricCopy';
 import {
   APP_TRAFFIC,
   ENDPOINT_PAGE,
@@ -38,6 +40,22 @@ describe('ApplicationsView', () => {
     expect(within(table).getByText('38')).toBeInTheDocument();
     expect(within(table).getByText('no data')).toBeInTheDocument();
     expect(screen.getByText('1 of 2')).toBeInTheDocument();
+  });
+});
+
+describe('ApplicationsView metric explanations', () => {
+  it('explains Identified / Linked (and the 80 % threshold) in the column headers', async () => {
+    server.use(http.get(routeUrl(ROUTES.overview.apps), () => HttpResponse.json(APP_TRAFFIC)));
+    const user = userEvent.setup();
+    renderWithProviders(<ApplicationsView />);
+    const table = await screen.findByRole('table', { name: 'Applications' });
+    for (const header of ['Users', 'API calls', 'Error rate', 'p95', 'Identified', 'Linked']) {
+      expect(within(table).getByRole('button', { name: `What is ${header}?` })).toBeInTheDocument();
+    }
+    await user.click(within(table).getByRole('button', { name: 'What is Linked?' }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent(METRIC_COPY.linkedPct.short);
+    expect(tip).toHaveTextContent(`Below ${COVERAGE_WARN_PCT} % is highlighted`);
   });
 });
 

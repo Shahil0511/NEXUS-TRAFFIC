@@ -90,6 +90,16 @@ describe('PageDetailView', () => {
       `/pages/ebo-sales/${OTHER_PAGE_ID}?app=ebo-sales&range=7d`,
     );
     expect(screen.getByText('Nothing after it in these sessions')).toBeInTheDocument();
+
+    // Applications › ebo-sales › Pages › /orders/:id — hrefs from PAGES, carrying the filters.
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    const links = within(trail).getAllByRole('link');
+    expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
+      ['Applications', '/applications?range=7d'],
+      ['ebo-sales', '/applications/ebo-sales?range=7d'],
+      ['Pages', '/pages?app=ebo-sales&range=7d'],
+    ]);
+    expect(within(trail).getByText('/orders/:id')).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -109,5 +119,15 @@ describe('ToolDetailView', () => {
     const actions = screen.getByRole('list', { name: 'Actions' });
     expect(within(actions).getByText('export')).toBeInTheDocument();
     expect(within(actions).getByText('not specified')).toBeInTheDocument();
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(trail).getByRole('link', { name: 'Tools' })).toHaveAttribute(
+      'href',
+      '/tools?app=ebo-sales',
+    );
+    expect(within(trail).getByRole('link', { name: 'ebo-sales' })).toHaveAttribute(
+      'href',
+      '/applications/ebo-sales',
+    );
+    expect(within(trail).getByText('export-csv')).toHaveAttribute('aria-current', 'page');
   });
 });

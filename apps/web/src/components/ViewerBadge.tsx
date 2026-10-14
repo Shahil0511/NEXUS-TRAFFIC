@@ -17,7 +17,8 @@ export function initialsOf(email: string): string {
 /**
  * WHY: who is signed in, and whether they are an admin (admins manage apps/keys and see IPs).
  * The email comes from api.me.get — the API's own verification of the SSO cookie — not from a
- * client-side decode of the token.
+ * client-side decode of the token. Below lg only the initials are drawn (the email stays readable
+ * by screen readers), below sm the admin badge shrinks to its icon.
  */
 export function ViewerBadge() {
   const me = useMe();
@@ -25,25 +26,32 @@ export function ViewerBadge() {
     return (
       <div className="flex items-center gap-2" aria-busy="true" aria-label="Loading your account">
         <Skeleton className="size-7 rounded-full" />
-        <Skeleton className="h-4 w-28" />
+        <Skeleton className="hidden h-4 w-28 lg:block" />
       </div>
     );
   }
   if (me.isError) return null;
   const { email, isAdmin } = me.data;
   return (
-    <div className="flex min-w-0 items-center gap-2" aria-label={`Signed in as ${email}`}>
+    <div className="flex min-w-0 items-center gap-2">
       <span
         aria-hidden="true"
-        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground"
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-2xs font-semibold text-accent-foreground"
       >
         {initialsOf(email)}
       </span>
-      <span className="hidden max-w-44 truncate text-xs font-medium xl:inline">{email}</span>
+      {/* Read once by screen readers at every width; the visible copy below is decoration. */}
+      <span className="sr-only">Signed in as {email}</span>
+      <span
+        aria-hidden="true"
+        className="hidden max-w-44 min-w-0 truncate text-xs font-medium lg:block"
+      >
+        {email}
+      </span>
       {isAdmin ? (
         <Badge variant="default" title="Admin: manages apps and keys, sees IP addresses">
           <ShieldCheck aria-hidden="true" />
-          admin
+          <span className="sr-only sm:not-sr-only">admin</span>
         </Badge>
       ) : null}
     </div>

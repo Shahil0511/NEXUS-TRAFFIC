@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { METRIC_COPY } from '@/lib/metricCopy';
 import {
   APP_TRAFFIC,
   ERROR_SUMMARY,
@@ -151,5 +152,20 @@ describe('OverviewView', () => {
     expect(
       within(panel).getByRole('figure', { name: 'Active users over time' }),
     ).toBeInTheDocument();
+  });
+
+  it('explains every headline metric behind an (i), outside the card links', async () => {
+    useOverviewHandlers();
+    const user = userEvent.setup();
+    renderWithProviders(<OverviewView />);
+    const metrics = await screen.findByRole('region', { name: 'Key metrics' });
+    await within(metrics).findByText('12.3K');
+    const tips = within(metrics).getAllByRole('button', { name: /^What is / });
+    expect(tips).toHaveLength(6);
+    for (const link of within(metrics).getAllByRole('link')) {
+      expect(within(link).queryByRole('button')).not.toBeInTheDocument();
+    }
+    await user.click(within(metrics).getByRole('button', { name: 'What is Error rate?' }));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(METRIC_COPY.errorRate.short);
   });
 });
