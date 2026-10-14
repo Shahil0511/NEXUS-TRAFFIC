@@ -22,13 +22,14 @@ import { formatDateTime, formatDuration, formatInteger } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 import { latestTick, LIVE_FEED_BUFFER, ticksToPoints } from './liveBuffer';
+import { OnlineNowPanel } from './OnlineNowPanel';
 import { useLiveFeed, type LiveStatus } from './useLiveFeed';
 
 const TICK_SECONDS = LIVE_TICK_MS / 1000;
 
 /**
- * The Live page: tiles for the current minute, the last hour per minute, and a streaming table of
- * API calls and page / tool events as they are committed.
+ * The Live page: tiles for the current minute, the last hour per minute, who is online right now
+ * (OnlineNowPanel), and a streaming table of API calls and page / tool events as they are committed.
  *
  * WHY THIS SHAPE: the REST snapshot paints the page immediately from the database; the socket then
  * keeps it moving (useLiveFeed). Only the APP filter applies — the time range of the top bar does
@@ -95,6 +96,8 @@ export function LiveView() {
           {() => <TrafficChart points={ticksToPoints(ticks)} grain="minute" />}
         </QueryState>
       </Panel>
+
+      <OnlineNowPanel />
 
       <Panel
         title="Activity stream"

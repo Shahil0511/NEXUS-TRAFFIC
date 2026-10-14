@@ -30,6 +30,7 @@ import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { maskEmail, useDocumentTitle } from '@/lib/useDocumentTitle';
 
+import { OnlineBadge } from './OnlineBadge';
 import { userTimelineColumns } from './userTimelineColumns';
 import { useUserProfile } from './useUserProfile';
 import { useUserTimeline } from './useUserTimeline';
@@ -163,6 +164,7 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
         title={summary.email}
         description={
           <span className="flex flex-wrap items-center gap-2">
+            <OnlineBadge userKey={userKey} />
             <AppChipList apps={summary.apps} linkQuery={linkQuery} max={6} />
             <span>
               First seen in this range {formatDateTime(profile.firstSeenAt)} · last seen{' '}

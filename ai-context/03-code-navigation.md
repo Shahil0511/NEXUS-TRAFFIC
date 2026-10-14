@@ -318,6 +318,13 @@ timers: LIVE_TICK_MS → LiveBroadcaster.emitTicks (traffic:tick per subscribed 
 Dev: `NEXT_PUBLIC_SOCKET_PATH=/traffic/socket.io` everywhere; `next dev` rewrites it to the api (`next.config.ts`),
 nginx does in production. Proven by `apps/api/test/e2e/live-socket.test.ts` (real socket, tick ≤ `LIVE_TICK_MS`).
 
+**Who's online** (`ROUTES.live.online`, GET `/v1/live/online`, query `liveOnlineQuerySchema` {app?, userKey?}):
+`features/live/useOnlineNow.ts` (polls every 15 s while visible) → `api.live.online` → `LiveController.online` →
+`LiveService.online` → `WebEventQueryRepository.countOnlineByApp` + `listOnlineUsers` — always the last
+`ACTIVE_USER_WINDOW_MS` on both tables; one row per (app, verified user) with the newest action (templates, never raw
+paths; `page_time` flushes rank last), current page and event count. Shown by `features/live/OnlineNowPanel.tsx` (Live),
+the "Online now" column (`features/applications/appTrafficColumns.tsx`), and `features/users/OnlineBadge.tsx`.
+
 ### 5d. Background jobs (S6): partitions + retention
 
 ```

@@ -16,6 +16,7 @@ import {
   errorSummaryQuerySchema,
   expireKeyBodySchema,
   geoQuerySchema,
+  liveOnlineQuerySchema,
   liveSnapshotQuerySchema,
   overviewAppsQuerySchema,
   overviewSummaryQuerySchema,
@@ -94,7 +95,13 @@ export function buildRouter(c: Container): Router {
 
   // ─── Dashboard: apps & keys ───────────────────────────────────────────────
   r.get(ROUTES.apps.list.path, ...dashboard, ctl.apps.list);
-  r.post(ROUTES.apps.create.path, ...admin, mw.dashboardJsonBody, validateBody(createAppBodySchema), ctl.apps.create);
+  r.post(
+    ROUTES.apps.create.path,
+    ...admin,
+    mw.dashboardJsonBody,
+    validateBody(createAppBodySchema),
+    ctl.apps.create,
+  );
   r.patch(
     ROUTES.apps.update.path,
     ...admin,
@@ -119,7 +126,12 @@ export function buildRouter(c: Container): Router {
     validateBody(expireKeyBodySchema),
     ctl.apps.expireKey,
   );
-  r.delete(ROUTES.apps.revokeKey.path, ...admin, validateParams(appKeyParamsSchema), ctl.apps.revokeKey);
+  r.delete(
+    ROUTES.apps.revokeKey.path,
+    ...admin,
+    validateParams(appKeyParamsSchema),
+    ctl.apps.revokeKey,
+  );
 
   // ─── Dashboard: overview ──────────────────────────────────────────────────
   r.get(
@@ -134,7 +146,12 @@ export function buildRouter(c: Container): Router {
     validateQuery(overviewTimeseriesQuerySchema),
     ctl.overview.timeseries,
   );
-  r.get(ROUTES.overview.apps.path, ...dashboard, validateQuery(overviewAppsQuerySchema), ctl.overview.apps);
+  r.get(
+    ROUTES.overview.apps.path,
+    ...dashboard,
+    validateQuery(overviewAppsQuerySchema),
+    ctl.overview.apps,
+  );
 
   // ─── Dashboard: API routes ────────────────────────────────────────────────
   r.get(
@@ -227,7 +244,12 @@ export function buildRouter(c: Container): Router {
     validateQuery(pageDetailQuerySchema),
     ctl.pages.detail,
   );
-  r.get(ROUTES.tools.usage.path, ...dashboard, validateQuery(toolUsageQuerySchema), ctl.tools.usage);
+  r.get(
+    ROUTES.tools.usage.path,
+    ...dashboard,
+    validateQuery(toolUsageQuerySchema),
+    ctl.tools.usage,
+  );
   r.get(
     ROUTES.tools.detail.path,
     ...dashboard,
@@ -246,6 +268,12 @@ export function buildRouter(c: Container): Router {
     ...dashboard,
     validateQuery(liveSnapshotQuerySchema),
     ctl.live.snapshot,
+  );
+  r.get(
+    ROUTES.live.online.path,
+    ...dashboard,
+    validateQuery(liveOnlineQuerySchema),
+    ctl.live.online,
   );
 
   // ─── Dashboard: integration health ────────────────────────────────────────

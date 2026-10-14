@@ -40,9 +40,11 @@ import {
   type GeoQuery,
   type IntegrationHealthDto,
   type KeyCreatedDto,
+  type LiveOnlineQuery,
   type LiveSnapshotDto,
   type LiveSnapshotQuery,
   type MeDto,
+  type OnlineNowDto,
   type OverviewAppsQuery,
   type OverviewSummaryDto,
   type OverviewSummaryQuery,
@@ -276,6 +278,9 @@ export const api = {
   live: {
     snapshot: (q: LiveSnapshotQuery, o?: CallOptions) =>
       request<LiveSnapshotDto>(ROUTES.live.snapshot, q, o),
+    /** Who is active right now (always the last ACTIVE_USER_WINDOW_MS; no range). */
+    online: (q: LiveOnlineQuery, o?: CallOptions) =>
+      request<OnlineNowDto>(ROUTES.live.online, q, o),
   },
   integration: {
     health: (o?: CallOptions) =>

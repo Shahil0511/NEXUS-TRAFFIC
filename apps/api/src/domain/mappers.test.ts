@@ -9,8 +9,10 @@ import {
   EVENT_ID,
   geoCityRow,
   OCCURRED_AT,
+  onlineUserRow,
   pageStatsRow,
   PLAIN_VIEWER,
+  SESSION_ID,
   sessionEventRow,
   sessionSummaryRow,
   timelineEventRow,
@@ -27,6 +29,8 @@ import {
   mapEndpointStats,
   mapGeoCity,
   mapGeoCountry,
+  mapOnlineApp,
+  mapOnlineUser,
   mapPageStats,
   mapRequestSample,
   mapSessionEvent,
@@ -357,6 +361,65 @@ describe('pages / tools / paths / geo mappers', () => {
     expect(mapGeoCity(geoCityRow({ lat: null, lon: null }))).toMatchObject({
       lat: null,
       lon: null,
+    });
+  });
+});
+
+describe('mapOnlineUser / mapOnlineApp', () => {
+  it('maps an API call as the last event (route template label, hex user key, ISO time)', () => {
+    expect(mapOnlineUser(onlineUserRow())).toEqual({
+      userKey: USER_KEY_HEX,
+      email: 'someone@libas.in',
+      app: 'ebo-sales',
+      sessionId: SESSION_ID,
+      currentPage: '/stores/:id',
+      lastEvent: {
+        kind: 'api',
+        path: '/ebo-sales/api/v1/stores/:id',
+        tool: null,
+        method: 'GET',
+        status: 200,
+        endpointId: ENDPOINT_ID,
+      },
+      lastSeenAt: OCCURRED_AT.toISOString(),
+      events: 3,
+    });
+  });
+
+  it('maps a browser tool use (no method / status / route) and API-only activity (no page)', () => {
+    const tool = mapOnlineUser(
+      onlineUserRow({
+        kind: 'tool_use',
+        path: '/stores/:id',
+        tool: 'export-csv',
+        method: null,
+        status_code: null,
+        endpoint_id: null,
+      }),
+    );
+    expect(tool.lastEvent).toEqual({
+      kind: 'tool_use',
+      path: '/stores/:id',
+      tool: 'export-csv',
+      method: null,
+      status: null,
+      endpointId: null,
+    });
+    const serverOnly = mapOnlineUser(onlineUserRow({ session_id: null, current_page: null }));
+    expect(serverOnly).toMatchObject({ sessionId: null, currentPage: null });
+  });
+
+  it('NEVER carries an IP field', () => {
+    const dto = mapOnlineUser({ ...onlineUserRow(), ip: '8.8.8.8' } as never);
+    expect(Object.keys(dto)).not.toContain('ip');
+    expect(JSON.stringify(dto)).not.toContain('8.8.8.8');
+  });
+
+  it('mapOnlineApp copies the counts by slug', () => {
+    expect(mapOnlineApp({ app_slug: 'hr-portal', users: 2, anonymous: 5 })).toEqual({
+      app: 'hr-portal',
+      users: 2,
+      anonymous: 5,
     });
   });
 });

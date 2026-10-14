@@ -106,6 +106,8 @@ export const ROUTES = {
   },
   live: {
     snapshot: { method: 'GET', path: '/v1/live/snapshot' },
+    /** Who is active right now (last ACTIVE_USER_WINDOW_MS), per app and per person. */
+    online: { method: 'GET', path: '/v1/live/online' },
   },
   integration: {
     health: { method: 'GET', path: '/v1/integration/health' },

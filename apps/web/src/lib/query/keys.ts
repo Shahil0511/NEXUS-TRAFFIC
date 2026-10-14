@@ -12,6 +12,7 @@ import type {
   ErrorListQuery,
   ErrorSummaryQuery,
   GeoQuery,
+  LiveOnlineQuery,
   LiveSnapshotQuery,
   OverviewAppsQuery,
   OverviewSummaryQuery,
@@ -101,6 +102,7 @@ export const qk = {
   live: {
     all: ['live'] as const,
     snapshot: (q: LiveSnapshotQuery) => ['live', 'snapshot', q] as const,
+    online: (q: LiveOnlineQuery) => ['live', 'online', q] as const,
   },
   integration: {
     all: ['integration'] as const,

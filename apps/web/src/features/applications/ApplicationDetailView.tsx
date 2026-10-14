@@ -35,6 +35,7 @@ import { useEndpointStats } from '@/features/endpoints/useEndpointStats';
 import { TopFailingEndpoints } from '@/features/errors/TopFailingEndpoints';
 import { useErrorSummary } from '@/features/errors/useErrorSummary';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { onlineCountOf, useOnlineNow } from '@/features/live/useOnlineNow';
 import { hasNoTraffic } from '@/features/overview/OverviewView';
 import { useOverviewTimeseries } from '@/features/overview/useOverviewTimeseries';
 import { usePageStats } from '@/features/pages/usePageStats';
@@ -49,6 +50,7 @@ import {
 } from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
+import { cn } from '@/lib/utils';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
 import { useAppTraffic } from './useAppTraffic';
@@ -69,11 +71,14 @@ export function ApplicationDetailView({ app }: { app: string }) {
   const filters = useMemo(() => ({ ...globalFilters, app }), [globalFilters, app]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const traffic = useAppTraffic(filters);
+  const online = useOnlineNow({ app });
   const row = traffic.data?.items[0];
   useDocumentTitle(row?.displayName ?? app);
 
   const backLink = (
-    <Breadcrumbs items={[applicationCrumbs(app, linkQuery)[0]!, { label: row?.displayName ?? app }]} />
+    <Breadcrumbs
+      items={[applicationCrumbs(app, linkQuery)[0]!, { label: row?.displayName ?? app }]}
+    />
   );
 
   if (traffic.isError) {
@@ -90,7 +95,12 @@ export function ApplicationDetailView({ app }: { app: string }) {
   return (
     <div className="space-y-6">
       {row ? (
-        <AppHeader row={row} window={traffic.data!.window} eyebrow={backLink} />
+        <AppHeader
+          row={row}
+          window={traffic.data!.window}
+          eyebrow={backLink}
+          online={online.data ? onlineCountOf(online.data, app) : undefined}
+        />
       ) : (
         <div className="space-y-2" aria-busy="true">
           {backLink}
@@ -121,10 +131,13 @@ function AppHeader({
   row,
   window,
   eyebrow,
+  online,
 }: {
   row: AppTrafficDto;
   window: TimeWindowDto;
   eyebrow: ReactNode;
+  /** People in the app right now (undefined while unknown). */
+  online: number | undefined;
 }) {
   return (
     <PageHeader
@@ -143,6 +156,7 @@ function AppHeader({
       }
       actions={
         <>
+          {online !== undefined ? <OnlineNowLink app={row.app} count={online} /> : null}
           <Button asChild variant="outline">
             <Link href={withQuery(PAGES.live(), { app: row.app })}>
               <Radio aria-hidden="true" /> Live
@@ -156,6 +170,28 @@ function AppHeader({
         </>
       }
     />
+  );
+}
+
+/**
+ * "4 online now" next to the header actions → the Live page filtered to this app, where the
+ * people and what they are doing are listed. The green dot is decorative (the words say it).
+ */
+function OnlineNowLink({ app, count }: { app: string; count: number }) {
+  return (
+    <Link
+      href={withQuery(PAGES.live(), { app })}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'size-2 rounded-full',
+          count > 0 ? 'bg-success motion-safe:animate-pulse' : 'bg-muted-foreground/40',
+        )}
+      />
+      <span className="tabular">{formatInteger(count)}</span> online now
+    </Link>
   );
 }
 

@@ -17,6 +17,29 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-14 — Who's online now (live active users per app and what they are doing)
+
+**Done**
+- **Contract**: `ROUTES.live.online` (GET `/v1/live/online`), `liveOnlineQuerySchema` {app?, userKey?},
+  `OnlineNowDto` / `OnlineAppDto` / `OnlineUserDto` (`packages/shared/src/dto/live.ts`).
+- **API**: `WebEventQueryRepository.listOnlineUsers` (one row per app × verified user over both tables in the last
+  5 minutes: newest action — route/page TEMPLATE, never the raw path, no IP — current page, event count; `page_time`
+  flushes counted but ranked last) and `countOnlineByApp` (verified users + anonymous sessions per app, same
+  definition as "Active users now"); `LiveService.online`, `LiveController.online`. No migration.
+- **Web**: "Who's online now" panel on Live (per-app chips that set the app filter, people with app, current page,
+  last action, "active N s ago", session link; refreshes every 15 s), "Online now" column on Applications + "N online
+  now" on the app page, "Online now · in <app> · on <page>" badge on a user's page; `metricInfo('onlineNow')`.
+- Built by a workflow: API and web agents in parallel, each followed by a reviewer-fixer (fixed: totals vs list
+  mismatch for page_time-only people, stale "updated N s ago" while switching apps, screen-reader text of the column).
+- **Tests**: api unit + DB integration (window bounds, app/user narrowing, anonymous counting, two apps = two rows,
+  limit), web (panel, chips, empty state, column, badge).
+
+**Notes / known issues**
+- A custom event shows as "Custom event": `OnlineUserDto.lastEvent` has no `name` yet.
+- People list capped at `ONLINE_USERS_LIMIT` (100) — the panel says so when the per-app totals are larger.
+
+---
+
 ## 2026-10-14 — UX Wave 3: polish (design tokens, explanations, copy, mobile, wayfinding) + error codes
 
 Built by a multi-agent workflow: six builders with disjoint file ownership, each followed by a

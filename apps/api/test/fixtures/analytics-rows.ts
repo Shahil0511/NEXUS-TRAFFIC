@@ -6,6 +6,7 @@ import type {
   ApiRequestRow,
   EndpointStatsRow,
   GeoCityRow,
+  OnlineUserRow,
   PageStatsRow,
   SessionEventRow,
   SessionSummaryRow,
@@ -205,6 +206,28 @@ export function geoCityRow(overrides: Partial<GeoCityRow> = {}): GeoCityRow {
     requests: 4,
     page_views: 6,
     users: 2,
+    ...overrides,
+  };
+}
+
+// ─── Live: who is online ────────────────────────────────────────────────────
+
+/** A verified user whose newest event is an API call (label = route template, never the path). */
+export function onlineUserRow(overrides: Partial<OnlineUserRow> = {}): OnlineUserRow {
+  return {
+    app_slug: 'ebo-sales',
+    user_key: USER_KEY,
+    user_email: 'someone@libas.in',
+    session_id: SESSION_ID,
+    kind: 'api',
+    path: '/ebo-sales/api/v1/stores/:id',
+    tool: null,
+    method: 'GET',
+    status_code: 200,
+    endpoint_id: ENDPOINT_ID,
+    last_seen_at: OCCURRED_AT,
+    events: 3,
+    current_page: '/stores/:id',
     ...overrides,
   };
 }

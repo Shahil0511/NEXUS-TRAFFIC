@@ -526,6 +526,44 @@ export interface LiveEventRow {
   geo_city: string | null;
 }
 
+/**
+ * One VERIFIED user active in ONE app in the "online now" window: their newest meaningful event
+ * (a page_time delta only when they sent nothing else), when they were last seen, how many
+ * non-page_time events they sent and the template of their newest page view. NO IP column.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listOnlineUsers
+ */
+export interface OnlineUserRow {
+  app_slug: string;
+  user_key: Buffer;
+  user_email: string;
+  /** Browser session of the newest event; null for a server call without one. */
+  session_id: string | null;
+  kind: TimelineItemKind;
+  /** Route template (`api`) or page template (browser events) — NEVER the raw path. */
+  path: string;
+  tool: string | null;
+  method: string | null;
+  status_code: number | null;
+  /** `api` rows only. */
+  endpoint_id: string | null;
+  /** Newest event of ANY kind (page_time included). */
+  last_seen_at: Date;
+  /** Events in the window, page_time deltas excluded (0 when they are all this person sent). */
+  events: number;
+  /** path_template of the newest page view of this user in this app in the window. */
+  current_page: string | null;
+}
+
+/**
+ * Active people of one app in the "online now" window (apps with nobody active are absent).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countOnlineByApp
+ */
+export interface OnlineAppRow {
+  app_slug: string;
+  users: number;
+  anonymous: number;
+}
+
 // ─── Integration Health (S5) ────────────────────────────────────────────────
 
 /**

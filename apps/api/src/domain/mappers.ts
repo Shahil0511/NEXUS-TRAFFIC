@@ -16,6 +16,8 @@ import type {
   HttpMethod,
   IngestCounterDto,
   LiveEventDto,
+  OnlineAppDto,
+  OnlineUserDto,
   PageStatsDto,
   RequestSampleDto,
   SdkHealthDto,
@@ -52,6 +54,8 @@ import type {
   GeoCountryRow,
   IngestCounterSumRow,
   LiveEventRow,
+  OnlineAppRow,
+  OnlineUserRow,
   PageStatsRow,
   SdkHealthRow,
   SessionEventRow,
@@ -511,6 +515,36 @@ export function mapLiveEvent(row: LiveEventRow, viewer: Viewer): LiveEventDto {
     country: row.geo_country,
     city: row.geo_city,
   };
+}
+
+/**
+ * WHY: "who is online" is shown to EVERY dashboard viewer, so the row carries no IP and the DTO
+ * has none — nothing to mask. user_key leaves as 64-char hex (the user page's address).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listOnlineUsers
+ */
+export function mapOnlineUser(row: OnlineUserRow): OnlineUserDto {
+  return {
+    userKey: row.user_key.toString('hex'),
+    email: row.user_email,
+    app: row.app_slug,
+    sessionId: row.session_id,
+    currentPage: row.current_page,
+    lastEvent: {
+      kind: row.kind,
+      path: row.path,
+      tool: row.tool,
+      method: row.method,
+      status: row.status_code,
+      endpointId: row.endpoint_id,
+    },
+    lastSeenAt: row.last_seen_at.toISOString(),
+    events: row.events,
+  };
+}
+
+/** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countOnlineByApp */
+export function mapOnlineApp(row: OnlineAppRow): OnlineAppDto {
+  return { app: row.app_slug, users: row.users, anonymous: row.anonymous };
 }
 
 /**

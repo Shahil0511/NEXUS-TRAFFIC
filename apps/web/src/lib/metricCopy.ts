@@ -115,6 +115,11 @@ export const METRIC_COPY = {
     short: 'People (or anonymous sessions) seen in the last 5 minutes.',
     long: 'Ignores the selected time range — it is always “right now”.',
   },
+  onlineNow: {
+    label: 'Online now',
+    short: 'People active in the last 5 minutes: verified users plus anonymous browser sessions.',
+    long: 'Refreshed every 15 s and independent of the selected time range. Someone active in two apps counts in each.',
+  },
   dau: {
     label: 'Daily active users',
     short: 'Distinct verified users per calendar day (India time).',

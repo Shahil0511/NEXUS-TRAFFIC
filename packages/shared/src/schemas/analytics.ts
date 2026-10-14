@@ -173,3 +173,12 @@ export type LiveFilterQuery = z.infer<typeof liveFilterSchema>;
 
 export const liveSnapshotQuerySchema = liveFilterSchema;
 export type LiveSnapshotQuery = z.infer<typeof liveSnapshotQuerySchema>;
+
+/**
+ * Who is online: always the last ACTIVE_USER_WINDOW_MS (no range). `app` narrows to one app,
+ * `userKey` to one person (the "Online now" badge on a user's page).
+ */
+export const liveOnlineQuerySchema = liveFilterSchema.safeExtend({
+  userKey: userKeySchema.optional(),
+});
+export type LiveOnlineQuery = z.infer<typeof liveOnlineQuerySchema>;

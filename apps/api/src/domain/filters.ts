@@ -18,7 +18,11 @@ export interface TrafficFilter {
   appId?: string;
   /** Stored `endpoint_id` (one app + method + route template); undefined = all endpoints. */
   endpointId?: string;
-  /** Stored `user_key` (bytea) — one verified user (Errors "View failures"); api_requests only. */
+  /**
+   * Stored `user_key` (bytea) — one verified user. Honoured by ApiRequestQueryRepository (Errors
+   * "View failures") and by WebEventQueryRepository's online queries (listOnlineUsers,
+   * countOnlineByApp) on BOTH tables; the other web-event queries take the key as an argument.
+   */
   userKey?: Buffer;
 }
 

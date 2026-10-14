@@ -4,6 +4,7 @@ import { COVERAGE_WARN_PCT, METRIC_COPY, metricInfo, type MetricKey } from './me
 
 /** Every metric a page shows behind an (i) — adding a metric to a page means adding it here. */
 const REQUIRED: readonly MetricKey[] = [
+  'onlineNow',
   'requests',
   'errorRate',
   'errors4xx',

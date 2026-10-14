@@ -1,4 +1,4 @@
-import { ERROR_CODES, ROUTES } from '@nexus/shared';
+import { ERROR_CODES, ROUTES, type OnlineNowDto } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -11,9 +11,17 @@ import { renderWithProviders } from '@/test/render';
 
 import { isNoActivity, UserDetailView } from './UserDetailView';
 
-function useProfileHandlers(profileStatus = 200): void {
+const NOBODY_ONLINE: OnlineNowDto = {
+  asOf: '2026-10-01T08:00:00.000Z',
+  windowMs: 300_000,
+  apps: [],
+  users: [],
+};
+
+function useProfileHandlers(profileStatus = 200, online: OnlineNowDto = NOBODY_ONLINE): void {
   server.use(
     http.get(routeUrl(ROUTES.apps.list), () => HttpResponse.json(APPS)),
+    http.get(routeUrl(ROUTES.live.online), () => HttpResponse.json(online)),
     http.get(routeUrl(ROUTES.users.profile), () =>
       profileStatus === 200
         ? HttpResponse.json(USER_PROFILE)
@@ -55,6 +63,45 @@ describe('UserDetailView', () => {
     expect(screen.getByRole('link', { name: /view sessions/i }).getAttribute('href')).toBe(
       `/journeys?userKey=${USER_KEY}`,
     );
+  });
+
+  it('shows an "Online now" badge in the header only while the user is active', async () => {
+    useProfileHandlers(200, {
+      ...NOBODY_ONLINE,
+      apps: [{ app: 'ebo-sales', users: 1, anonymous: 0 }],
+      users: [
+        {
+          userKey: USER_KEY,
+          email: 'buyer@libas.in',
+          app: 'ebo-sales',
+          sessionId: SESSION_ID,
+          currentPage: '/orders/:id',
+          lastEvent: {
+            kind: 'page_view',
+            path: '/orders/:id',
+            tool: null,
+            method: null,
+            status: null,
+            endpointId: null,
+          },
+          lastSeenAt: '2026-10-01T07:59:30.000Z',
+          events: 4,
+        },
+      ],
+    });
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    await screen.findByRole('heading', { name: 'buyer@libas.in' });
+    expect(await screen.findByText(/Online now/)).toHaveTextContent(
+      'Online now · in ebo-sales · on /orders/:id',
+    );
+  });
+
+  it('shows no badge when the user is not online', async () => {
+    useProfileHandlers();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    await screen.findByRole('heading', { name: 'buyer@libas.in' });
+    await screen.findByRole('table', { name: 'User activity' });
+    expect(screen.queryByText(/Online now/)).toBeNull();
   });
 
   it('merges API calls, pages and tools in one timeline (IP only when sent, replay by id)', async () => {

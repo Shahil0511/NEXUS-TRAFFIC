@@ -5,14 +5,30 @@ import {
 } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { ADMIN_VIEWER, PLAIN_VIEWER, trafficBucketRow } from '../../test/fixtures/analytics-rows';
+import {
+  ADMIN_VIEWER,
+  onlineUserRow,
+  PLAIN_VIEWER,
+  trafficBucketRow,
+  USER_KEY,
+  USER_KEY_HEX,
+} from '../../test/fixtures/analytics-rows';
 import { FakeAppSlugs, KNOWN_APP_ID } from '../../test/fixtures/fake-query-repositories';
 import type { TrafficFilter } from '../domain/filters';
-import type { ActivityBucketRow, LiveEventRow, TrafficBucketRow } from '../domain/rows';
+import type {
+  ActivityBucketRow,
+  LiveEventRow,
+  OnlineAppRow,
+  OnlineUserRow,
+  TrafficBucketRow,
+} from '../domain/rows';
 import { NotFoundError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
-import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
+import {
+  ONLINE_USERS_LIMIT,
+  type WebEventQueryRepository,
+} from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
 import { LiveService } from './live.service';
 
@@ -53,13 +69,29 @@ class FakeRequests implements Pick<ApiRequestQueryRepository, 'timeseries'> {
 
 class FakeWebEvents implements Pick<
   WebEventQueryRepository,
-  'activityTimeseries' | 'listRecentEvents' | 'countActiveUsers'
+  | 'activityTimeseries'
+  | 'listRecentEvents'
+  | 'countActiveUsers'
+  | 'listOnlineUsers'
+  | 'countOnlineByApp'
 > {
   activity: ActivityBucketRow[] = [];
   recent: LiveEventRow[] = [];
   activeUsers = 0;
+  onlineUsers: OnlineUserRow[] = [];
+  onlineApps: OnlineAppRow[] = [];
   recentCalls: Array<{ filter: TrafficFilter; limit: number }> = [];
   activeFilters: TrafficFilter[] = [];
+  onlineUserCalls: Array<{ filter: TrafficFilter; limit: number }> = [];
+  onlineAppFilters: TrafficFilter[] = [];
+  async listOnlineUsers(filter: TrafficFilter, limit: number) {
+    this.onlineUserCalls.push({ filter, limit });
+    return this.onlineUsers;
+  }
+  async countOnlineByApp(filter: TrafficFilter) {
+    this.onlineAppFilters.push(filter);
+    return this.onlineApps;
+  }
   async activityTimeseries() {
     return this.activity;
   }
@@ -162,5 +194,88 @@ describe('LiveService.snapshot', () => {
     await expect(service.snapshot({ app: 'nope' }, PLAIN_VIEWER)).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+});
+
+describe('LiveService.online', () => {
+  const WINDOW_START = new Date(NOW.getTime() - ACTIVE_USER_WINDOW_MS);
+
+  it('queries the last ACTIVE_USER_WINDOW_MS (to = now) for every app, capped at ONLINE_USERS_LIMIT', async () => {
+    const { service, webEvents } = build();
+    const dto = await service.online({});
+    const expected: TrafficFilter = {
+      from: WINDOW_START,
+      to: NOW,
+      appId: undefined,
+      userKey: undefined,
+    };
+    expect(webEvents.onlineAppFilters).toEqual([expected]);
+    expect(webEvents.onlineUserCalls).toEqual([{ filter: expected, limit: ONLINE_USERS_LIMIT }]);
+    expect(dto).toEqual({
+      asOf: NOW.toISOString(),
+      windowMs: ACTIVE_USER_WINDOW_MS,
+      apps: [],
+      users: [],
+    });
+  });
+
+  it('resolves the app slug and the hex user key into the filter of BOTH queries', async () => {
+    const { service, webEvents } = build();
+    await service.online({ app: 'ebo-sales', userKey: USER_KEY_HEX });
+    for (const filter of [webEvents.onlineAppFilters[0], webEvents.onlineUserCalls[0]?.filter]) {
+      expect(filter).toMatchObject({ from: WINDOW_START, to: NOW, appId: KNOWN_APP_ID });
+      expect(filter?.userKey?.equals(USER_KEY)).toBe(true);
+    }
+  });
+
+  it('maps apps and people in repository order (busiest app / newest person first), without IPs', async () => {
+    const { service, webEvents } = build();
+    webEvents.onlineApps = [
+      { app_slug: 'ebo-sales', users: 2, anonymous: 3 },
+      { app_slug: 'hr-portal', users: 1, anonymous: 0 },
+    ];
+    const newest = new Date('2026-10-01T10:00:25.000Z');
+    const older = new Date('2026-10-01T09:58:00.000Z');
+    webEvents.onlineUsers = [
+      onlineUserRow({ last_seen_at: newest }),
+      onlineUserRow({
+        app_slug: 'hr-portal',
+        last_seen_at: older,
+        kind: 'page_view',
+        path: '/leaves',
+        method: null,
+        status_code: null,
+        endpoint_id: null,
+        current_page: '/leaves',
+        events: 1,
+      }),
+    ];
+
+    const dto = await service.online({});
+
+    expect(dto.apps).toEqual([
+      { app: 'ebo-sales', users: 2, anonymous: 3 },
+      { app: 'hr-portal', users: 1, anonymous: 0 },
+    ]);
+    expect(dto.users.map((u) => [u.app, u.lastSeenAt])).toEqual([
+      ['ebo-sales', newest.toISOString()],
+      ['hr-portal', older.toISOString()],
+    ]);
+    expect(dto.users[0]).toMatchObject({
+      userKey: USER_KEY_HEX,
+      lastEvent: { kind: 'api', path: '/ebo-sales/api/v1/stores/:id', method: 'GET', status: 200 },
+    });
+    expect(dto.users[1]).toMatchObject({
+      currentPage: '/leaves',
+      events: 1,
+      lastEvent: { kind: 'page_view', path: '/leaves', method: null, status: null },
+    });
+    expect(JSON.stringify(dto)).not.toMatch(/"ip"/);
+  });
+
+  it('404s an unknown app before querying', async () => {
+    const { service, webEvents } = build();
+    await expect(service.online({ app: 'nope' })).rejects.toBeInstanceOf(NotFoundError);
+    expect(webEvents.onlineUserCalls).toEqual([]);
   });
 });

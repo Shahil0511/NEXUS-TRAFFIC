@@ -14,6 +14,7 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { onlineCountOf, useOnlineNow } from '@/features/live/useOnlineNow';
 import { formatCompact, formatInteger, formatWindowCaption } from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
@@ -35,17 +36,26 @@ const FAILING_ERROR_RATE = 5;
 
 /**
  * The Applications page: every registered app side by side — users, API calls, error rate,
- * latency, page views, sessions and tool uses, each with its change versus the previous window.
+ * latency, page views, sessions and tool uses, each with its change versus the previous window,
+ * plus how many people are in each app right now (useOnlineNow, polled every 15 s).
  * Answers "how is each app doing and who uses it?"; a row opens the app's own page.
  */
 export function ApplicationsView() {
   const { filters } = useGlobalFilters();
   // The app filter does not apply here (this page IS the per-app breakdown).
   const query = useAppTraffic({ ...filters, app: undefined });
+  // Who is online right now, in every app (never range- or app-filtered), merged by slug.
+  const online = useOnlineNow({});
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  const onlineData = online.data;
   const columns = useMemo(
-    () => appTrafficColumns(linkQuery, (iso) => <RelativeTime iso={iso} />),
-    [linkQuery],
+    () =>
+      appTrafficColumns(
+        linkQuery,
+        (iso) => <RelativeTime iso={iso} />,
+        (app) => (onlineData ? onlineCountOf(onlineData, app) : undefined),
+      ),
+    [linkQuery, onlineData],
   );
   const items = query.data?.items;
   const totals = items ? totalsOf(items) : null;

@@ -14,6 +14,7 @@ import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
+  ACTIVE_USER_WINDOW_MS,
   ERROR_CODES,
   type EndpointStatsDto,
   type FailedRequestDto,
@@ -23,6 +24,7 @@ import {
 import { createQueryPool } from '../../src/db/pool';
 import type { Viewer } from '../../src/domain/viewer';
 import { FixedClock } from '../../src/lib/clock';
+import { ApiRequestIngestRepository } from '../../src/repositories/api-request-ingest.repository';
 import { ApiRequestQueryRepository } from '../../src/repositories/api-request-query.repository';
 import { AppRepository } from '../../src/repositories/app.repository';
 import { WebEventQueryRepository } from '../../src/repositories/web-event-query.repository';
@@ -31,6 +33,7 @@ import { EndpointService } from '../../src/services/endpoint.service';
 import { ErrorService } from '../../src/services/error.service';
 import { GeoService } from '../../src/services/geo.service';
 import { JourneyService } from '../../src/services/journey.service';
+import { LiveService } from '../../src/services/live.service';
 import { OverviewService } from '../../src/services/overview.service';
 import { PageService } from '../../src/services/page.service';
 import { ToolService } from '../../src/services/tool.service';
@@ -46,6 +49,7 @@ import {
   microsecondBlockAt,
   MUMBAI,
   percentileCont,
+  ROUTE,
   SALES_SLUG,
   seedAnalytics,
   SEEDED_IP,
@@ -56,9 +60,11 @@ import {
   type AnalyticsSeed,
   type JourneySeed,
 } from './analytics-seed';
+import { apiRequestRow, sha256 } from './fixtures';
 import { createTestDatabase, quietLogger, RUN_DB_TESTS, type TestDatabase } from './test-database';
 
 const HOUR = 3_600_000;
+const MINUTE = 60_000;
 const ADMIN: Viewer = { email: 'boss@libas.in', isAdmin: true };
 const VIEWER: Viewer = { email: 'viewer@libas.in', isAdmin: false };
 
@@ -846,6 +852,218 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
 
       const newest = await repo.listRecentEvents(hourBefore(), 3);
       expect(newest.map((e) => e.event_id)).toEqual(all.slice(0, 3).map((e) => e.event_id));
+    });
+  });
+
+  // ─── Who is online (LiveService.online → listOnlineUsers + countOnlineByApp) ─
+
+  describe('LiveService.online', () => {
+    const minutesAgo = (minutes: number) => new Date(seed.now.getTime() - minutes * MINUTE);
+    /** The service as if "now" were `minutes` before seed.now (the seed has nothing in the last 5 min). */
+    const onlineAt = (minutes: number) =>
+      new LiveService(
+        new ApiRequestQueryRepository(queryPool),
+        new WebEventQueryRepository(queryPool),
+        new AppSlugResolver(new AppRepository(queryPool)),
+        new FixedClock(minutesAgo(minutes)),
+      );
+
+    it('nobody is online when the last ACTIVE_USER_WINDOW_MS has no events', async () => {
+      expect(await onlineAt(0).online({})).toEqual({
+        asOf: seed.now.toISOString(),
+        windowMs: ACTIVE_USER_WINDOW_MS,
+        apps: [],
+        users: [],
+      });
+    });
+
+    it('API call as the newest event: route TEMPLATE label, page = newest page view, page_time not counted', async () => {
+      // Window [−62.25, −57.25) min: J1 pv /home −60, page_time −59, pv /stores/42 −58, API call −57.5.
+      const dto = await onlineAt(57.25).online({});
+      expect(dto.apps).toEqual([{ app: SALES_SLUG, users: 1, anonymous: 0 }]);
+      expect(dto.users).toEqual([
+        {
+          userKey: userKeyHex(USER_A),
+          email: USER_A,
+          app: SALES_SLUG,
+          sessionId: seed.sessions.j1,
+          currentPage: '/stores/:id',
+          lastEvent: {
+            kind: 'api',
+            path: ROUTE.storeLookup.template,
+            tool: null,
+            method: 'GET',
+            status: 200,
+            endpointId: ENDPOINT_IDS.storeLookup,
+          },
+          lastSeenAt: minutesAgo(57.5).toISOString(),
+          events: 3,
+        },
+      ]);
+      const json = JSON.stringify(dto);
+      expect(json).not.toContain('/stores/42'); // never a raw path
+      expect(json).not.toContain(SEEDED_IP);
+      expect(json).not.toMatch(/"ip"/);
+    });
+
+    it('browser event as the newest event; `to` is exclusive and `from` inclusive', async () => {
+      // Window [−23, −18) min: J3 pv /leaves −20, tool apply-leave −19 (the custom event AT −18 is out).
+      const before = await onlineAt(18).online({});
+      expect(before.apps).toEqual([{ app: HR_SLUG, users: 1, anonymous: 0 }]);
+      expect(before.users).toEqual([
+        {
+          userKey: userKeyHex(USER_B),
+          email: USER_B,
+          app: HR_SLUG,
+          sessionId: seed.sessions.j3,
+          currentPage: '/leaves',
+          lastEvent: {
+            kind: 'tool_use',
+            path: '/leaves',
+            tool: 'apply-leave',
+            method: null,
+            status: null,
+            endpointId: null,
+          },
+          lastSeenAt: minutesAgo(19).toISOString(),
+          events: 2,
+        },
+      ]);
+      // Window [−20, −15) min: the page view AT −20 is in; the custom event is the newest.
+      const after = await onlineAt(15).online({});
+      expect(after.users).toHaveLength(1);
+      expect(after.users[0]).toMatchObject({
+        events: 3,
+        currentPage: '/leaves',
+        lastEvent: { kind: 'custom', path: '/leaves', tool: null },
+        lastSeenAt: minutesAgo(18).toISOString(),
+      });
+    });
+
+    it('page_time: a flush-only person is still listed (counted => listed), never the last event otherwise', async () => {
+      const repo = new WebEventQueryRepository(queryPool);
+      // [−56.5, −54.5) min: J1 has ONLY its two page_time deltas (−56, −55).
+      const flushOnly = { from: minutesAgo(56.5), to: minutesAgo(54.5) };
+      expect(await repo.countOnlineByApp(flushOnly)).toEqual([
+        { app_slug: SALES_SLUG, users: 1, anonymous: 0 },
+      ]);
+      const rows = await repo.listOnlineUsers(flushOnly, 10);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        app_slug: SALES_SLUG,
+        user_email: USER_A,
+        kind: 'page_time',
+        path: '/stores/:id',
+        events: 0,
+        last_seen_at: minutesAgo(55),
+        current_page: null,
+      });
+      // Window [−59.5, −54.5): pv −58, API −57.5, tool −57, page_time −56/−55 → the tool is the
+      // last ACTION, the newest flush is when they were last seen.
+      const dto = await onlineAt(54.5).online({});
+      expect(dto.apps).toEqual([{ app: SALES_SLUG, users: 1, anonymous: 0 }]);
+      expect(dto.users).toHaveLength(1);
+      expect(dto.users[0]).toMatchObject({
+        currentPage: '/stores/:id',
+        lastEvent: { kind: 'tool_use', tool: 'export-csv', path: '/stores/:id' },
+        lastSeenAt: minutesAgo(55).toISOString(),
+        events: 3,
+      });
+    });
+
+    it('claims are NOT users: a client_claimed session counts as anonymous and is never listed', async () => {
+      // Window [−40, −35) min: only J2 (claimed@example.com, no verified identity).
+      const dto = await onlineAt(35).online({});
+      expect(dto.apps).toEqual([{ app: SALES_SLUG, users: 0, anonymous: 1 }]);
+      expect(dto.users).toEqual([]);
+      expect(JSON.stringify(dto)).not.toContain(CLAIMED_EMAIL);
+    });
+
+    it('narrows to one app and to one user key', async () => {
+      const service = onlineAt(15);
+      expect(await service.online({ app: SALES_SLUG })).toMatchObject({ apps: [], users: [] });
+      const hr = await service.online({ app: HR_SLUG });
+      expect(hr.users.map((u) => u.email)).toEqual([USER_B]);
+      const b = await service.online({ userKey: userKeyHex(USER_B) });
+      expect(b.apps).toEqual([{ app: HR_SLUG, users: 1, anonymous: 0 }]);
+      expect(b.users.map((u) => u.email)).toEqual([USER_B]);
+      expect(await service.online({ userKey: userKeyHex(USER_A) })).toMatchObject({
+        apps: [],
+        users: [],
+      });
+      await expect(service.online({ app: 'nope' })).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('one row per (app, user), anonymous API sessions counted once each, LIMIT honoured', async () => {
+      // The extra rows exist ONLY inside this transaction (rolled back): the shared seed never moves.
+      const client = await db.appPool.connect();
+      try {
+        await client.query('BEGIN');
+        const anonymousSessions = [
+          '00000000-0000-4000-8000-000000000001',
+          '00000000-0000-4000-8000-000000000002',
+          '00000000-0000-4000-8000-000000000001',
+        ];
+        await new ApiRequestIngestRepository(db.appPool).insertBatch(
+          [
+            // user a in hr-portal (window [−20, −15), where user b is active too): server-only
+            apiRequestRow(seed.appIds.hr, {
+              occurredAt: minutesAgo(19.5),
+              routeTemplate: '/hr-portal/api/leaves/:id',
+              path: '/hr-portal/api/leaves/7',
+              sessionId: null,
+              userEmail: USER_A,
+              userKey: sha256(USER_A),
+            }),
+            // user b ALSO in ebo-sales: a second row for the same person
+            apiRequestRow(seed.appIds.sales, {
+              occurredAt: minutesAgo(16),
+              sessionId: null,
+              userEmail: USER_B,
+              userKey: sha256(USER_B),
+            }),
+            // two anonymous sessions in hr-portal (one of them twice)
+            ...anonymousSessions.map((sessionId, i) =>
+              apiRequestRow(seed.appIds.hr, {
+                occurredAt: minutesAgo(19 + (i + 1) / 10),
+                sessionId,
+                userEmail: null,
+                userKey: null,
+                identitySource: 'anonymous',
+              }),
+            ),
+          ],
+          client,
+        );
+        const repo = new WebEventQueryRepository(db.appPool);
+        const filter = { from: minutesAgo(20), to: minutesAgo(15) };
+
+        // Busiest app first.
+        expect(await repo.countOnlineByApp(filter, client)).toEqual([
+          { app_slug: HR_SLUG, users: 2, anonymous: 2 },
+          { app_slug: SALES_SLUG, users: 1, anonymous: 0 },
+        ]);
+        // Most recently active first; user b is two rows (two apps).
+        const rows = await repo.listOnlineUsers(filter, 10, client);
+        expect(rows.map((r) => [r.app_slug, r.user_email, r.kind, r.events])).toEqual([
+          [SALES_SLUG, USER_B, 'api', 1],
+          [HR_SLUG, USER_B, 'custom', 3],
+          [HR_SLUG, USER_A, 'api', 1],
+        ]);
+        expect(rows[0]?.current_page).toBeNull(); // b's page views are in hr-portal, not ebo-sales
+        expect(rows[1]?.current_page).toBe('/leaves');
+        expect(rows[2]).toMatchObject({
+          path: '/hr-portal/api/leaves/:id',
+          session_id: null,
+          current_page: null,
+        });
+        for (const row of rows) expect(row).not.toHaveProperty('ip');
+        const first = await repo.listOnlineUsers(filter, 1, client);
+        expect(first.map((r) => [r.app_slug, r.user_email])).toEqual([[SALES_SLUG, USER_B]]);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
     });
   });
 });

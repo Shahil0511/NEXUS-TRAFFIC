@@ -1,7 +1,7 @@
 /**
  * ROUTES.live.* — the Live page's REST backfill (the stream itself is Socket.io, see src/socket.ts).
  */
-import { liveSnapshotQuerySchema } from '@nexus/shared';
+import { liveOnlineQuerySchema, liveSnapshotQuerySchema } from '@nexus/shared';
 import type { RequestHandler } from 'express';
 
 import type { LiveService } from '../../services/live.service';
@@ -16,6 +16,14 @@ export class LiveController {
   snapshot: RequestHandler = async (_req, res) => {
     const viewer = requireViewer(res);
     const body = await this.live.snapshot(validQuery(res, liveSnapshotQuerySchema), viewer);
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_LIVE_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/live.service.ts LiveService.online */
+  online: RequestHandler = async (_req, res) => {
+    requireViewer(res); // asserts ssoAuth ran; nothing in this payload depends on the role
+    const body = await this.live.online(validQuery(res, liveOnlineQuerySchema));
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_LIVE_CACHE);
     res.json(body);
   };

@@ -6,12 +6,14 @@ import {
   type LiveSnapshotDto,
   type LiveSubscribeAck,
   type LiveTickDto,
+  type OnlineNowDto,
 } from '@nexus/shared';
 import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { APPS } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -129,9 +131,25 @@ const card = (label: string) =>
   within(metrics()).getByRole('heading', { name: label }).closest('section')!;
 const table = () => screen.getByRole('table', { name: /Live activity/ });
 
+/** The Who's online panel polls its own route; nobody is online unless a test says so. */
+function useOnline(online: OnlineNowDto = NOBODY_ONLINE) {
+  server.use(
+    http.get(routeUrl(ROUTES.apps.list), () => HttpResponse.json(APPS)),
+    http.get(routeUrl(ROUTES.live.online), () => HttpResponse.json(online)),
+  );
+}
+
+const NOBODY_ONLINE: OnlineNowDto = {
+  asOf: MINUTE,
+  windowMs: 300_000,
+  apps: [],
+  users: [],
+};
+
 beforeEach(() => {
   sockets.length = 0;
   endLiveSession.mockReset();
+  useOnline();
 });
 
 describe('LiveView', () => {
@@ -198,6 +216,46 @@ describe('LiveView', () => {
 
     await user.click(screen.getByRole('button', { name: 'Resume (1 new)' }));
     expect(screen.getByText('/api/held')).toBeInTheDocument();
+  });
+
+  it('shows who is online above the activity stream, scoped like the rest of the page', async () => {
+    useSnapshot();
+    const seen: string[] = [];
+    server.use(
+      http.get(routeUrl(ROUTES.live.online), ({ request }) => {
+        seen.push(new URL(request.url).search);
+        return HttpResponse.json({
+          ...NOBODY_ONLINE,
+          apps: [{ app: 'ebo-sales', users: 1, anonymous: 0 }],
+          users: [
+            {
+              userKey: 'a'.repeat(64),
+              email: 'buyer@libas.in',
+              app: 'ebo-sales',
+              sessionId: null,
+              currentPage: '/orders',
+              lastEvent: {
+                kind: 'page_view',
+                path: '/orders',
+                tool: null,
+                method: null,
+                status: null,
+                endpointId: null,
+              },
+              lastSeenAt: MINUTE,
+              events: 2,
+            },
+          ],
+        } satisfies OnlineNowDto);
+      }),
+    );
+    renderWithProviders(<LiveView />, { searchParams: '?app=ebo-sales' });
+
+    const people = await screen.findByRole('list', { name: 'People online now' });
+    expect(within(people).getByRole('link', { name: 'buyer@libas.in' })).toBeInTheDocument();
+    const headings = screen.getAllByRole('heading').map((heading) => heading.textContent);
+    expect(headings.indexOf("Who's online now")).toBeLessThan(headings.indexOf('Activity stream'));
+    expect(seen).toContain('?app=ebo-sales');
   });
 
   it('scopes the snapshot and the subscription to the global app filter', async () => {

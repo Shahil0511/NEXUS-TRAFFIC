@@ -44,6 +44,8 @@ import type {
   GeoCityRow,
   GeoCountryRow,
   LiveEventRow,
+  OnlineAppRow,
+  OnlineUserRow,
   PageDetailRows,
   PageLinkRow,
   PageStatsRow,
@@ -75,6 +77,8 @@ export const PROFILE_TOP_LIMIT = 10;
 export const DETAIL_TOP_LIMIT = 10;
 /** Safety cap on the events of one session replay (a runaway tab must not return 100k rows). */
 export const SESSION_EVENT_LIMIT = 2000;
+/** How many (app, user) rows "who is online" returns, most recently active first. */
+export const ONLINE_USERS_LIMIT = 100;
 
 const PAGE_VIEW: BrowserEventType = 'page_view';
 const PAGE_TIME: BrowserEventType = 'page_time';
@@ -103,6 +107,14 @@ function windowConditions(alias: string, filter: TrafficFilter, params: ParamLis
   ];
   if (filter.appId !== undefined) conditions.push(`${alias}.app_id = ${params.add(filter.appId)}`);
   return conditions;
+}
+
+/**
+ * `alias.user_key = $k` when the filter targets ONE verified user (online queries only), else
+ * nothing. `alias` MUST be a trusted identifier.
+ */
+function userKeyConditions(alias: string, filter: TrafficFilter, params: ParamList): string[] {
+  return filter.userKey === undefined ? [] : [`${alias}.user_key = ${params.add(filter.userKey)}`];
 }
 
 /** `(alias.occurred_at, alias.event_id) < keyset` — newest-first keyset paging. */
@@ -518,6 +530,122 @@ export class WebEventQueryRepository {
        ) items
        ORDER BY items.occurred_at DESC, items.event_id DESC
        LIMIT ${limitParam}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * "Who is online": one row per (app, VERIFIED user) over API calls ∪ browser events of the window.
+   * The row carries the NEWEST meaningful event (row_number: page_time deltas rank last, then
+   * occurred_at, event_id DESC), `last_seen_at` = the newest event of ANY kind, the number of
+   * non-page_time events and `current_page` = template of the newest page view of that user in
+   * that app (correlated, window-bounded, idx_web_events_user_key_occurred_at).
+   * WHY page_time rows are kept: countOnlineByApp counts them (countActiveUsers definition), so a
+   * person whose only event in the window is a page_time flush must still be listed, or the
+   * per-app totals and this list disagree. Their `kind` is then `page_time` and `events` is 0.
+   * Labels are TEMPLATES only (route_template / path_template), never raw paths; no IP is selected.
+   * Most recently seen first.
+   */
+  async listOnlineUsers(
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<OnlineUserRow[]> {
+    const params = new ParamList();
+    const api = [
+      ...windowConditions('r', filter, params),
+      'r.user_key IS NOT NULL',
+      ...userKeyConditions('r', filter, params),
+    ];
+    const web = [
+      ...windowConditions('w', filter, params),
+      'w.user_key IS NOT NULL',
+      ...userKeyConditions('w', filter, params),
+    ];
+    const pageWindow = [
+      `p.occurred_at >= ${params.add(filter.from)}`,
+      `p.occurred_at < ${params.add(filter.to)}`,
+    ];
+    const { rows } = await exec.query<OnlineUserRow>(
+      `WITH activity AS (
+         SELECT r.app_id, r.user_key, r.user_email, r.occurred_at, r.event_id,
+                '${API_KIND}'::text AS kind, r.route_template AS path, NULL::text AS tool,
+                r.method, r.status_code::int AS status_code, r.endpoint_id, r.session_id
+           FROM traffic.api_requests r
+          WHERE ${api.join(' AND ')}
+         UNION ALL
+         SELECT w.app_id, w.user_key, w.user_email, w.occurred_at, w.event_id,
+                w.event_type, w.path_template, w.tool,
+                NULL::text, NULL::int, NULL::uuid, w.session_id
+           FROM traffic.web_events w
+          WHERE ${web.join(' AND ')}
+       ), ranked AS (
+         SELECT u.*,
+                row_number() OVER (
+                  PARTITION BY u.app_id, u.user_key
+                  ORDER BY (u.kind = '${PAGE_TIME}'), u.occurred_at DESC, u.event_id DESC
+                ) AS position,
+                max(u.occurred_at) OVER (PARTITION BY u.app_id, u.user_key) AS last_seen_at,
+                count(*) FILTER (WHERE u.kind <> '${PAGE_TIME}')
+                  OVER (PARTITION BY u.app_id, u.user_key) AS events
+           FROM activity u
+       )
+       SELECT a.slug AS app_slug, x.user_key, x.user_email, x.session_id, x.kind, x.path,
+              x.tool, x.method, x.status_code, x.endpoint_id, x.last_seen_at, x.events,
+              (SELECT p.path_template
+                 FROM traffic.web_events p
+                WHERE ${pageWindow.join(' AND ')}
+                  AND p.app_id = x.app_id
+                  AND p.user_key = x.user_key
+                  AND p.event_type = '${PAGE_VIEW}'
+                ORDER BY p.occurred_at DESC, p.event_id DESC
+                LIMIT 1) AS current_page
+         FROM ranked x
+         JOIN traffic.apps a ON a.id = x.app_id
+        WHERE x.position = 1
+        ORDER BY x.last_seen_at DESC, a.slug ASC, x.user_key ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * Active people per app in the window over BOTH tables, with the countActiveUsers definition of
+   * a person: a verified user by `user_key`, an anonymous visitor by `session_id` (rows with
+   * neither are not countable). Apps with nobody active are absent; busiest first.
+   */
+  async countOnlineByApp(filter: TrafficFilter, exec: Executor = this.db): Promise<OnlineAppRow[]> {
+    const params = new ParamList();
+    const api = [
+      ...windowConditions('r', filter, params),
+      ...userKeyConditions('r', filter, params),
+    ];
+    const web = [
+      ...windowConditions('w', filter, params),
+      ...userKeyConditions('w', filter, params),
+    ];
+    const { rows } = await exec.query<OnlineAppRow>(
+      `SELECT a.slug AS app_slug, c.users, c.anonymous
+         FROM (
+           SELECT h.app_id,
+                  count(DISTINCT h.user_key) AS users,
+                  count(DISTINCT h.session_id) FILTER (WHERE h.user_key IS NULL) AS anonymous
+             FROM (
+               SELECT r.app_id, r.user_key, r.session_id
+                 FROM traffic.api_requests r
+                WHERE ${api.join(' AND ')}
+               UNION ALL
+               SELECT w.app_id, w.user_key, w.session_id
+                 FROM traffic.web_events w
+                WHERE ${web.join(' AND ')}
+             ) h
+            GROUP BY h.app_id
+         ) c
+         JOIN traffic.apps a ON a.id = c.app_id
+        WHERE c.users + c.anonymous > 0
+        ORDER BY c.users + c.anonymous DESC, c.users DESC, a.slug ASC`,
       params.values,
     );
     return rows;
