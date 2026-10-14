@@ -277,7 +277,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
 
   const apps = useAppList();
   const users = useUserSearch(
-    { ...filters, search: settled, limit: GROUP_LIMIT },
+    { ...filters, search: settled, sort: 'lastSeen', dir: 'desc', limit: GROUP_LIMIT },
     { enabled: serverSearch },
   );
   // Routes need percentiles: over a too-long range the search simply returns nothing.

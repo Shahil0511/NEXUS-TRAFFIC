@@ -19,6 +19,7 @@ import { useMemo, type ReactNode } from 'react';
 import { UserLink } from '@/components/ActorCell';
 import { TrafficChart } from '@/components/charts/TrafficChart';
 import { EmptyState } from '@/components/EmptyState';
+import { PageLink, ToolLink } from '@/components/EntityLinks';
 import { ErrorState } from '@/components/ErrorState';
 import { KpiCard } from '@/components/KpiCard';
 import { MethodBadge } from '@/components/MethodBadge';
@@ -279,12 +280,13 @@ function FailingRoutesPanel({
 }
 
 function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuery: LinkQuery }) {
-  const users = useUserList({ ...filters, limit: TOP_N });
+  // Most active first: the people who use this app the most.
+  const users = useUserList({ ...filters, sort: 'requests', dir: 'desc', limit: TOP_N });
   const rows = users.data?.pages[0]?.items;
   return (
     <Panel
       title="Who uses it"
-      description="Verified users, most recently active first"
+      description="Verified users, most active first"
       aside={<ViewAll href={withQuery(PAGES.users(), linkQuery)} label="All users of this app" />}
     >
       <QueryState
@@ -387,8 +389,15 @@ function PagesPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
           <RankedList
             ariaLabel="Most viewed pages"
             items={rows!.map((page) => ({
-              key: page.pathTemplate,
-              label: <span className="font-mono">{page.pathTemplate}</span>,
+              key: page.pageId,
+              label: (
+                <PageLink
+                  app={page.app}
+                  pageId={page.pageId}
+                  pathTemplate={page.pathTemplate}
+                  linkQuery={linkQuery}
+                />
+              ),
               sublabel: `${formatInteger(page.uniqueSessions)} sessions · avg ${formatDuration(page.avgVisibleMs)} visible`,
               value: page.views,
             }))}
@@ -423,8 +432,15 @@ function ToolsPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
           <RankedList
             ariaLabel="Most used tools"
             items={rows!.map((tool) => ({
-              key: tool.tool,
-              label: tool.tool,
+              key: tool.toolId,
+              label: (
+                <ToolLink
+                  app={tool.app}
+                  toolId={tool.toolId}
+                  tool={tool.tool}
+                  linkQuery={linkQuery}
+                />
+              ),
               sublabel: `${formatInteger(tool.distinctUsers)} users · ${formatInteger(tool.distinctSessions)} sessions`,
               value: tool.uses,
             }))}

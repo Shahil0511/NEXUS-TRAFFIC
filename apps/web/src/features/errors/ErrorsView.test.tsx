@@ -71,4 +71,31 @@ describe('ErrorsView', () => {
     await user.click(screen.getByRole('radio', { name: 'Server errors (5xx)' }));
     await waitFor(() => expect(listCalls.at(-1)?.get('statusClass')).toBe('5xx'));
   });
+
+  it('counts the users affected and lists them, each linking to the user', async () => {
+    useErrorHandlers();
+    renderWithProviders(<ErrorsView />);
+    const totals = await screen.findByRole('region', { name: 'Failure totals' });
+    expect(await within(totals).findByText('4')).toBeInTheDocument();
+    const affected = await screen.findByRole('list', { name: 'Most affected users' });
+    expect(within(affected).getByRole('link', { name: 'buyer@libas.in' })).toBeInTheDocument();
+  });
+
+  it('?userKey= scopes the summary AND the list to one user, named in its chip', async () => {
+    const listCalls = useErrorHandlers();
+    const summaryCalls: URLSearchParams[] = [];
+    server.use(
+      http.get(routeUrl(ROUTES.errors.summary), ({ request }) => {
+        summaryCalls.push(new URL(request.url).searchParams);
+        return HttpResponse.json(ERROR_SUMMARY);
+      }),
+    );
+    const key = 'a'.repeat(64);
+    renderWithProviders(<ErrorsView />, { searchParams: `?userKey=${key}` });
+    expect(
+      await screen.findByRole('button', { name: 'Remove user filter User: buyer@libas.in' }),
+    ).toBeInTheDocument();
+    expect(summaryCalls.every((params) => params.get('userKey') === key)).toBe(true);
+    await waitFor(() => expect(listCalls[0]?.get('userKey')).toBe(key));
+  });
 });

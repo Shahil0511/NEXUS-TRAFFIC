@@ -127,8 +127,28 @@ describe('OverviewService.apps', () => {
     const { service, requests, webEvents } = build();
     const seenAt = new Date('2026-10-01T09:30:00Z');
     requests.trafficByApp = [
-      [{ app_id: OTHER_APP_ID, requests: 50, errors: 5, p95_ms: 120.123, last_event_at: seenAt }],
-      [{ app_id: OTHER_APP_ID, requests: 25, errors: 0, p95_ms: 90, last_event_at: seenAt }],
+      [
+        {
+          app_id: OTHER_APP_ID,
+          requests: 50,
+          errors: 5,
+          p95_ms: 120.123,
+          last_event_at: seenAt,
+          identified: 40,
+          linked: 25,
+        },
+      ],
+      [
+        {
+          app_id: OTHER_APP_ID,
+          requests: 25,
+          errors: 0,
+          p95_ms: 90,
+          last_event_at: seenAt,
+          identified: 25,
+          linked: 25,
+        },
+      ],
     ];
     webEvents.activityByApp = [
       [
@@ -139,6 +159,8 @@ describe('OverviewService.apps', () => {
           sessions: 3,
           tool_uses: 2,
           last_event_at: new Date('2026-10-01T09:45:00Z'),
+          events: 80,
+          identified: 60,
         },
       ],
       [],
@@ -158,12 +180,16 @@ describe('OverviewService.apps', () => {
       sessions: 3,
       toolUses: 2,
       lastEventAt: '2026-10-01T09:45:00.000Z',
+      identifiedPct: 75,
+      linkedPct: 50,
     });
     expect(dto.items[1]).toMatchObject({
       app: 'ebo-sales',
       requests: { value: 0 },
       errorRate: { value: null },
       lastEventAt: null,
+      identifiedPct: null,
+      linkedPct: null,
     });
   });
 

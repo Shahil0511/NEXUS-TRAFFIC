@@ -7,6 +7,7 @@ import { useMemo } from 'react';
 
 import { AppChip } from '@/components/AppChip';
 import { ChartLegend } from '@/components/charts/ChartLegend';
+import { CountChart } from '@/components/charts/CountChart';
 import { ERROR_SERIES, ErrorsChart } from '@/components/charts/ErrorsChart';
 import { LatencyChart } from '@/components/charts/LatencyChart';
 import { TrafficChart } from '@/components/charts/TrafficChart';
@@ -21,6 +22,7 @@ import { useAppTraffic } from '@/features/applications/useAppTraffic';
 import { TopFailingEndpoints } from '@/features/errors/TopFailingEndpoints';
 import { useErrorSummary } from '@/features/errors/useErrorSummary';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { useUserActivity } from '@/features/users/useUserActivity';
 import {
   formatCompact,
   formatDuration,
@@ -160,8 +162,72 @@ export function OverviewView() {
         </Panel>
       </div>
 
-      <AppsPanel filters={filters} linkQuery={linkQuery} />
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ActiveUsersPanel filters={filters} linkQuery={linkQuery} />
+        <AppsPanel filters={filters} linkQuery={linkQuery} />
+      </div>
     </div>
+  );
+}
+
+// ─── Active users ────────────────────────────────────────────────────────────
+
+/**
+ * WHY: "how many people actually use our apps, and is it growing?" — distinct verified users per
+ * day, with this week's and this month's distinct users next to it.
+ */
+function ActiveUsersPanel({
+  filters,
+  linkQuery,
+}: {
+  filters: Parameters<typeof useUserActivity>[0];
+  linkQuery: Record<string, string | undefined>;
+}) {
+  const activity = useUserActivity(filters);
+  return (
+    <Panel
+      title="Active users"
+      description="Distinct verified users per day (IST)"
+      aside={
+        activity.data ? (
+          <dl className="flex items-center gap-4 text-right text-xs">
+            <div>
+              <dt className="text-muted-foreground">Last 7 days</dt>
+              <dd className="font-semibold tabular">{formatInteger(activity.data.wau)}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Last 30 days</dt>
+              <dd className="font-semibold tabular">{formatInteger(activity.data.mau)}</dd>
+            </div>
+            <Button asChild variant="ghost" size="sm">
+              <Link href={withQuery(PAGES.users(), linkQuery)}>
+                Users <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+          </dl>
+        ) : null
+      }
+    >
+      <QueryState
+        query={activity}
+        skeleton={<ChartSkeleton />}
+        isEmpty={activity.data ? activity.data.points.every((p) => p.users === 0) : false}
+        empty={
+          <EmptyState
+            title="No identified users in this window"
+            description="Users appear once apps send verified identities (SSO cookie or app-attested)."
+          />
+        }
+      >
+        {() => (
+          <CountChart
+            points={activity.data!.points.map((p) => ({ bucket: p.day, count: p.users }))}
+            grain="day"
+            label="Active users"
+          />
+        )}
+      </QueryState>
+    </Panel>
   );
 }
 

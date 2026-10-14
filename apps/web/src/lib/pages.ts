@@ -35,8 +35,14 @@ export const PAGES = {
     `/journeys/${encodeURIComponent(app)}/${encodeURIComponent(sessionId)}`,
   /** @see ../app/(dashboard)/pages/page.tsx */
   pages: () => '/pages',
+  /** @see ../app/(dashboard)/pages/[app]/[pageId]/page.tsx (app slug + opaque pageId) */
+  pageDetail: (app: string, pageId: string) =>
+    `/pages/${encodeURIComponent(app)}/${encodeURIComponent(pageId)}`,
   /** @see ../app/(dashboard)/tools/page.tsx */
   tools: () => '/tools',
+  /** @see ../app/(dashboard)/tools/[app]/[toolId]/page.tsx (app slug + opaque toolId) */
+  toolDetail: (app: string, toolId: string) =>
+    `/tools/${encodeURIComponent(app)}/${encodeURIComponent(toolId)}`,
   /** @see ../app/(dashboard)/geography/page.tsx */
   geography: () => '/geography',
   /** @see ../app/(dashboard)/integration/page.tsx */

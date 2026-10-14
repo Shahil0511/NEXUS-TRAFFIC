@@ -35,3 +35,20 @@ export function uuidV5(name: string, namespace: string): string {
 export function toEndpointId(appSlug: string, method: string, routeTemplate: string): string {
   return uuidV5(`${appSlug} ${method.toUpperCase()} ${routeTemplate}`, ENDPOINT_ID_NAMESPACE);
 }
+
+/** Namespaces of page / tool ids. NEVER change them (would re-key every page/tool link). */
+export const PAGE_ID_NAMESPACE = '46281c3e-02ab-44d8-9052-1787fb20a0d4';
+export const TOOL_ID_NAMESPACE = '5d647b86-d35c-4f1e-9423-dff5cdcb9243';
+
+/**
+ * Opaque id of a page (app + path template) for dashboard URLs: the template is ingested text and
+ * must never be a URL segment. Computed by the API from stored columns (not stored itself).
+ */
+export function toPageId(appSlug: string, pathTemplate: string): string {
+  return uuidV5(`${appSlug} ${pathTemplate}`, PAGE_ID_NAMESPACE);
+}
+
+/** Opaque id of a tool (app + tool name) for dashboard URLs; same rules as toPageId. */
+export function toToolId(appSlug: string, tool: string): string {
+  return uuidV5(`${appSlug} ${tool}`, TOOL_ID_NAMESPACE);
+}

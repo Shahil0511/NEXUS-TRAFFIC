@@ -17,6 +17,39 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-14 — UX Wave 2: users × apps × features drill-downs
+
+**Done** ([ADR 0007](decisions/0007-page-and-tool-ids-and-drill-downs.md))
+- **Contract**: `ROUTES.users.activity`, `ROUTES.pages.detail` (`/v1/pages/:app/:pageId`), `ROUTES.tools.detail`
+  (`/v1/tools/:app/:toolId`); `USER_SORT_VALUES` + `sort`/`dir` on the Users list and search; `userKey` on both
+  errors leaves; `UserUsageDto`; new fields on endpoint detail, error summary, user summary/profile, page stats,
+  tool usage, app traffic (`identifiedPct`, `linkedPct`); `toPageId` / `toToolId` (node-only, UUID v5).
+- **API**: `ApiRequestQueryRepository.listTopUsers` / `countUsers` / `listUserTopEndpoints` / `listPageApiCalls`;
+  `WebEventQueryRepository` user sort whitelist, `listUserApps`, `listDailyUsers`, `pageStatsStatement` (+ distinct
+  users), `getPageDetail`, `getToolDetail`, template/tool resolution lists; `fillCountGaps`. No migration.
+- **Web**: page and tool detail pages (`PageDetailView`, `ToolDetailView`), `PageLink` / `ToolLink` everywhere a
+  page/tool is listed; route page "Top callers" + Users KPI; user page "Apps used", "Top API routes",
+  "View failures"; Users table sortable by every column + "Failed" (→ Errors `?userKey=`) + "First seen";
+  Errors "Users affected" + "Most affected users" + user scope chip; Overview "Active users" (DAU chart, last
+  7 / 30 days); Applications "Identified" / "Linked" coverage columns; `TopUsersList`, `CountChart`; latency
+  chart draws isolated buckets as dots (was an empty chart for sparse ranges).
+- **Tests**: api unit (new: page/tool detail, activity, profile routes/apps, user-scoped errors), DB 91 files
+  (new: top callers, users affected + user scope, page/tool detail sums, user sort, per-app profile, DAU ≤ WAU ≤ MAU),
+  web 31 files (new: page/tool detail, Users sort in URL, failed link, Errors user scope, profile routes/apps, DAU).
+- **Deployed DB, read-only EXPLAIN ANALYZE** (2026-10-14): page → API calls ≈ 250 ms, DAU 30 d ≈ 100 ms,
+  sorted Users 30 d ≈ 85 ms.
+
+**Next (Wave 3)**: design tokens (11 px minimum, `--link`, method/status colours), metric explanations (tooltips),
+copy buttons for ids, breadcrumbs (`from=`), mobile sidebar drawer, axe checks in the smoke suite; later:
+retention cohorts, funnels, error grouping.
+
+**Notes / known issues**
+- DB tests now ran on a throwaway `postgres:18-alpine` on :55432 (`TEST_PG_ADMIN_URL` default). Do NOT point them at
+  the dev container: the migrate bootstrap resets the cluster-wide `nexus_app` password (happened once in Wave 1,
+  restored from `.env.dev`).
+
+---
+
 ## 2026-10-14 — UX Wave 1: linked navigation, Ctrl+K search, Applications page, consistent numbers
 
 **Done** ([ADR 0006](decisions/0006-navigation-search-and-applications.md); from a multi-agent UX audit)
@@ -58,7 +91,7 @@ Applications; a subnet → office mapping for private IPs (or hide Geography whe
 
 **Notes / known issues**
 - `npm test` needs `npm run build -w @nexus/node` first (the express package imports its dist), as CI does.
-- `RUN_DB_TESTS=1` defaults to a test Postgres on :55432; locally, point `TEST_PG_ADMIN_URL` at the dev container (:55434).
+- `RUN_DB_TESTS=1` defaults to a test Postgres on :55432 (start a throwaway `postgres:18-alpine` there; not the dev container, see Wave 2 notes).
 - Breadcrumb `from=` links and a mobile sidebar drawer are not done yet (Wave 3).
 
 ---

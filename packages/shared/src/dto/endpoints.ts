@@ -1,5 +1,5 @@
 import type { HttpMethod } from '../constants/traffic';
-import type { StatusCountDto, TimeWindowDto, TimeseriesPointDto } from './common';
+import type { StatusCountDto, TimeWindowDto, TimeseriesPointDto, UserUsageDto } from './common';
 import type { RequestSampleDto } from './requests';
 
 /** GET ROUTES.endpoints.list item — one (app, method, routeTemplate). */
@@ -27,4 +27,8 @@ export interface EndpointDetailDto {
   timeseries: TimeseriesPointDto[];
   statusBreakdown: StatusCountDto[];
   slowest: RequestSampleDto[];
+  /** Distinct verified users who called the route in the window. */
+  uniqueUsers: number;
+  /** Who calls it most (`count` = calls). */
+  topUsers: UserUsageDto[];
 }

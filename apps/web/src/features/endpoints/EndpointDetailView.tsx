@@ -1,7 +1,7 @@
 'use client';
 
 import type { EndpointDetailDto, TimeWindowQuery } from '@nexus/shared';
-import { Activity, ArrowLeft, Gauge, Hourglass, Timer, TriangleAlert, Zap } from 'lucide-react';
+import { Activity, ArrowLeft, Gauge, Hourglass, TriangleAlert, Users, Zap } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
@@ -19,6 +19,7 @@ import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
+import { TopUsersList } from '@/components/TopUsersList';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -115,11 +116,13 @@ function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
           </span>
         }
         actions={
-          <Button asChild variant="outline">
-            <Link href={failuresHref}>
-              <TriangleAlert aria-hidden="true" /> View failures
-            </Link>
-          </Button>
+          endpoint.errors4xx + endpoint.errors5xx > 0 ? (
+            <Button asChild variant="outline">
+              <Link href={failuresHref}>
+                <TriangleAlert aria-hidden="true" /> View failures
+              </Link>
+            </Button>
+          ) : null
         }
       />
 
@@ -134,26 +137,38 @@ function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
           value={formatPercent(endpoint.errorRate)}
           hint={`${formatInteger(endpoint.errors4xx)} 4xx · ${formatInteger(endpoint.errors5xx)} 5xx`}
         />
-        <KpiCard label="p50" icon={Zap} value={formatDuration(endpoint.p50Ms)} />
+        <KpiCard
+          label="Users"
+          icon={Users}
+          value={formatInteger(detail.uniqueUsers)}
+          hint="verified callers"
+        />
+        <KpiCard
+          label="p50"
+          icon={Zap}
+          value={formatDuration(endpoint.p50Ms)}
+          hint={`avg ${formatDuration(endpoint.avgMs)}`}
+        />
         <KpiCard label="p95" icon={Gauge} value={formatDuration(endpoint.p95Ms)} />
         <KpiCard label="p99" icon={Hourglass} value={formatDuration(endpoint.p99Ms)} />
-        <KpiCard label="Average" icon={Timer} value={formatDuration(endpoint.avgMs)} />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="Requests" description="Calls per bucket" className="lg:col-span-2">
           <TrafficChart points={detail.timeseries} grain={window.grain} />
         </Panel>
-        <Panel title="Status codes" description="Responses in this window">
-          {detail.statusBreakdown.length > 0 ? (
-            <StatusBreakdown items={detail.statusBreakdown} />
-          ) : (
-            <EmptyState title="No responses" />
-          )}
+        <Panel title="Top callers" description="Verified users by calls to this route">
+          <TopUsersList
+            users={detail.topUsers}
+            unit="calls"
+            ariaLabel="Top callers"
+            linkQuery={linkQuery}
+            emptyTitle="No verified caller"
+          />
         </Panel>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="Latency" description="p95 per bucket">
           <LatencyChart points={detail.timeseries} grain={window.grain} />
         </Panel>
@@ -162,7 +177,18 @@ function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
           description="Failed requests by class"
           aside={<ChartLegend series={ERROR_SERIES} />}
         >
-          <ErrorsChart points={detail.timeseries} grain={window.grain} />
+          {endpoint.errors4xx + endpoint.errors5xx > 0 ? (
+            <ErrorsChart points={detail.timeseries} grain={window.grain} />
+          ) : (
+            <EmptyState title="No failures" description="Every call in this window succeeded." />
+          )}
+        </Panel>
+        <Panel title="Status codes" description="Responses in this window">
+          {detail.statusBreakdown.length > 0 ? (
+            <StatusBreakdown items={detail.statusBreakdown} />
+          ) : (
+            <EmptyState title="No responses" />
+          )}
         </Panel>
       </div>
 

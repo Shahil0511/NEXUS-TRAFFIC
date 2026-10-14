@@ -26,9 +26,13 @@ import type {
   ToolTrendPointDto,
   ToolUsageDto,
   TopPathDto,
+  UserAppUsageDto,
+  UserEndpointUsageDto,
   UserProfileDto,
   UserSummaryDto,
+  UserUsageDto,
 } from '@nexus/shared';
+import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 
 import { userKeyToHex } from '../enrichment/user-key.hasher';
 import { computeMetric } from './compute-deltas';
@@ -56,8 +60,11 @@ import type {
   ToolUsageRow,
   TopPathRow,
   TrafficBucketRow,
+  UserAppRow,
+  UserEndpointRow,
   UserProfileRows,
   UserSummaryRow,
+  UserUsageRow,
 } from './rows';
 import type { Viewer } from './viewer';
 
@@ -112,7 +119,7 @@ export function mapApp(row: AppRow, keys: ApiKeyRow[]): AppDto {
  * WHY: `method` is TEXT in SQL but CHECK-constrained to HTTP_METHOD_VALUES
  * (migrations/0004_api_requests.sql), so the narrowing cast is safe.
  */
-function asHttpMethod(method: string): HttpMethod {
+export function asHttpMethod(method: string): HttpMethod {
   return method as HttpMethod;
 }
 
@@ -241,6 +248,21 @@ export function mapAppTraffic(app: AppRow, sources: AppTrafficSources): AppTraff
     sessions: activity?.sessions ?? 0,
     toolUses: activity?.tool_uses ?? 0,
     lastEventAt: latestOf(traffic?.last_event_at, activity?.last_event_at)?.toISOString() ?? null,
+    identifiedPct: activity ? percentOf(activity.identified, activity.events) : null,
+    linkedPct: traffic ? percentOf(traffic.linked, traffic.requests) : null,
+  };
+}
+
+/**
+ * WHY: one verified user's count (callers of a route, viewers of a page, users of a tool, users hit
+ * by failures). `user_key` leaves as hex — the opaque id of the user's page.
+ */
+export function mapUserUsage(row: UserUsageRow): UserUsageDto {
+  return {
+    userKey: row.user_key.toString('hex'),
+    email: row.user_email,
+    count: row.count,
+    lastSeenAt: row.last_seen_at.toISOString(),
   };
 }
 
@@ -264,22 +286,62 @@ export function mapUserSummary(row: UserSummaryRow): UserSummaryDto {
     requests: row.requests,
     pageViews: row.page_views,
     sessions: row.sessions,
+    failedRequests: row.failed_requests,
+    firstSeenAt: row.first_seen_at.toISOString(),
     apps: [...row.apps],
   };
 }
 
-/** WHY: the profile header + its top lists, from the rows of getUserProfile. */
-export function mapUserProfile(rows: UserProfileRows): UserProfileDto {
+/** WHY: one route of a user's profile, linked by its stored endpoint_id. */
+export function mapUserEndpoint(row: UserEndpointRow): UserEndpointUsageDto {
+  return {
+    endpointId: row.endpoint_id,
+    app: row.app_slug,
+    method: asHttpMethod(row.method),
+    routeTemplate: row.route_template,
+    calls: row.calls,
+    failed: row.failed,
+  };
+}
+
+/** WHY: one app of a user's profile ("Apps used"). */
+export function mapUserApp(row: UserAppRow): UserAppUsageDto {
+  return {
+    app: row.app_slug,
+    requests: row.requests,
+    pageViews: row.page_views,
+    toolUses: row.tool_uses,
+    sessions: row.sessions,
+    lastSeenAt: row.last_seen_at.toISOString(),
+  };
+}
+
+/**
+ * WHY: the profile header + its top lists, from the rows of getUserProfile and the user's top
+ * routes. Pages and tools carry their opaque ids (toPageId / toToolId) so they can be links.
+ */
+export function mapUserProfile(
+  rows: UserProfileRows,
+  topEndpoints: readonly UserEndpointRow[],
+): UserProfileDto {
   return {
     summary: mapUserSummary(rows.summary),
     firstSeenAt: rows.summary.first_seen_at.toISOString(),
     failedRequests: rows.summary.failed_requests,
-    topTools: rows.topTools.map((row) => ({ app: row.app_slug, tool: row.tool, uses: row.uses })),
+    topTools: rows.topTools.map((row) => ({
+      toolId: toToolId(row.app_slug, row.tool),
+      app: row.app_slug,
+      tool: row.tool,
+      uses: row.uses,
+    })),
     topPages: rows.topPages.map((row) => ({
+      pageId: toPageId(row.app_slug, row.path_template),
       app: row.app_slug,
       pathTemplate: row.path_template,
       views: row.views,
     })),
+    topEndpoints: topEndpoints.map(mapUserEndpoint),
+    perApp: rows.perApp.map(mapUserApp),
     countries: [...rows.countries],
   };
 }
@@ -355,10 +417,12 @@ export function mapTopPath(row: TopPathRow): TopPathDto {
 /** WHY: time on page — avg/p50 are rounded to whole milliseconds (visible time is integral). */
 export function mapPageStats(row: PageStatsRow): PageStatsDto {
   return {
+    pageId: toPageId(row.app_slug, row.path_template),
     app: row.app_slug,
     pathTemplate: row.path_template,
     views: row.views,
     uniqueSessions: row.unique_sessions,
+    distinctUsers: row.distinct_users,
     avgVisibleMs: roundOrNull(row.avg_visible_ms, 0),
     p50VisibleMs: roundOrNull(row.p50_visible_ms, 0),
     exits: row.exits,
@@ -375,6 +439,7 @@ export function mapToolTrendPoint(row: ToolTrendRow): ToolTrendPointDto {
  */
 export function mapToolUsage(row: ToolUsageRow, trend: ToolTrendPointDto[]): ToolUsageDto {
   return {
+    toolId: toToolId(row.app_slug, row.tool),
     app: row.app_slug,
     tool: row.tool,
     uses: row.uses,

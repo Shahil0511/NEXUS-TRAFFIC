@@ -75,6 +75,8 @@ export const ROUTES = {
   },
   users: {
     list: { method: 'GET', path: '/v1/users' },
+    /** Daily active users over the window + WAU/MAU. Registered BEFORE `/:userKey`. */
+    activity: { method: 'GET', path: '/v1/users/activity' },
     /**
      * Email search. POST on purpose: a typed email never travels in a URL, so it never reaches an
      * access log (ADR 0006). A read, not a mutation.
@@ -90,9 +92,13 @@ export const ROUTES = {
   },
   pages: {
     list: { method: 'GET', path: '/v1/pages' },
+    /** `pageId` = toPageId(app, pathTemplate): the template never appears in the URL. */
+    detail: { method: 'GET', path: '/v1/pages/:app/:pageId' },
   },
   tools: {
     usage: { method: 'GET', path: '/v1/tools' },
+    /** `toolId` = toToolId(app, tool): the tool name never appears in the URL. */
+    detail: { method: 'GET', path: '/v1/tools/:app/:toolId' },
   },
   geo: {
     countries: { method: 'GET', path: '/v1/geo/countries' },

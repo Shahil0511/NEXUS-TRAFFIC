@@ -4,6 +4,7 @@ import type { Grain, ToolUsageDto } from '@nexus/shared';
 import { useMemo } from 'react';
 
 import { AppChip } from '@/components/AppChip';
+import { ToolLink } from '@/components/EntityLinks';
 import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
 import { Sparkline } from '@/components/charts/Sparkline';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
@@ -62,9 +63,13 @@ export function toolColumns(
       className: 'w-full max-w-0',
       cell: (row) => (
         <span className="block min-w-0 space-y-1">
-          <span className="block truncate font-medium" title={row.tool}>
-            {row.tool}
-          </span>
+          <ToolLink
+            app={row.app}
+            toolId={row.toolId}
+            tool={row.tool}
+            linkQuery={linkQuery}
+            className="block truncate font-medium"
+          />
           <AppChip app={row.app} linkQuery={linkQuery} />
         </span>
       ),
@@ -173,7 +178,14 @@ export function ToolsView() {
                 ariaLabel="Tools by distinct users"
                 items={reach.map((tool) => ({
                   key: toolKey(tool),
-                  label: tool.tool,
+                  label: (
+                    <ToolLink
+                      app={tool.app}
+                      toolId={tool.toolId}
+                      tool={tool.tool}
+                      linkQuery={linkQuery}
+                    />
+                  ),
                   sublabel: tool.app,
                   value: tool.distinctUsers,
                 }))}

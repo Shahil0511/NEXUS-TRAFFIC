@@ -17,10 +17,12 @@ import {
   mapRequestSample,
   mapStatusCount,
   mapTimeseriesPoint,
+  mapUserUsage,
 } from '../domain/mappers';
 import { pageFetchSize, parseKeysetCursor, toCursorPage } from '../domain/pagination';
 import { fillTimeseriesGaps } from '../domain/timeseries-gaps';
 import type { Viewer } from '../domain/viewer';
+import { userKeyFromHex } from '../enrichment/user-key.hasher';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
@@ -36,8 +38,8 @@ export class ErrorService {
 
   /**
    * Totals (4xx / 5xx), failures per status, the gap-filled series and the top failing endpoints,
-   * optionally of ONE route (`endpointId`, the Errors page opened from a route) — so the numbers
-   * above the list describe the same requests as the list.
+   * and the users hit, optionally of ONE route (`endpointId`) and/or ONE user (`userKey`) — so the
+   * numbers above the list describe the same requests as the list.
    * The top endpoints carry latency percentiles → capped at MAX_PERCENTILE_RANGE_MS.
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeErrors
    */
@@ -46,6 +48,7 @@ export class ErrorService {
     const filter = {
       ...currentFilter(window, await this.appSlugs.resolve(query.app)),
       endpointId: query.endpointId,
+      userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
     };
 
     const rows = await this.requests.summarizeErrors(filter, window.grain);
@@ -60,6 +63,8 @@ export class ErrorService {
         window,
       ),
       topEndpoints: rows.topEndpoints.map(mapEndpointStats),
+      usersAffected: rows.usersAffected,
+      topAffectedUsers: rows.topAffectedUsers.map(mapUserUsage),
     };
   }
 
@@ -74,7 +79,11 @@ export class ErrorService {
     const after = parseKeysetCursor(query.cursor);
 
     const rows = await this.requests.listFailures(
-      { ...currentFilter(window, appId), endpointId: query.endpointId },
+      {
+        ...currentFilter(window, appId),
+        endpointId: query.endpointId,
+        userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
+      },
       { statusClass: query.statusClass, after, limit: pageFetchSize(query.limit) },
     );
     return toCursorPage(

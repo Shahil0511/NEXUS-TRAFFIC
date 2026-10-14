@@ -174,6 +174,7 @@ export function pageStatsRow(overrides: Partial<PageStatsRow> = {}): PageStatsRo
     path_template: '/stores/:id',
     views: 20,
     unique_sessions: 8,
+    distinct_users: 5,
     avg_visible_ms: 3500.4999,
     p50_visible_ms: 3000.5,
     exits: 3,

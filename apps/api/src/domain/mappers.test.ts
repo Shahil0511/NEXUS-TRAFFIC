@@ -1,3 +1,4 @@
+import { toToolId } from '@nexus/shared/endpoint-id';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -223,18 +224,24 @@ describe('mapUserSummary / mapUserProfile', () => {
       requests: 12,
       pageViews: 5,
       sessions: 2,
+      failedRequests: 2,
+      firstSeenAt: '2026-10-01T08:00:00.000Z',
       apps: ['ebo-sales', 'hr-portal'],
     });
     expect(USER_KEY_HEX).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('maps the profile header and its top lists', () => {
-    const dto = mapUserProfile({
-      summary: userSummaryRow(),
-      topTools: [{ app_slug: 'ebo-sales', tool: 'export-csv', uses: 2 }],
-      topPages: [{ app_slug: 'ebo-sales', path_template: '/home', views: 3 }],
-      countries: ['IN', 'AE'],
-    });
+    const dto = mapUserProfile(
+      {
+        summary: userSummaryRow(),
+        topTools: [{ app_slug: 'ebo-sales', tool: 'export-csv', uses: 2 }],
+        topPages: [{ app_slug: 'ebo-sales', path_template: '/home', views: 3 }],
+        perApp: [],
+        countries: ['IN', 'AE'],
+      },
+      [],
+    );
     expect(dto).toMatchObject({
       firstSeenAt: '2026-10-01T08:00:00.000Z',
       failedRequests: 2,
@@ -327,6 +334,7 @@ describe('pages / tools / paths / geo mappers', () => {
   it('mapToolUsage never exposes the internal app id', () => {
     const dto = mapToolUsage(toolUsageRow(), [{ bucket: '2026-10-01T08:30:00.000Z', uses: 1 }]);
     expect(dto).toEqual({
+      toolId: toToolId('ebo-sales', 'export-csv'),
       app: 'ebo-sales',
       tool: 'export-csv',
       uses: 7,

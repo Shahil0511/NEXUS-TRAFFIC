@@ -1,10 +1,16 @@
 import { ERROR_CODES, ROUTES } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
-import { delay, http, HttpResponse } from 'msw';
 import userEvent from '@testing-library/user-event';
+import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { APP_TRAFFIC, ERROR_SUMMARY, OVERVIEW_SUMMARY, OVERVIEW_TIMESERIES } from '@/test/fixtures';
+import {
+  APP_TRAFFIC,
+  ERROR_SUMMARY,
+  OVERVIEW_SUMMARY,
+  OVERVIEW_TIMESERIES,
+  USER_ACTIVITY,
+} from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -19,6 +25,7 @@ function useOverviewHandlers(summaryResolver?: Parameters<typeof http.get>[1]) {
     http.get(routeUrl(ROUTES.overview.timeseries), () => HttpResponse.json(OVERVIEW_TIMESERIES)),
     http.get(routeUrl(ROUTES.errors.summary), () => HttpResponse.json(ERROR_SUMMARY)),
     http.get(routeUrl(ROUTES.overview.apps), () => HttpResponse.json(APP_TRAFFIC)),
+    http.get(routeUrl(ROUTES.users.activity), () => HttpResponse.json(USER_ACTIVITY)),
   );
 }
 
@@ -133,5 +140,16 @@ describe('OverviewView', () => {
     const link = await within(apps).findByRole('link', { name: 'EBO Sales' });
     expect(link.getAttribute('href')).toBe('/applications/ebo-sales?range=7d');
     expect(within(apps).getByText('38')).toBeInTheDocument();
+  });
+
+  it('shows daily active users with the last 7 / 30 days next to it', async () => {
+    useOverviewHandlers();
+    renderWithProviders(<OverviewView />);
+    const panel = await screen.findByRole('region', { name: 'Active users' });
+    expect(await within(panel).findByText('31')).toBeInTheDocument();
+    expect(within(panel).getByText('38')).toBeInTheDocument();
+    expect(
+      within(panel).getByRole('figure', { name: 'Active users over time' }),
+    ).toBeInTheDocument();
   });
 });

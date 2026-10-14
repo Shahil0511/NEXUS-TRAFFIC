@@ -220,9 +220,19 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ),
     endpoints: new EndpointService(repositories.apiRequestQuery, appSlugs, clock),
     errors: new ErrorService(repositories.apiRequestQuery, appSlugs, clock),
-    users: new UserService(repositories.webEventQuery, appSlugs, clock),
+    users: new UserService(
+      repositories.webEventQuery,
+      repositories.apiRequestQuery,
+      appSlugs,
+      clock,
+    ),
     journeys: new JourneyService(repositories.webEventQuery, appSlugs, clock),
-    pages: new PageService(repositories.webEventQuery, appSlugs, clock),
+    pages: new PageService(
+      repositories.webEventQuery,
+      repositories.apiRequestQuery,
+      appSlugs,
+      clock,
+    ),
     tools: new ToolService(repositories.webEventQuery, appSlugs, clock),
     geo: new GeoService(repositories.webEventQuery, appSlugs, clock),
     live: new LiveService(

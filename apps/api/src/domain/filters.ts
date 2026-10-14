@@ -6,7 +6,7 @@
  * `occurred_at >= from AND occurred_at < to` (partition pruning on the monthly partitions), so the
  * window is REQUIRED here, not optional.
  */
-import type { EndpointSort, SortDirection, StatusClass } from '@nexus/shared';
+import type { EndpointSort, SortDirection, StatusClass, UserSort } from '@nexus/shared';
 
 /** The window + scope every analytics query runs over. */
 export interface TrafficFilter {
@@ -18,6 +18,8 @@ export interface TrafficFilter {
   appId?: string;
   /** Stored `endpoint_id` (one app + method + route template); undefined = all endpoints. */
   endpointId?: string;
+  /** Stored `user_key` (bytea) — one verified user (Errors "View failures"); api_requests only. */
+  userKey?: Buffer;
 }
 
 /**
@@ -54,10 +56,13 @@ export interface FailureListOptions {
   limit: number;
 }
 
-/** Paging + search of `WebEventQueryRepository.listUsers` (offset: aggregate list). */
+/** Paging + search + order of `WebEventQueryRepository.listUsers` (offset: aggregate list). */
 export interface UserListOptions {
   /** Case-insensitive substring of the verified email. */
   search?: string;
+  /** Whitelisted sort key (USER_SORT_VALUES); default: most recently seen first. */
+  sort?: UserSort;
+  dir?: SortDirection;
   limit: number;
   offset: number;
 }

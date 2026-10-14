@@ -4,6 +4,7 @@
  */
 import type {
   AppTrafficDto,
+  UserActivityDto,
   AppDto,
   CursorPage,
   EndpointDetailDto,
@@ -73,6 +74,8 @@ export function appTraffic(overrides: Partial<AppTrafficDto> = {}): AppTrafficDt
     sessions: 120,
     toolUses: 64,
     lastEventAt: '2026-10-01T07:59:00.000Z',
+    identifiedPct: 96.5,
+    linkedPct: 71.2,
     ...overrides,
   };
 }
@@ -92,8 +95,20 @@ export const APP_TRAFFIC: WindowedListDto<AppTrafficDto> = {
       sessions: 0,
       toolUses: 0,
       lastEventAt: null,
+      identifiedPct: null,
+      linkedPct: null,
     }),
   ],
+};
+
+export const USER_ACTIVITY: UserActivityDto = {
+  window: WINDOW,
+  points: [
+    { day: '2026-09-29T18:30:00.000Z', users: 21 },
+    { day: '2026-09-30T18:30:00.000Z', users: 25 },
+  ],
+  wau: 31,
+  mau: 38,
 };
 
 export function timeseriesPoint(bucket: string, requests: number): TimeseriesPointDto {
@@ -177,6 +192,15 @@ export const ERROR_SUMMARY: ErrorSummaryDto = {
   ],
   timeseries: OVERVIEW_TIMESERIES.points,
   topEndpoints: [endpointStats()],
+  usersAffected: 4,
+  topAffectedUsers: [
+    {
+      userKey: 'a'.repeat(64),
+      email: 'buyer@libas.in',
+      count: 9,
+      lastSeenAt: '2026-10-01T07:40:00.000Z',
+    },
+  ],
 };
 
 export const ENDPOINT_DETAIL: EndpointDetailDto = {
@@ -188,12 +212,24 @@ export const ENDPOINT_DETAIL: EndpointDetailDto = {
     { status: 404, count: 12 },
   ],
   slowest: [failedRequest('9d7a3c1e-1111-4a2b-9c3d-4e5f6a7b8c9d', 200)],
+  uniqueUsers: 3,
+  topUsers: [
+    {
+      userKey: 'a'.repeat(64),
+      email: 'buyer@libas.in',
+      count: 800,
+      lastSeenAt: '2026-10-01T07:40:00.000Z',
+    },
+  ],
 };
 
 // ─── S3: users, journeys, pages, tools, geography ───────────────────────────
 
 /** A valid userKey (64 hex chars, the shape of the API's HMAC). */
 export const USER_KEY = 'a'.repeat(64);
+/** Opaque page / tool ids (the API computes them; any uuid works here). */
+export const PAGE_ID = '0d6e9a51-3f7e-5a7e-9a51-2a596f1c3f7e';
+export const TOOL_ID = '1a2b3c4d-5e6f-5a7b-8c9d-0e1f2a3b4c5d';
 export const SESSION_ID = '7c1d2e3f-4a5b-4c6d-8e7f-001122334455';
 
 export function userSummary(overrides: Partial<UserSummaryDto> = {}): UserSummaryDto {
@@ -204,6 +240,8 @@ export function userSummary(overrides: Partial<UserSummaryDto> = {}): UserSummar
     requests: 1_234,
     pageViews: 56,
     sessions: 7,
+    failedRequests: 12,
+    firstSeenAt: '2026-09-30T09:00:00.000Z',
     apps: ['ebo-sales'],
     ...overrides,
   };
@@ -213,8 +251,28 @@ export const USER_PROFILE: UserProfileDto = {
   summary: userSummary(),
   firstSeenAt: '2026-09-30T09:00:00.000Z',
   failedRequests: 12,
-  topTools: [{ app: 'ebo-sales', tool: 'export-csv', uses: 9 }],
-  topPages: [{ app: 'ebo-sales', pathTemplate: '/orders/:id', views: 31 }],
+  topTools: [{ toolId: TOOL_ID, app: 'ebo-sales', tool: 'export-csv', uses: 9 }],
+  topPages: [{ pageId: PAGE_ID, app: 'ebo-sales', pathTemplate: '/orders/:id', views: 31 }],
+  topEndpoints: [
+    {
+      endpointId: '6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11',
+      app: 'ebo-sales',
+      method: 'GET',
+      routeTemplate: '/api/orders/:id',
+      calls: 1_100,
+      failed: 12,
+    },
+  ],
+  perApp: [
+    {
+      app: 'ebo-sales',
+      requests: 1_234,
+      pageViews: 56,
+      toolUses: 9,
+      sessions: 7,
+      lastSeenAt: '2026-10-01T07:45:00.000Z',
+    },
+  ],
   countries: ['IN'],
 };
 
@@ -325,19 +383,23 @@ export const PAGE_STATS: WindowedListDto<PageStatsDto> = {
   window: WINDOW,
   items: [
     {
+      pageId: PAGE_ID,
       app: 'ebo-sales',
       pathTemplate: '/orders/:id',
       views: 420,
       uniqueSessions: 200,
+      distinctUsers: 64,
       avgVisibleMs: 48_000,
       p50VisibleMs: 31_000,
       exits: 50,
     },
     {
+      pageId: '2b3c4d5e-6f7a-5b8c-9d0e-1f2a3b4c5d6e',
       app: 'ebo-sales',
       pathTemplate: '/reports',
       views: 12,
       uniqueSessions: 10,
+      distinctUsers: 6,
       avgVisibleMs: null,
       p50VisibleMs: null,
       exits: 0,
@@ -349,6 +411,7 @@ export const TOOL_USAGE: WindowedListDto<ToolUsageDto> = {
   window: WINDOW,
   items: [
     {
+      toolId: TOOL_ID,
       app: 'ebo-sales',
       tool: 'export-csv',
       uses: 1_250,

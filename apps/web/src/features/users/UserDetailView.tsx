@@ -11,9 +11,11 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { KpiCard } from '@/components/KpiCard';
 import { LoadMoreButton } from '@/components/LoadMoreButton';
+import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
 import { ListSkeleton, Panel } from '@/components/Panel';
 import { RankedList } from '@/components/RankedList';
+import { RelativeTime } from '@/components/RelativeTime';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -31,6 +33,9 @@ import { useUserTimeline } from './useUserTimeline';
 const TIMELINE_PAGE_SIZE = 50;
 const PERCENT = 100;
 const PROFILE_PANELS = ['Top pages', 'Top tools', 'Countries'] as const;
+/** Inline link inside a ranked list row. */
+const ROW_LINK =
+  'rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60';
 
 /**
  * One verified user: totals, the pages and tools they use most, where they connect from, and a
@@ -110,6 +115,7 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
   const { summary } = profile;
   const linkQuery = filterLinkQuery(filters);
   const sessionsHref = withQuery(PAGES.journeys(), { ...linkQuery, userKey });
+  const failuresHref = withQuery(PAGES.errors(), { ...linkQuery, userKey });
   useDocumentTitle(maskEmail(summary.email));
   const failedShare =
     summary.requests > 0 ? (profile.failedRequests / summary.requests) * PERCENT : null;
@@ -128,11 +134,20 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
           </span>
         }
         actions={
-          <Button asChild variant="outline">
-            <Link href={sessionsHref}>
-              <Waypoints aria-hidden="true" /> View sessions
-            </Link>
-          </Button>
+          <>
+            {profile.failedRequests > 0 ? (
+              <Button asChild variant="outline">
+                <Link href={failuresHref}>
+                  <TriangleAlert aria-hidden="true" /> View failures
+                </Link>
+              </Button>
+            ) : null}
+            <Button asChild variant="outline">
+              <Link href={sessionsHref}>
+                <Waypoints aria-hidden="true" /> View sessions
+              </Link>
+            </Button>
+          </>
         }
       />
 
@@ -143,6 +158,7 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
           icon={TriangleAlert}
           value={formatInteger(profile.failedRequests)}
           hint={failedShare !== null ? `${formatPercent(failedShare)} of requests` : undefined}
+          href={profile.failedRequests > 0 ? failuresHref : undefined}
         />
         <KpiCard label="Page views" icon={Eye} value={formatInteger(summary.pageViews)} />
         <KpiCard
@@ -154,14 +170,57 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
         />
       </section>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Apps used" description="This user's activity per application">
+          <AppsUsedTable apps={profile.perApp} linkQuery={linkQuery} />
+        </Panel>
+        <Panel title="Top API routes" description="The routes this user calls most">
+          {profile.topEndpoints.length > 0 ? (
+            <RankedList
+              ariaLabel="Top API routes"
+              items={profile.topEndpoints.map((route) => ({
+                key: route.endpointId,
+                label: (
+                  <Link
+                    href={withQuery(PAGES.endpointDetail(route.endpointId), linkQuery)}
+                    className={`inline-flex min-w-0 items-center gap-1.5 ${ROW_LINK}`}
+                  >
+                    <MethodBadge method={route.method} />
+                    <span className="truncate font-mono">{route.routeTemplate}</span>
+                  </Link>
+                ),
+                sublabel: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <AppChip app={route.app} linkQuery={linkQuery} />
+                    {route.failed > 0 ? (
+                      <span className="text-destructive">{formatInteger(route.failed)} failed</span>
+                    ) : null}
+                  </span>
+                ),
+                value: route.calls,
+              }))}
+            />
+          ) : (
+            <EmptyState title="No API calls" description="This user only used the browser UI." />
+          )}
+        </Panel>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel title="Top pages" description="Most viewed page templates">
           {profile.topPages.length > 0 ? (
             <RankedList
               ariaLabel="Top pages"
               items={profile.topPages.map((page) => ({
-                key: `${page.app}|${page.pathTemplate}`,
-                label: <span className="font-mono">{page.pathTemplate}</span>,
+                key: page.pageId,
+                label: (
+                  <Link
+                    href={withQuery(PAGES.pageDetail(page.app, page.pageId), linkQuery)}
+                    className={`font-mono ${ROW_LINK}`}
+                  >
+                    {page.pathTemplate}
+                  </Link>
+                ),
                 sublabel: <AppChip app={page.app} linkQuery={linkQuery} />,
                 value: page.views,
               }))}
@@ -175,8 +234,15 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
             <RankedList
               ariaLabel="Top tools"
               items={profile.topTools.map((tool) => ({
-                key: `${tool.app}|${tool.tool}`,
-                label: tool.tool,
+                key: tool.toolId,
+                label: (
+                  <Link
+                    href={withQuery(PAGES.toolDetail(tool.app, tool.toolId), linkQuery)}
+                    className={ROW_LINK}
+                  >
+                    {tool.tool}
+                  </Link>
+                ),
                 sublabel: <AppChip app={tool.app} linkQuery={linkQuery} />,
                 value: tool.uses,
               }))}
@@ -202,6 +268,58 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
         </Panel>
       </div>
     </>
+  );
+}
+
+// ─── Apps used ───────────────────────────────────────────────────────────────
+
+/** WHY: "which apps does this person use, and how much" — one row per app, each opening it. */
+function AppsUsedTable({
+  apps,
+  linkQuery,
+}: {
+  apps: UserProfileDto['perApp'];
+  linkQuery: Record<string, string | undefined>;
+}) {
+  if (apps.length === 0) return <EmptyState title="No activity" />;
+  return (
+    <table className="w-full text-xs">
+      <caption className="sr-only">Apps used</caption>
+      <thead>
+        <tr className="text-[11px] text-muted-foreground uppercase">
+          <th scope="col" className="pb-2 text-left font-medium">
+            App
+          </th>
+          <th scope="col" className="pb-2 text-right font-medium">
+            API calls
+          </th>
+          <th scope="col" className="pb-2 text-right font-medium">
+            Page views
+          </th>
+          <th scope="col" className="pb-2 text-right font-medium">
+            Tools
+          </th>
+          <th scope="col" className="pb-2 text-right font-medium">
+            Last seen
+          </th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">
+        {apps.map((app) => (
+          <tr key={app.app}>
+            <td className="py-2">
+              <AppChip app={app.app} linkQuery={linkQuery} />
+            </td>
+            <td className="py-2 text-right tabular">{formatInteger(app.requests)}</td>
+            <td className="py-2 text-right tabular">{formatInteger(app.pageViews)}</td>
+            <td className="py-2 text-right tabular">{formatInteger(app.toolUses)}</td>
+            <td className="py-2 text-right text-muted-foreground">
+              <RelativeTime iso={app.lastSeenAt} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

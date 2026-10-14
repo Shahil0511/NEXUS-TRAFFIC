@@ -2,6 +2,7 @@
  * ROUTES.users.* — the Users page (user list, profile, combined timeline).
  */
 import {
+  userActivityQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
   userProfileQuerySchema,
@@ -22,6 +23,14 @@ export class UserController {
   list: RequestHandler = async (_req, res) => {
     requireViewer(res);
     const body = await this.users.list(validQuery(res, userListQuerySchema));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/user.service.ts UserService.activity */
+  activity: RequestHandler = async (_req, res) => {
+    requireViewer(res);
+    const body = await this.users.activity(validQuery(res, userActivityQuerySchema));
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

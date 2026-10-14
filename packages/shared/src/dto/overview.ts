@@ -34,6 +34,10 @@ export interface AppTrafficDto {
   toolUses: number;
   /** Newest API call or browser event in the window. */
   lastEventAt: string | null;
+  /** % of events (API calls + browser events) carrying a VERIFIED user; null without events. */
+  identifiedPct: number | null;
+  /** % of API calls linked to a browser session (tracker header); null without API calls. */
+  linkedPct: number | null;
 }
 
 /** GET ROUTES.overview.timeseries */

@@ -20,15 +20,20 @@ import {
   overviewAppsQuerySchema,
   overviewSummaryQuerySchema,
   overviewTimeseriesQuerySchema,
+  pageDetailParamsSchema,
+  pageDetailQuerySchema,
   pageListQuerySchema,
   ROUTES,
   serverIngestEnvelopeSchema,
   sessionListQuerySchema,
   sessionParamsSchema,
   sessionQuerySchema,
+  toolDetailParamsSchema,
+  toolDetailQuerySchema,
   toolUsageQuerySchema,
   topPathsQuerySchema,
   updateAppBodySchema,
+  userActivityQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
   userProfileQuerySchema,
@@ -162,6 +167,13 @@ export function buildRouter(c: Container): Router {
 
   // ─── Dashboard: users ─────────────────────────────────────────────────────
   r.get(ROUTES.users.list.path, ...dashboard, validateQuery(userListQuerySchema), ctl.users.list);
+  // Before `/:userKey`, which would otherwise answer it with a 400 (not a user key).
+  r.get(
+    ROUTES.users.activity.path,
+    ...dashboard,
+    validateQuery(userActivityQuerySchema),
+    ctl.users.activity,
+  );
   // POST so the typed email stays out of the URL (ADR 0006); registered before `/:userKey`.
   r.post(
     ROUTES.users.search.path,
@@ -208,7 +220,21 @@ export function buildRouter(c: Container): Router {
 
   // ─── Dashboard: pages & tools ─────────────────────────────────────────────
   r.get(ROUTES.pages.list.path, ...dashboard, validateQuery(pageListQuerySchema), ctl.pages.list);
+  r.get(
+    ROUTES.pages.detail.path,
+    ...dashboard,
+    validateParams(pageDetailParamsSchema),
+    validateQuery(pageDetailQuerySchema),
+    ctl.pages.detail,
+  );
   r.get(ROUTES.tools.usage.path, ...dashboard, validateQuery(toolUsageQuerySchema), ctl.tools.usage);
+  r.get(
+    ROUTES.tools.detail.path,
+    ...dashboard,
+    validateParams(toolDetailParamsSchema),
+    validateQuery(toolDetailQuerySchema),
+    ctl.tools.detail,
+  );
 
   // ─── Dashboard: geography ─────────────────────────────────────────────────
   r.get(ROUTES.geo.countries.path, ...dashboard, validateQuery(geoQuerySchema), ctl.geo.countries);

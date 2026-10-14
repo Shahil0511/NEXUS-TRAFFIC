@@ -4,6 +4,7 @@ import type { Grain, TimeseriesPointDto } from '@nexus/shared';
 import { useReducedMotion } from 'motion/react';
 import {
   CartesianGrid,
+  type DotItemDotProps,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -27,6 +28,7 @@ const SERIES: readonly ChartTooltipSeries[] = [
  */
 export function LatencyChart({ points, grain }: { points: TimeseriesPointDto[]; grain: Grain }) {
   const reducedMotion = useReducedMotion() ?? false;
+  const isolated = isolatedIndexes(points);
   return (
     <figure aria-label="p95 latency over time" className="m-0">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
@@ -57,7 +59,20 @@ export function LatencyChart({ points, grain }: { points: TimeseriesPointDto[]; 
             name="p95 latency"
             stroke={CHART_COLORS.requests}
             strokeWidth={2}
-            dot={false}
+            // A bucket with a value but no valued neighbour has no line segment: draw it as a dot.
+            dot={(props: DotItemDotProps) =>
+              props.index !== undefined && isolated.has(props.index) && props.cx && props.cy ? (
+                <circle
+                  key={props.index}
+                  cx={props.cx}
+                  cy={props.cy}
+                  r={3}
+                  fill={CHART_COLORS.requests}
+                />
+              ) : (
+                <g key={props.index} />
+              )
+            }
             activeDot={{ r: 4, strokeWidth: 2, stroke: CHART_COLORS.surface }}
             connectNulls={false}
             isAnimationActive={!reducedMotion}
@@ -66,4 +81,19 @@ export function LatencyChart({ points, grain }: { points: TimeseriesPointDto[]; 
       </ResponsiveContainer>
     </figure>
   );
+}
+
+/**
+ * Indexes of points that have a p95 but no p95 on either side — `connectNulls={false}` draws no
+ * segment for them, so without a dot a quiet range shows an empty chart (pure; tested).
+ */
+export function isolatedIndexes(points: readonly { p95Ms: number | null }[]): Set<number> {
+  const result = new Set<number>();
+  points.forEach((point, index) => {
+    if (point.p95Ms === null) return;
+    const before = points[index - 1]?.p95Ms ?? null;
+    const after = points[index + 1]?.p95Ms ?? null;
+    if (before === null && after === null) result.add(index);
+  });
+  return result;
 }

@@ -48,6 +48,8 @@ import {
   type OverviewSummaryQuery,
   type OverviewTimeseriesDto,
   type OverviewTimeseriesQuery,
+  type PageDetailDto,
+  type PageDetailQuery,
   type PageListQuery,
   type PageStatsDto,
   type PathParams,
@@ -57,11 +59,15 @@ import {
   type SessionQuery,
   type SessionSummaryDto,
   type TimelineItemDto,
+  type ToolDetailDto,
+  type ToolDetailQuery,
   type ToolUsageDto,
   type ToolUsageQuery,
   type TopPathDto,
   type TopPathsQuery,
   type UpdateAppBody,
+  type UserActivityDto,
+  type UserActivityQuery,
   type UserListQuery,
   type UserProfileDto,
   type UserProfileQuery,
@@ -216,6 +222,8 @@ export const api = {
   users: {
     list: (q: UserListQuery, o?: CallOptions) =>
       request<CursorPage<UserSummaryDto>>(ROUTES.users.list, q, o),
+    activity: (q: UserActivityQuery, o?: CallOptions) =>
+      request<UserActivityDto>(ROUTES.users.activity, q, o),
     /** POST: the typed email travels in the body, never in a URL (ADR 0006). */
     search: (body: UserSearchBody, o?: CallOptions) =>
       request<CursorPage<UserSummaryDto>>(ROUTES.users.search, undefined, { ...o, body }),
@@ -244,10 +252,20 @@ export const api = {
   pages: {
     list: (q: PageListQuery, o?: CallOptions) =>
       request<WindowedListDto<PageStatsDto>>(ROUTES.pages.list, q, o),
+    detail: (app: string, pageId: string, q: PageDetailQuery, o?: CallOptions) =>
+      request<PageDetailDto, typeof ROUTES.pages.detail>(ROUTES.pages.detail, q, {
+        ...o,
+        params: { app, pageId },
+      }),
   },
   tools: {
     usage: (q: ToolUsageQuery, o?: CallOptions) =>
       request<WindowedListDto<ToolUsageDto>>(ROUTES.tools.usage, q, o),
+    detail: (app: string, toolId: string, q: ToolDetailQuery, o?: CallOptions) =>
+      request<ToolDetailDto, typeof ROUTES.tools.detail>(ROUTES.tools.detail, q, {
+        ...o,
+        params: { app, toolId },
+      }),
   },
   geo: {
     countries: (q: GeoQuery, o?: CallOptions) =>

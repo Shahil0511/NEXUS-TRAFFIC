@@ -114,6 +114,41 @@ export interface TrafficSummaryRow {
 export interface AppTrafficRow extends TrafficSummaryRow {
   app_id: string;
   last_event_at: Date | null;
+  /** API calls with a verified user. */
+  identified: number;
+  /** API calls with a browser session id. */
+  linked: number;
+}
+
+/**
+ * One verified user's count of something (calls of a route, failures, views of a page, uses of a tool).
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listTopUsers
+ */
+export interface UserUsageRow {
+  user_key: Buffer;
+  user_email: string;
+  count: number;
+  last_seen_at: Date;
+}
+
+/** @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listUserTopEndpoints */
+export interface UserEndpointRow {
+  endpoint_id: string;
+  app_slug: string;
+  method: string;
+  route_template: string;
+  calls: number;
+  failed: number;
+}
+
+/** @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listPageApiCalls */
+export interface PageApiCallRow {
+  endpoint_id: string;
+  method: string;
+  route_template: string;
+  calls: number;
+  failed: number;
+  p95_ms: number | null;
 }
 
 /**
@@ -129,6 +164,63 @@ export interface AppActivityRow {
   sessions: number;
   tool_uses: number;
   last_event_at: Date | null;
+  /** All events of the app (API calls + browser events) and those with a verified user. */
+  events: number;
+  identified: number;
+}
+
+/** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserApps */
+export interface UserAppRow {
+  app_slug: string;
+  requests: number;
+  page_views: number;
+  tool_uses: number;
+  sessions: number;
+  last_seen_at: Date;
+}
+
+/** One IST day and its distinct verified users. */
+export interface DailyUsersRow {
+  day: Date;
+  users: number;
+}
+
+/** A count per bucket (page views of a page). */
+export interface BucketCountRow {
+  bucket: Date;
+  count: number;
+}
+
+/** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getPageDetail */
+export interface PageToolRow {
+  tool: string;
+  uses: number;
+  users: number;
+}
+
+/** A neighbour page: `direction` 'from' = the page before, 'to' = the page after. */
+export interface PageLinkRow {
+  direction: 'from' | 'to';
+  path_template: string;
+  sessions: number;
+}
+
+/** Everything the page detail needs (null from the repository when the page has no views). */
+export interface PageDetailRows {
+  stats: PageStatsRow;
+  trend: BucketCountRow[];
+  topUsers: UserUsageRow[];
+  tools: PageToolRow[];
+  links: PageLinkRow[];
+}
+
+/** Everything the tool detail needs (null from the repository when the tool was not used). */
+export interface ToolDetailRows {
+  stats: ToolUsageRow;
+  trend: ToolTrendRow[];
+  topUsers: UserUsageRow[];
+  pages: Array<{ path_template: string; uses: number }>;
+  actions: Array<{ action: string | null; uses: number }>;
 }
 
 /**
@@ -181,6 +273,8 @@ export interface EndpointDetailRows {
   timeseries: TrafficBucketRow[];
   statusBreakdown: StatusCountRow[];
   slowest: ApiRequestRow[];
+  uniqueUsers: number;
+  topUsers: UserUsageRow[];
 }
 
 /** Everything the Errors page summary needs. */
@@ -189,6 +283,8 @@ export interface ErrorSummaryRows {
   byStatus: StatusCountRow[];
   timeseries: TrafficBucketRow[];
   topEndpoints: EndpointStatsRow[];
+  usersAffected: number;
+  topAffectedUsers: UserUsageRow[];
 }
 
 /** @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.pageViewTimeseries */
@@ -235,6 +331,7 @@ export interface UserProfileRows {
   summary: UserSummaryRow;
   topTools: UserToolCountRow[];
   topPages: UserPageCountRow[];
+  perApp: UserAppRow[];
   /** ISO-3166 alpha-2 codes, most frequent first. */
   countries: string[];
 }
@@ -332,6 +429,7 @@ export interface PageStatsRow {
   path_template: string;
   views: number;
   unique_sessions: number;
+  distinct_users: number;
   avg_visible_ms: number | null;
   p50_visible_ms: number | null;
   exits: number;

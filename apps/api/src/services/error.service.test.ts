@@ -57,6 +57,10 @@ describe('ErrorService.summary', () => {
       ],
       timeseries: [],
       topEndpoints: [endpointStatsRow()],
+      usersAffected: 1,
+      topAffectedUsers: [
+        { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 4, last_seen_at: NOW },
+      ],
     };
     const dto = await service.summary({ range: '6h' });
     expect(dto).toMatchObject({ total: 9, errors4xx: 6, errors5xx: 3 });
@@ -124,5 +128,30 @@ describe('ErrorService.list', () => {
     const page = await service.list(listQuery(), PLAIN_VIEWER);
     expect(page.items[0]?.actor.ip).toBeNull();
     expect(JSON.stringify(page)).not.toContain('8.8.8.8');
+  });
+});
+
+describe('ErrorService (one user)', () => {
+  it('scopes the summary and the list to the user key (bytes), and maps affected users', async () => {
+    const { service, requests } = build();
+    const key = 'ab'.repeat(32);
+    requests.errorSummary = {
+      totals: { total: 4, errors_4xx: 4, errors_5xx: 0 },
+      byStatus: [],
+      timeseries: [],
+      topEndpoints: [],
+      usersAffected: 1,
+      topAffectedUsers: [
+        { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 4, last_seen_at: NOW },
+      ],
+    };
+    const dto = await service.summary({ range: '24h', userKey: key });
+    expect(requests.argsOf('summarizeErrors')[0]?.[0]).toMatchObject({
+      userKey: Buffer.from(key, 'hex'),
+    });
+    expect(dto.usersAffected).toBe(1);
+    expect(dto.topAffectedUsers).toEqual([
+      { userKey: key, email: 'a@libas.in', count: 4, lastSeenAt: NOW.toISOString() },
+    ]);
   });
 });

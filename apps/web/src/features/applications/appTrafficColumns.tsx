@@ -30,6 +30,26 @@ function MetricCell({
   );
 }
 
+/** Below this share (%) an integration gap is flagged (amber) on the Applications table. */
+export const COVERAGE_WARN_PCT = 80;
+
+/**
+ * A data-quality share: "96 %" (normal), amber below COVERAGE_WARN_PCT, "—" without data.
+ * The meaning is in `title` + the accessible name, never colour alone.
+ */
+function CoverageCell({ pct, meaning }: { pct: number | null; meaning: string }) {
+  const low = pct !== null && pct < COVERAGE_WARN_PCT;
+  return (
+    <span
+      className={low ? 'font-semibold text-warning tabular' : 'tabular'}
+      title={meaning}
+      aria-label={`${formatPercent(pct, 0)} ${meaning}${low ? ' (low)' : ''}`}
+    >
+      {formatPercent(pct, 0)}
+    </span>
+  );
+}
+
 /** Whether an app sent nothing at all in the window (a silent integration). */
 export function isSilent(row: AppTrafficDto): boolean {
   return row.lastEventAt === null;
@@ -115,6 +135,22 @@ export function appTrafficColumns(
       header: 'Tool uses',
       align: 'right',
       cell: (row) => <span className="tabular">{formatInteger(row.toolUses)}</span>,
+    },
+    {
+      id: 'identified',
+      header: 'Identified',
+      align: 'right',
+      cell: (row) => (
+        <CoverageCell pct={row.identifiedPct} meaning="of events carry a verified user" />
+      ),
+    },
+    {
+      id: 'linked',
+      header: 'Linked',
+      align: 'right',
+      cell: (row) => (
+        <CoverageCell pct={row.linkedPct} meaning="of API calls are linked to a browser session" />
+      ),
     },
     {
       id: 'lastEvent',

@@ -85,6 +85,15 @@ describe('EndpointService.detail', () => {
       { status_code: 500, count: 8 },
     ],
     slowest: [apiRequestSampleRow()],
+    uniqueUsers: 3,
+    topUsers: [
+      {
+        user_key: Buffer.alloc(32, 0xab),
+        user_email: 'a@libas.in',
+        count: 7,
+        last_seen_at: new Date('2026-10-01T09:00:00Z'),
+      },
+    ],
   });
 
   it('404 when the endpoint has no traffic in the window', async () => {

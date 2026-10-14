@@ -44,33 +44,59 @@ export type EndpointDetailQuery = z.infer<typeof endpointDetailQuerySchema>;
 export const STATUS_CLASS_VALUES = ['all', '4xx', '5xx'] as const;
 export type StatusClass = (typeof STATUS_CLASS_VALUES)[number];
 
-/** `endpointId` scopes the totals, chart and status codes to one route (Errors opened from a route). */
+/** userKey = hex HMAC-SHA256 of the email (64 chars). */
+export const userKeySchema = z.string().regex(/^[0-9a-f]{64}$/, 'invalid user key');
+
+/**
+ * `endpointId` / `userKey` scope the totals, chart and status codes to one route / one user
+ * (Errors opened from a route or from a user's "View failures").
+ */
 export const errorSummaryQuerySchema = timeWindowQuerySchema.safeExtend({
   endpointId: z.uuid().optional(),
+  userKey: userKeySchema.optional(),
 });
 export type ErrorSummaryQuery = z.infer<typeof errorSummaryQuerySchema>;
 
 export const errorListQuerySchema = timeWindowQuerySchema.safeExtend({
   statusClass: z.enum(STATUS_CLASS_VALUES).default('all'),
   endpointId: z.uuid().optional(),
+  userKey: userKeySchema.optional(),
   ...pageQueryShape,
 });
 export type ErrorListQuery = z.infer<typeof errorListQuerySchema>;
 
 // ─── users ──────────────────────────────────────────────────────────────────
-/** userKey = hex HMAC-SHA256 of the email (64 chars). */
-export const userKeySchema = z.string().regex(/^[0-9a-f]{64}$/, 'invalid user key');
+/** Sort keys of the Users table (whitelisted ORDER BY in the repository). */
+export const USER_SORT_VALUES = [
+  'lastSeen',
+  'firstSeen',
+  'requests',
+  'pageViews',
+  'sessions',
+  'failed',
+] as const;
+export type UserSort = (typeof USER_SORT_VALUES)[number];
+
+const userListShape = {
+  sort: z.enum(USER_SORT_VALUES).default('lastSeen'),
+  dir: z.enum(SORT_DIRECTION_VALUES).default('desc'),
+  ...pageQueryShape,
+};
 
 /** No `search` here: an email must never be in a URL — searching is ROUTES.users.search (POST). */
-export const userListQuerySchema = timeWindowQuerySchema.safeExtend({ ...pageQueryShape });
+export const userListQuerySchema = timeWindowQuerySchema.safeExtend(userListShape);
 export type UserListQuery = z.infer<typeof userListQuerySchema>;
 
 /** BODY of ROUTES.users.search: the list query plus the email substring (ADR 0006). */
 export const userSearchBodySchema = timeWindowQuerySchema.safeExtend({
   search: z.string().trim().min(1).max(100),
-  ...pageQueryShape,
+  ...userListShape,
 });
 export type UserSearchBody = z.infer<typeof userSearchBodySchema>;
+
+/** DAU over the window; WAU/MAU end at the window's end. */
+export const userActivityQuerySchema = timeWindowQuerySchema;
+export type UserActivityQuery = z.infer<typeof userActivityQuerySchema>;
 
 export const userKeyParamsSchema = z.object({ userKey: userKeySchema });
 export type UserKeyParams = z.infer<typeof userKeyParamsSchema>;
@@ -112,6 +138,19 @@ export const toolUsageQuerySchema = timeWindowQuerySchema.safeExtend({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 export type ToolUsageQuery = z.infer<typeof toolUsageQuerySchema>;
+
+/** A page is addressed by its registered app slug + opaque pageId (never the template). */
+export const pageDetailParamsSchema = z.object({ app: appSlugSchema, pageId: z.uuid() });
+export type PageDetailParams = z.infer<typeof pageDetailParamsSchema>;
+/** The window; the PATH app wins over an `app` query value (accepted, ignored). */
+export const pageDetailQuerySchema = timeWindowQuerySchema;
+export type PageDetailQuery = z.infer<typeof pageDetailQuerySchema>;
+
+/** A tool is addressed by its registered app slug + opaque toolId (never the tool name). */
+export const toolDetailParamsSchema = z.object({ app: appSlugSchema, toolId: z.uuid() });
+export type ToolDetailParams = z.infer<typeof toolDetailParamsSchema>;
+export const toolDetailQuerySchema = timeWindowQuerySchema;
+export type ToolDetailQuery = z.infer<typeof toolDetailQuerySchema>;
 
 export const geoQuerySchema = timeWindowQuerySchema.safeExtend({
   limit: z.coerce.number().int().min(1).max(500).default(100),

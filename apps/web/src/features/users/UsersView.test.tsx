@@ -36,7 +36,7 @@ describe('UsersView', () => {
   it('lists verified users, each linked to its profile by the opaque userKey', async () => {
     useUserHandlers();
     renderWithProviders(<UsersView />, { searchParams: '?range=7d' });
-    const link = await screen.findByRole('link', { name: /buyer@libas\.in/ });
+    const link = await screen.findByRole('link', { name: 'buyer@libas.in' });
     expect(link.getAttribute('href')).toBe(`/users/${USER_KEY}?range=7d`);
     expect(screen.getByText('1,234')).toBeInTheDocument();
     expect(screen.getByText(/Verified identities only/)).toBeInTheDocument();
@@ -80,5 +80,27 @@ describe('UsersView', () => {
     renderWithProviders(<UsersView />);
     const chip = await screen.findByRole('link', { name: 'ebo-sales' });
     expect(chip.getAttribute('href')).toBe('/applications/ebo-sales');
+  });
+
+  it('sorts on the server by a clicked column, keeping the choice in the URL', async () => {
+    const calls = useUserHandlers();
+    const urls: string[] = [];
+    const user = userEvent.setup();
+    renderWithProviders(<UsersView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
+    await screen.findByText('buyer@libas.in');
+
+    await user.click(screen.getByRole('button', { name: /API calls/ }));
+    await waitFor(() => expect(calls.at(-1)?.get('sort')).toBe('requests'));
+    expect(calls.at(-1)?.get('dir')).toBe('desc');
+    expect(urls.at(-1)).toContain('sort=requests');
+  });
+
+  it("links failed requests to the user's failures on Errors (opaque key)", async () => {
+    useUserHandlers();
+    renderWithProviders(<UsersView />);
+    const failed = await screen.findByRole('link', {
+      name: /12 failed requests of buyer@libas\.in/,
+    });
+    expect(failed.getAttribute('href')).toBe(`/errors?userKey=${USER_KEY}`);
   });
 });

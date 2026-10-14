@@ -1,12 +1,12 @@
 /**
- * ROUTES.tools.* — the "tool usage" table of the Pages & Tools page.
+ * ROUTES.tools.* — the "tool usage" table of the Pages & Tools page and one tool's detail.
  */
-import { toolUsageQuerySchema } from '@nexus/shared';
+import { toolDetailParamsSchema, toolDetailQuerySchema, toolUsageQuerySchema } from '@nexus/shared';
 import type { RequestHandler } from 'express';
 
 import type { ToolService } from '../../services/tool.service';
 import { CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE } from '../cache-control';
-import { requireViewer, validQuery } from '../request-accessors';
+import { requireViewer, validParams, validQuery } from '../request-accessors';
 
 /** WHY: thin HTTP adapter — reads validated input, calls the same-named service method. */
 export class ToolController {
@@ -16,6 +16,15 @@ export class ToolController {
   usage: RequestHandler = async (_req, res) => {
     requireViewer(res);
     const body = await this.tools.usage(validQuery(res, toolUsageQuerySchema));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/tool.service.ts ToolService.detail */
+  detail: RequestHandler = async (_req, res) => {
+    requireViewer(res);
+    const { app, toolId } = validParams(res, toolDetailParamsSchema);
+    const body = await this.tools.detail(app, toolId, validQuery(res, toolDetailQuerySchema));
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

@@ -56,6 +56,18 @@ export interface StatusCountDto {
   count: number;
 }
 
+/**
+ * One verified user's share of something — a route's callers, a page's viewers, a tool's users,
+ * the users hit by failures. `userKey` is the opaque id (safe in URLs); `count` is what the list
+ * ranks by (calls, views, uses, failures).
+ */
+export interface UserUsageDto {
+  userKey: string;
+  email: string;
+  count: number;
+  lastSeenAt: string;
+}
+
 /** Who did something. `ip` is null for non-admin viewers (masked by the API mapper). */
 export interface ActorDto {
   userKey: string | null;

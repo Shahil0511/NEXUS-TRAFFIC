@@ -98,3 +98,19 @@ export function fillToolTrendGaps(
   for (const point of points) byBucket.set(point.bucket, point);
   return [...byBucket.values()].sort((a, b) => a.bucket.localeCompare(b.bucket));
 }
+
+/**
+ * A plain count per bucket with one point per bucket of the window (missing buckets → 0), oldest
+ * first — a page's views, daily active users. `counts` is keyed by ISO bucket start.
+ */
+export function fillCountGaps(
+  counts: ReadonlyMap<string, number>,
+  window: SeriesWindow,
+): Array<{ bucket: string; count: number }> {
+  const byBucket = new Map<string, number>();
+  for (const start of bucketStarts(window)) byBucket.set(start.toISOString(), 0);
+  for (const [bucket, count] of counts) byBucket.set(bucket, count);
+  return [...byBucket.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([bucket, count]) => ({ bucket, count }));
+}

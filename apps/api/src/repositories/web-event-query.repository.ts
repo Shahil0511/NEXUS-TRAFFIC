@@ -23,11 +23,12 @@ import {
   type BrowserEventType,
   type Grain,
   type TimelineItemKind,
+  type UserSort,
 } from '@nexus/shared';
 import type { Pool } from 'pg';
 
 import type { Executor } from '../db/executor';
-import { bucketExpr, keysetTimeExpr, likeContains, ParamList } from '../db/sql';
+import { bucketExpr, keysetTimeExpr, likeContains, orderByClause, ParamList } from '../db/sql';
 import type {
   EventKeyset,
   SessionListOptions,
@@ -38,23 +39,31 @@ import type {
 import type {
   ActivityBucketRow,
   AppActivityRow,
+  BucketCountRow,
+  DailyUsersRow,
   GeoCityRow,
   GeoCountryRow,
   LiveEventRow,
+  PageDetailRows,
+  PageLinkRow,
   PageStatsRow,
+  PageToolRow,
   PageViewBucketRow,
   SessionEventRow,
   SessionRows,
   SessionSummaryRow,
   TimelineEventRow,
+  ToolDetailRows,
   ToolTrendRow,
   ToolUsageRow,
   ToolUsageRows,
   TopPathRow,
+  UserAppRow,
   UserPageCountRow,
   UserProfileRows,
   UserSummaryRow,
   UserToolCountRow,
+  UserUsageRow,
 } from '../domain/rows';
 import { FAILURE_PREDICATES } from './api-request-query.repository';
 
@@ -62,6 +71,8 @@ import { FAILURE_PREDICATES } from './api-request-query.repository';
 
 /** How many tools / pages / countries the user profile lists. */
 export const PROFILE_TOP_LIMIT = 10;
+/** How many rows each list of a page / tool detail returns. */
+export const DETAIL_TOP_LIMIT = 10;
 /** Safety cap on the events of one session replay (a runaway tab must not return 100k rows). */
 export const SESSION_EVENT_LIMIT = 2000;
 
@@ -120,6 +131,16 @@ function firstOf(expr: string, order: string, nonNull = `${expr} IS NOT NULL`): 
   return `(array_agg(${expr} ORDER BY ${order}) FILTER (WHERE ${nonNull}))[1]`;
 }
 
+/** User-stats sort key → SQL over the grouped `activity u`. The ONLY ORDER BY sources (whitelist). */
+const USER_ORDER_SQL = Object.freeze({
+  lastSeen: 'max(u.occurred_at)',
+  firstSeen: 'min(u.occurred_at)',
+  requests: `count(*) FILTER (WHERE u.kind = '${API_KIND}')`,
+  pageViews: `count(*) FILTER (WHERE u.kind = '${PAGE_VIEW}')`,
+  sessions: `count(DISTINCT u.session_id) FILTER (WHERE u.kind <> '${API_KIND}')`,
+  failed: 'count(*) FILTER (WHERE u.failed)',
+} as const satisfies Record<UserSort, string>);
+
 /** Extra knobs of the shared user-stats statement. */
 interface UserStatsQuery extends UserListOptions {
   /** One user only (profile header). */
@@ -128,7 +149,7 @@ interface UserStatsQuery extends UserListOptions {
 
 /**
  * One row per verified user over api_requests ∪ web_events: list, search and the profile header.
- * Users are ordered most recently seen first (ties: user_key). `sessions` counts BROWSER sessions
+ * Ordered by a whitelisted key (USER_ORDER_SQL; default most recently seen first; ties: user_key). `sessions` counts BROWSER sessions
  * only — the ones Journeys lists — so "3 sessions" always opens 3 replayable sessions.
  */
 function userStatsStatement(
@@ -169,7 +190,7 @@ function userStatsStatement(
       FROM activity u
       JOIN traffic.apps a ON a.id = u.app_id
      GROUP BY u.user_key
-     ORDER BY max(u.occurred_at) DESC, u.user_key ASC
+     ${orderByClause(USER_ORDER_SQL, query.sort ?? 'lastSeen', query.dir ?? 'desc')}, u.user_key ASC
      LIMIT ${params.add(query.limit)} OFFSET ${params.add(query.offset)}`;
   return { text, values: params.values };
 }
@@ -218,6 +239,61 @@ function sessionStatsStatement(
      GROUP BY a.slug, w.session_id
      ORDER BY max(w.occurred_at) DESC, a.slug ASC, w.session_id ASC
      LIMIT ${params.add(query.limit)} OFFSET ${params.add(query.offset)}`;
+  return { text, values: params.values };
+}
+
+/**
+ * Page stats per (app, path template) — the Pages list, or ONE page when `pathTemplate` is given.
+ * Exits need every view of a session, so the single-page filter applies to the final SELECT only.
+ */
+function pageStatsStatement(
+  filter: TrafficFilter,
+  limit: number,
+  pathTemplate: string | undefined,
+): { text: string; values: unknown[] } {
+  const params = new ParamList();
+  const views = [...windowConditions('w', filter, params), IS_PAGE_VIEW].join(' AND ');
+  const times = [...windowConditions('w', filter, params), `w.event_type = '${PAGE_TIME}'`].join(
+    ' AND ',
+  );
+  const only =
+    pathTemplate === undefined ? '' : `WHERE s.path_template = ${params.add(pathTemplate)}`;
+  const text = `WITH views AS (
+       SELECT w.app_id, w.session_id, w.path_template, w.event_id, w.seq, w.occurred_at, w.user_key
+         FROM traffic.web_events w
+        WHERE ${views}
+     ), visible AS (
+       SELECT w.page_view_id, sum(w.visible_ms) AS visible_ms
+         FROM traffic.web_events w
+        WHERE ${times}
+        GROUP BY w.page_view_id
+     ), exits AS (
+       SELECT DISTINCT ON (v.app_id, v.session_id) v.app_id, v.path_template
+         FROM views v
+        ORDER BY v.app_id, v.session_id, v.seq DESC, v.occurred_at DESC, v.event_id DESC
+     ), exit_counts AS (
+       SELECT e.app_id, e.path_template, count(*) AS exits
+         FROM exits e
+        GROUP BY e.app_id, e.path_template
+     ), stats AS (
+       SELECT v.app_id, v.path_template,
+              count(*) AS views,
+              count(DISTINCT v.session_id) AS unique_sessions,
+              count(DISTINCT v.user_key) AS distinct_users,
+              avg(t.visible_ms) AS avg_visible_ms,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY t.visible_ms) AS p50_visible_ms
+         FROM views v
+         LEFT JOIN visible t ON t.page_view_id = v.event_id
+        GROUP BY v.app_id, v.path_template
+     )
+     SELECT a.slug AS app_slug, s.path_template, s.views, s.unique_sessions, s.distinct_users,
+            s.avg_visible_ms, s.p50_visible_ms, coalesce(e.exits, 0) AS exits
+       FROM stats s
+       JOIN traffic.apps a ON a.id = s.app_id
+       LEFT JOIN exit_counts e ON e.app_id = s.app_id AND e.path_template = s.path_template
+      ${only}
+      ORDER BY s.views DESC, a.slug ASC, s.path_template ASC
+      LIMIT ${params.add(limit)}`;
   return { text, values: params.values };
 }
 
@@ -365,7 +441,9 @@ export class WebEventQueryRepository {
               count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
               count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS sessions,
               count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
-              max(h.occurred_at) AS last_event_at
+              max(h.occurred_at) AS last_event_at,
+              count(*) AS events,
+              count(*) FILTER (WHERE h.user_key IS NOT NULL) AS identified
          FROM (
            SELECT r.app_id, r.user_key, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind
              FROM traffic.api_requests r
@@ -459,8 +537,8 @@ export class WebEventQueryRepository {
   }
 
   /**
-   * Header numbers, top tools, top pages and countries of one stored user_key. Null when the user
-   * has no rows in the window (→ 404).
+   * Header numbers, top tools, top pages, per-app activity and countries of one stored user_key.
+   * Null when the user has no rows in the window (→ 404).
    */
   async getUserProfile(
     userKey: Buffer,
@@ -471,12 +549,13 @@ export class WebEventQueryRepository {
     const { rows } = await exec.query<UserSummaryRow>(text, values);
     const summary = rows[0];
     if (!summary) return null;
-    const [topTools, topPages, countries] = await Promise.all([
+    const [topTools, topPages, perApp, countries] = await Promise.all([
       this.countUserTools(userKey, filter, exec),
       this.countUserPages(userKey, filter, exec),
+      this.listUserApps(userKey, filter, exec),
       this.listUserCountries(userKey, filter, exec),
     ]);
-    return { summary, topTools, topPages, countries };
+    return { summary, topTools, topPages, perApp, countries };
   }
 
   /**
@@ -614,58 +693,52 @@ export class WebEventQueryRepository {
   // ─── Pages & Tools ────────────────────────────────────────────────────────
 
   /**
-   * Per (app, path template): page views, distinct sessions, avg/p50 of Σ visible_ms per page view
-   * (page views without any page_time are left out of avg/p50) and exits (sessions whose LAST page
-   * view in the window was this page). Most viewed first.
+   * Per (app, path template): page views, distinct sessions and verified users, avg/p50 of Σ
+   * visible_ms per page view (page views without any page_time are left out of avg/p50) and exits
+   * (sessions whose LAST page view in the window was this page). Most viewed first.
    */
   async listPageStats(
     filter: TrafficFilter,
     limit: number,
     exec: Executor = this.db,
   ): Promise<PageStatsRow[]> {
+    const { text, values } = pageStatsStatement(filter, limit, undefined);
+    const { rows } = await exec.query<PageStatsRow>(text, values);
+    return rows;
+  }
+
+  /** Distinct page templates viewed in the window (resolves an opaque pageId in the service). */
+  async listPageTemplates(filter: TrafficFilter, exec: Executor = this.db): Promise<string[]> {
     const params = new ParamList();
-    const views = [...windowConditions('w', filter, params), IS_PAGE_VIEW].join(' AND ');
-    const times = [...windowConditions('w', filter, params), `w.event_type = '${PAGE_TIME}'`].join(
-      ' AND ',
-    );
-    const { rows } = await exec.query<PageStatsRow>(
-      `WITH views AS (
-         SELECT w.app_id, w.session_id, w.path_template, w.event_id, w.seq, w.occurred_at
-           FROM traffic.web_events w
-          WHERE ${views}
-       ), visible AS (
-         SELECT w.page_view_id, sum(w.visible_ms) AS visible_ms
-           FROM traffic.web_events w
-          WHERE ${times}
-          GROUP BY w.page_view_id
-       ), exits AS (
-         SELECT DISTINCT ON (v.app_id, v.session_id) v.app_id, v.path_template
-           FROM views v
-          ORDER BY v.app_id, v.session_id, v.seq DESC, v.occurred_at DESC, v.event_id DESC
-       ), exit_counts AS (
-         SELECT e.app_id, e.path_template, count(*) AS exits
-           FROM exits e
-          GROUP BY e.app_id, e.path_template
-       ), stats AS (
-         SELECT v.app_id, v.path_template,
-                count(*) AS views,
-                count(DISTINCT v.session_id) AS unique_sessions,
-                avg(t.visible_ms) AS avg_visible_ms,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY t.visible_ms) AS p50_visible_ms
-           FROM views v
-           LEFT JOIN visible t ON t.page_view_id = v.event_id
-          GROUP BY v.app_id, v.path_template
-       )
-       SELECT a.slug AS app_slug, s.path_template, s.views, s.unique_sessions,
-              s.avg_visible_ms, s.p50_visible_ms, coalesce(e.exits, 0) AS exits
-         FROM stats s
-         JOIN traffic.apps a ON a.id = s.app_id
-         LEFT JOIN exit_counts e ON e.app_id = s.app_id AND e.path_template = s.path_template
-        ORDER BY s.views DESC, a.slug ASC, s.path_template ASC
-        LIMIT ${params.add(limit)}`,
+    const where = [...windowConditions('w', filter, params), IS_PAGE_VIEW].join(' AND ');
+    const { rows } = await exec.query<{ path_template: string }>(
+      `SELECT DISTINCT w.path_template FROM traffic.web_events w WHERE ${where}`,
       params.values,
     );
-    return rows;
+    return rows.map((row) => row.path_template);
+  }
+
+  /**
+   * One page (app in `filter`, path template): its stats row, views per bucket, top viewers, the
+   * tools used on it and the pages before / after it in sessions. Null without views.
+   */
+  async getPageDetail(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    grain: Grain,
+    exec: Executor = this.db,
+  ): Promise<PageDetailRows | null> {
+    const statement = pageStatsStatement(filter, 1, pathTemplate);
+    const { rows } = await exec.query<PageStatsRow>(statement.text, statement.values);
+    const stats = rows[0];
+    if (!stats) return null;
+    const [trend, topUsers, tools, links] = await Promise.all([
+      this.countPageViewsPerBucket(pathTemplate, filter, grain, exec),
+      this.listPageViewers(pathTemplate, filter, exec),
+      this.listPageTools(pathTemplate, filter, exec),
+      this.listPageLinks(pathTemplate, filter, exec),
+    ]);
+    return { stats, trend, topUsers, tools, links };
   }
 
   /**
@@ -697,6 +770,85 @@ export class WebEventQueryRepository {
     if (tools.length === 0) return { tools, trend: [] };
     const trend = await this.toolTrend(tools, filter, grain, exec);
     return { tools, trend };
+  }
+
+  /** Distinct tool names used in the window (resolves an opaque toolId in the service). */
+  async listToolNames(filter: TrafficFilter, exec: Executor = this.db): Promise<string[]> {
+    const params = new ParamList();
+    const where = [...windowConditions('w', filter, params), IS_TOOL_USE].join(' AND ');
+    const { rows } = await exec.query<{ tool: string }>(
+      `SELECT DISTINCT w.tool FROM traffic.web_events w WHERE ${where}`,
+      params.values,
+    );
+    return rows.map((row) => row.tool);
+  }
+
+  /**
+   * One tool (app in `filter`): its usage row and trend, top users, the pages it was used on and
+   * its actions. Null when it was not used in the window.
+   */
+  async getToolDetail(
+    tool: string,
+    filter: TrafficFilter,
+    grain: Grain,
+    exec: Executor = this.db,
+  ): Promise<ToolDetailRows | null> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_TOOL_USE,
+      `w.tool = ${params.add(tool)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<ToolUsageRow>(
+      `SELECT w.app_id, a.slug AS app_slug, w.tool,
+              count(*) AS uses,
+              count(DISTINCT w.user_key) AS distinct_users,
+              count(DISTINCT w.session_id) AS distinct_sessions,
+              max(w.occurred_at) AS last_used_at
+         FROM traffic.web_events w
+         JOIN traffic.apps a ON a.id = w.app_id
+        WHERE ${where}
+        GROUP BY w.app_id, a.slug, w.tool`,
+      params.values,
+    );
+    const stats = rows[0];
+    if (!stats) return null;
+    const [trend, topUsers, pages, actions] = await Promise.all([
+      this.toolTrend([stats], filter, grain, exec),
+      this.listToolUsers(tool, filter, exec),
+      this.countToolUses(tool, 'path_template', filter, exec),
+      this.countToolUses(tool, 'action', filter, exec),
+    ]);
+    return {
+      stats,
+      trend,
+      topUsers,
+      pages: pages.map((row) => ({ path_template: row.value as string, uses: row.uses })),
+      actions: actions.map((row) => ({ action: row.value, uses: row.uses })),
+    };
+  }
+
+  // ─── Active users ─────────────────────────────────────────────────────────
+
+  /** Distinct VERIFIED users per IST day over API calls + browser events (DAU), oldest first. */
+  async listDailyUsers(filter: TrafficFilter, exec: Executor = this.db): Promise<DailyUsersRow[]> {
+    const params = new ParamList();
+    const api = [...windowConditions('r', filter, params), 'r.user_key IS NOT NULL'].join(' AND ');
+    const web = [...windowConditions('w', filter, params), 'w.user_key IS NOT NULL'].join(' AND ');
+    const { rows } = await exec.query<DailyUsersRow>(
+      `SELECT d.day, count(DISTINCT d.user_key) AS users
+         FROM (
+           SELECT ${bucketExpr('day', 'r.occurred_at')} AS day, r.user_key
+             FROM traffic.api_requests r WHERE ${api}
+           UNION
+           SELECT ${bucketExpr('day', 'w.occurred_at')}, w.user_key
+             FROM traffic.web_events w WHERE ${web}
+         ) d
+        GROUP BY d.day
+        ORDER BY d.day`,
+      params.values,
+    );
+    return rows;
   }
 
   // ─── Geography ────────────────────────────────────────────────────────────
@@ -848,6 +1000,206 @@ export class WebEventQueryRepository {
         WHERE ${where.join(' AND ')}
         ORDER BY r.occurred_at, r.event_id
         LIMIT ${params.add(SESSION_EVENT_LIMIT)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** A user's activity per app over both tables (profile "Apps used"), most active first. */
+  private async listUserApps(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<UserAppRow[]> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const { rows } = await exec.query<UserAppRow>(
+      `SELECT a.slug AS app_slug,
+              count(*) FILTER (WHERE h.kind = '${API_KIND}') AS requests,
+              count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
+              count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
+              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS sessions,
+              max(h.occurred_at) AS last_seen_at
+         FROM (
+           SELECT r.app_id, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind
+             FROM traffic.api_requests r WHERE ${api}
+           UNION ALL
+           SELECT w.app_id, w.session_id, w.occurred_at, w.event_type
+             FROM traffic.web_events w WHERE ${web}
+         ) h
+         JOIN traffic.apps a ON a.id = h.app_id
+        GROUP BY a.slug
+        ORDER BY count(*) DESC, a.slug ASC`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** Page views of one page per bucket (gaps filled by the service). */
+  private async countPageViewsPerBucket(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    grain: Grain,
+    exec: Executor,
+  ): Promise<BucketCountRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_PAGE_VIEW,
+      `w.path_template = ${params.add(pathTemplate)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<BucketCountRow>(
+      `SELECT ${bucketExpr(grain, 'w.occurred_at')} AS bucket, count(*) AS count
+         FROM traffic.web_events w
+        WHERE ${where}
+        GROUP BY 1
+        ORDER BY 1`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** Verified users by views of one page, most first. */
+  private async listPageViewers(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<UserUsageRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_PAGE_VIEW,
+      'w.user_key IS NOT NULL',
+      `w.path_template = ${params.add(pathTemplate)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<UserUsageRow>(
+      `SELECT w.user_key, min(w.user_email) AS user_email, count(*) AS count,
+              max(w.occurred_at) AS last_seen_at
+         FROM traffic.web_events w
+        WHERE ${where}
+        GROUP BY w.user_key
+        ORDER BY count DESC, w.user_key ASC
+        LIMIT ${params.add(DETAIL_TOP_LIMIT)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** Tools used ON one page (tool_use rows carry their page's template), most used first. */
+  private async listPageTools(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<PageToolRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_TOOL_USE,
+      `w.path_template = ${params.add(pathTemplate)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<PageToolRow>(
+      `SELECT w.tool, count(*) AS uses, count(DISTINCT w.user_key) AS users
+         FROM traffic.web_events w
+        WHERE ${where}
+        GROUP BY w.tool
+        ORDER BY uses DESC, w.tool ASC
+        LIMIT ${params.add(DETAIL_TOP_LIMIT)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * The pages just before ('from') and after ('to') one page in sessions, by sessions. Reloads
+   * (the same page twice in a row) are collapsed first, like listTopPaths.
+   */
+  private async listPageLinks(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<PageLinkRow[]> {
+    const params = new ParamList();
+    const where = [...windowConditions('w', filter, params), IS_PAGE_VIEW].join(' AND ');
+    const page = params.add(pathTemplate);
+    const { rows } = await exec.query<PageLinkRow>(
+      `WITH views AS (
+         SELECT w.app_id, w.session_id, w.seq, w.occurred_at, w.event_id, w.path_template,
+                lag(w.path_template) OVER s AS previous_path
+           FROM traffic.web_events w
+          WHERE ${where}
+         WINDOW s AS (PARTITION BY w.app_id, w.session_id ORDER BY ${SESSION_ORDER})
+       ), steps AS (
+         SELECT v.session_id, v.path_template,
+                lag(v.path_template) OVER s AS before_path,
+                lead(v.path_template) OVER s AS after_path
+           FROM views v
+          WHERE v.previous_path IS DISTINCT FROM v.path_template
+         WINDOW s AS (PARTITION BY v.app_id, v.session_id ORDER BY v.seq, v.occurred_at, v.event_id)
+       )
+       SELECT 'from'::text AS direction, s.before_path AS path_template,
+              count(DISTINCT s.session_id) AS sessions
+         FROM steps s
+        WHERE s.path_template = ${page} AND s.before_path IS NOT NULL
+        GROUP BY s.before_path
+       UNION ALL
+       SELECT 'to'::text, s.after_path, count(DISTINCT s.session_id)
+         FROM steps s
+        WHERE s.path_template = ${page} AND s.after_path IS NOT NULL
+        GROUP BY s.after_path
+       ORDER BY 3 DESC, 2 ASC`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** Verified users by uses of one tool, most first. */
+  private async listToolUsers(
+    tool: string,
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<UserUsageRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_TOOL_USE,
+      'w.user_key IS NOT NULL',
+      `w.tool = ${params.add(tool)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<UserUsageRow>(
+      `SELECT w.user_key, min(w.user_email) AS user_email, count(*) AS count,
+              max(w.occurred_at) AS last_seen_at
+         FROM traffic.web_events w
+        WHERE ${where}
+        GROUP BY w.user_key
+        ORDER BY count DESC, w.user_key ASC
+        LIMIT ${params.add(DETAIL_TOP_LIMIT)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /** Uses of one tool grouped by a trusted column (`path_template` or `action`), most first. */
+  private async countToolUses(
+    tool: string,
+    column: 'path_template' | 'action',
+    filter: TrafficFilter,
+    exec: Executor,
+  ): Promise<Array<{ value: string | null; uses: number }>> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      IS_TOOL_USE,
+      `w.tool = ${params.add(tool)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<{ value: string | null; uses: number }>(
+      `SELECT w.${column} AS value, count(*) AS uses
+         FROM traffic.web_events w
+        WHERE ${where}
+        GROUP BY w.${column}
+        ORDER BY uses DESC, w.${column} ASC NULLS LAST
+        LIMIT ${params.add(DETAIL_TOP_LIMIT)}`,
       params.values,
     );
     return rows;

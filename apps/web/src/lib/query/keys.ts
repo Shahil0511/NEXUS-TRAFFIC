@@ -16,11 +16,14 @@ import type {
   OverviewAppsQuery,
   OverviewSummaryQuery,
   OverviewTimeseriesQuery,
+  PageDetailQuery,
   PageListQuery,
   SessionListQuery,
   SessionQuery,
+  ToolDetailQuery,
   ToolUsageQuery,
   TopPathsQuery,
+  UserActivityQuery,
   UserListQuery,
   UserProfileQuery,
   UserSearchBody,
@@ -64,6 +67,7 @@ export const qk = {
   users: {
     all: ['users'] as const,
     list: (q: UserListKeyQuery) => ['users', 'list', q] as const,
+    activity: (q: UserActivityQuery) => ['users', 'activity', q] as const,
     /** The search text is part of the in-memory key only — never of a URL. */
     search: (q: UserSearchKeyBody) => ['users', 'search', q] as const,
     profile: (userKey: string, q: UserProfileQuery) => ['users', 'profile', userKey, q] as const,
@@ -80,10 +84,14 @@ export const qk = {
   pages: {
     all: ['pages'] as const,
     list: (q: PageListQuery) => ['pages', 'list', q] as const,
+    detail: (app: string, pageId: string, q: PageDetailQuery) =>
+      ['pages', 'detail', app, pageId, q] as const,
   },
   tools: {
     all: ['tools'] as const,
     usage: (q: ToolUsageQuery) => ['tools', 'usage', q] as const,
+    detail: (app: string, toolId: string, q: ToolDetailQuery) =>
+      ['tools', 'detail', app, toolId, q] as const,
   },
   geo: {
     all: ['geo'] as const,

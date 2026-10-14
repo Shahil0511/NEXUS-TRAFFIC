@@ -1,7 +1,7 @@
 'use client';
 
 import { STATUS_CLASS_VALUES, type StatusClass } from '@nexus/shared';
-import { Ban, ServerCrash, TriangleAlert, X } from 'lucide-react';
+import { Ban, ServerCrash, TriangleAlert, UserX, X } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { ChartLegend } from '@/components/charts/ChartLegend';
@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
+import { TopUsersList } from '@/components/TopUsersList';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl, type SegmentedOption } from '@/components/ui/segmented-control';
 import { useEndpointDetail } from '@/features/endpoints/useEndpointDetail';
@@ -41,15 +42,17 @@ const STATUS_CLASS_OPTIONS: readonly SegmentedOption<StatusClass>[] = STATUS_CLA
 );
 
 /**
- * The Errors page: failure totals, 4xx/5xx over time, status codes, the routes that fail most and
- * the newest failed requests (keyset-paged, "Load more"), with the user, geo and — for admins —
- * the IP of each.
+ * The Errors page: failure totals, how many people were hit, 4xx/5xx over time, status codes, the
+ * routes that fail most, the users hit most and the newest failed requests (keyset-paged, "Load
+ * more"), with the user, geo and — for admins — the IP of each. `?endpointId=` / `?userKey=` scope
+ * EVERYTHING on the page to one route / one user.
  */
 export function ErrorsView() {
   const { filters } = useGlobalFilters();
-  const { endpointId } = useErrorListParams();
-  // Scoped like the list below: opened from a route, every number describes that route only.
-  const summary = useErrorSummary({ ...filters, endpointId });
+  const { endpointId, userKey } = useErrorListParams();
+  // Scoped like the list below: every number describes the same requests as the list.
+  const summary = useErrorSummary({ ...filters, endpointId, userKey });
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
 
   return (
     <div className="space-y-6">
@@ -62,7 +65,7 @@ export function ErrorsView() {
         }
       />
 
-      <section aria-label="Failure totals" className="grid grid-cols-3 gap-3">
+      <section aria-label="Failure totals" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Failed requests"
           icon={TriangleAlert}
@@ -80,6 +83,13 @@ export function ErrorsView() {
           icon={Ban}
           loading={summary.isPending}
           value={formatInteger(summary.data?.errors4xx)}
+        />
+        <KpiCard
+          label="Users affected"
+          icon={UserX}
+          loading={summary.isPending}
+          value={formatInteger(summary.data?.usersAffected)}
+          hint="verified users with ≥ 1 failure"
         />
       </section>
 
@@ -106,29 +116,37 @@ export function ErrorsView() {
             )}
           </QueryState>
         </Panel>
-        <div className="flex flex-col gap-4">
-          <Panel title="Status codes">
-            <QueryState
-              query={summary}
-              skeleton={<ListSkeleton rows={3} />}
-              isEmpty={summary.data?.byStatus.length === 0}
-              empty={<EmptyState title="No failed responses" />}
-            >
-              {() => <StatusBreakdown items={summary.data!.byStatus} />}
-            </QueryState>
-          </Panel>
-          <Panel title="Top failing routes" className="flex-1">
-            <QueryState query={summary} skeleton={<ListSkeleton rows={3} />}>
-              {() => (
-                <TopFailingEndpoints
-                  endpoints={summary.data!.topEndpoints}
-                  filters={filters}
-                  limit={4}
-                />
-              )}
-            </QueryState>
-          </Panel>
-        </div>
+        <Panel title="Status codes">
+          <QueryState
+            query={summary}
+            skeleton={<ListSkeleton rows={3} />}
+            isEmpty={summary.data?.byStatus.length === 0}
+            empty={<EmptyState title="No failed responses" />}
+          >
+            {() => <StatusBreakdown items={summary.data!.byStatus} />}
+          </QueryState>
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Top failing routes" description="Most 4xx + 5xx responses">
+          <QueryState query={summary} skeleton={<ListSkeleton />}>
+            {() => <TopFailingEndpoints endpoints={summary.data!.topEndpoints} filters={filters} />}
+          </QueryState>
+        </Panel>
+        <Panel title="Most affected users" description="Verified users by failed requests">
+          <QueryState query={summary} skeleton={<ListSkeleton />}>
+            {() => (
+              <TopUsersList
+                users={summary.data!.topAffectedUsers}
+                unit="failed"
+                ariaLabel="Most affected users"
+                linkQuery={linkQuery}
+                emptyTitle="No verified user was affected"
+              />
+            )}
+          </QueryState>
+        </Panel>
       </div>
 
       <FailedRequestsPanel />
@@ -162,10 +180,40 @@ function RouteFilterChip({ endpointId, onClear }: { endpointId: string; onClear:
   );
 }
 
+/**
+ * WHY: "User: x ×" names the user from the user-scoped summary (its only affected user) — never
+ * from the URL, which carries the opaque key only.
+ */
+function UserFilterChip({ userKey, onClear }: { userKey: string; onClear: () => void }) {
+  const { filters } = useGlobalFilters();
+  const summary = useErrorSummary({ ...filters, userKey });
+  const email = summary.data?.topAffectedUsers.find((user) => user.userKey === userKey)?.email;
+  const label = email ? `User: ${email}` : 'One user only';
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onClear}
+      className="max-w-72"
+      aria-label={`Remove user filter ${label}`}
+    >
+      <span className="truncate">{label}</span>
+      <X aria-hidden="true" />
+    </Button>
+  );
+}
+
 function FailedRequestsPanel() {
   const { filters } = useGlobalFilters();
-  const { statusClass, endpointId, setStatusClass, clearEndpoint } = useErrorListParams();
-  const failures = useFailedRequests({ ...filters, statusClass, endpointId, limit: PAGE_SIZE });
+  const { statusClass, endpointId, userKey, setStatusClass, clearEndpoint, clearUser } =
+    useErrorListParams();
+  const failures = useFailedRequests({
+    ...filters,
+    statusClass,
+    endpointId,
+    userKey,
+    limit: PAGE_SIZE,
+  });
   const rows = useMemo(() => failures.data?.pages.flatMap((page) => page.items), [failures.data]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => requestSampleColumns({ showRoute: true, linkQuery }), [linkQuery]);
@@ -178,6 +226,7 @@ function FailedRequestsPanel() {
       aside={
         <div className="flex items-center gap-2">
           {endpointId ? <RouteFilterChip endpointId={endpointId} onClear={clearEndpoint} /> : null}
+          {userKey ? <UserFilterChip userKey={userKey} onClear={clearUser} /> : null}
           <SegmentedControl
             ariaLabel="Status class"
             value={statusClass}

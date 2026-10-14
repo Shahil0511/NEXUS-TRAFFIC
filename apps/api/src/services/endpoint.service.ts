@@ -16,6 +16,7 @@ import {
   mapRequestSample,
   mapStatusCount,
   mapTimeseriesPoint,
+  mapUserUsage,
 } from '../domain/mappers';
 import { pageFetchSize, toCursorPage } from '../domain/pagination';
 import { fillTimeseriesGaps } from '../domain/timeseries-gaps';
@@ -57,7 +58,7 @@ export class EndpointService {
   }
 
   /**
-   * Stats, gap-filled chart, status breakdown and slowest calls of one stored endpoint_id.
+   * Stats, gap-filled chart, status breakdown, slowest calls and top callers of one endpoint_id.
    * 404 when the endpoint has no traffic in the window. Samples are role-masked (IP admin-only).
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.getEndpointDetail
    */
@@ -81,6 +82,8 @@ export class EndpointService {
       ),
       statusBreakdown: rows.statusBreakdown.map(mapStatusCount),
       slowest: rows.slowest.map((row) => mapRequestSample(row, viewer)),
+      uniqueUsers: rows.uniqueUsers,
+      topUsers: rows.topUsers.map(mapUserUsage),
     };
   }
 }

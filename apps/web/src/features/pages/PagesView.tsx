@@ -4,6 +4,7 @@ import type { PageStatsDto } from '@nexus/shared';
 import { useMemo } from 'react';
 
 import { AppChip } from '@/components/AppChip';
+import { PageLink } from '@/components/EntityLinks';
 import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
@@ -58,9 +59,13 @@ function pageColumns(
       className: 'w-full max-w-0',
       cell: (row) => (
         <span className="block min-w-0 space-y-1">
-          <span className="block truncate font-mono text-xs" title={row.pathTemplate}>
-            {row.pathTemplate}
-          </span>
+          <PageLink
+            app={row.app}
+            pageId={row.pageId}
+            pathTemplate={row.pathTemplate}
+            linkQuery={linkQuery}
+            className="block truncate text-xs"
+          />
           <AppChip app={row.app} linkQuery={linkQuery} />
         </span>
       ),
@@ -111,7 +116,8 @@ export function PagesView() {
   const { filters } = useGlobalFilters();
   const pages = usePageStats({ ...filters, limit: PAGE_LIMIT });
   const items = pages.data?.items;
-  const columns = useMemo(() => pageColumns(filterLinkQuery(filters)), [filters]);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  const columns = useMemo(() => pageColumns(linkQuery), [linkQuery]);
   const longest = useMemo(() => longestMedianPages(items ?? []), [items]);
   const exits = useMemo(() => topExitPages(items ?? []), [items]);
 
@@ -168,7 +174,14 @@ export function PagesView() {
                 ariaLabel="Exit pages"
                 items={exits.map((page) => ({
                   key: pageKey(page),
-                  label: <span className="font-mono">{page.pathTemplate}</span>,
+                  label: (
+                    <PageLink
+                      app={page.app}
+                      pageId={page.pageId}
+                      pathTemplate={page.pathTemplate}
+                      linkQuery={linkQuery}
+                    />
+                  ),
                   sublabel: page.app,
                   value: page.exits,
                 }))}

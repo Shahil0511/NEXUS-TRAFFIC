@@ -16,20 +16,25 @@ import type {
   ApiRequestRow,
   AppActivityRow,
   AppTrafficRow,
+  DailyUsersRow,
   EndpointDetailRows,
   EndpointStatsRow,
   ErrorSummaryRows,
   GeoCityRow,
   GeoCountryRow,
+  PageApiCallRow,
+  PageDetailRows,
   PageStatsRow,
   PageViewBucketRow,
   SessionRows,
   SessionSummaryRow,
   TimelineEventRow,
+  ToolDetailRows,
   ToolUsageRows,
   TopPathRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserEndpointRow,
   UserProfileRows,
   UserSummaryRow,
 } from '../../src/domain/rows';
@@ -58,7 +63,9 @@ type RequestQueryMethods =
   | 'getEndpointDetail'
   | 'summarizeErrors'
   | 'listFailures'
-  | 'summarizeTrafficByApp';
+  | 'summarizeTrafficByApp'
+  | 'listUserTopEndpoints'
+  | 'listPageApiCalls';
 
 export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, RequestQueryMethods> {
   readonly calls: Array<{ method: RequestQueryMethods; args: unknown[] }> = [];
@@ -71,10 +78,14 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     byStatus: [],
     timeseries: [],
     topEndpoints: [],
+    usersAffected: 0,
+    topAffectedUsers: [],
   };
   failures: ApiRequestRow[] = [];
   /** Returned in call order (current window first, then previous). */
   trafficByApp: AppTrafficRow[][] = [];
+  userTopEndpoints: UserEndpointRow[] = [];
+  pageApiCalls: PageApiCallRow[] = [];
 
   /** Returns `summaries` in call order (current window first, then previous). */
   async summarizeTraffic(filter: TrafficFilter): Promise<TrafficSummaryRow> {
@@ -121,6 +132,24 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     return this.trafficByApp[index] ?? [];
   }
 
+  async listUserTopEndpoints(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<UserEndpointRow[]> {
+    this.calls.push({ method: 'listUserTopEndpoints', args: [userKey, filter, limit] });
+    return this.userTopEndpoints;
+  }
+
+  async listPageApiCalls(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<PageApiCallRow[]> {
+    this.calls.push({ method: 'listPageApiCalls', args: [pathTemplate, filter, limit] });
+    return this.pageApiCalls;
+  }
+
   argsOf(method: RequestQueryMethods): unknown[][] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args);
   }
@@ -132,6 +161,11 @@ type WebQueryMethods =
   | 'countActiveUsers'
   | 'countIdentifiedUsers'
   | 'summarizeActivityByApp'
+  | 'listDailyUsers'
+  | 'listPageTemplates'
+  | 'getPageDetail'
+  | 'listToolNames'
+  | 'getToolDetail'
   | 'listUsers'
   | 'getUserProfile'
   | 'listUserTimeline'
@@ -151,6 +185,11 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   /** Returned in call order (current window first, then previous). */
   identifiedUsers: number[] = [0, 0];
   activityByApp: AppActivityRow[][] = [];
+  dailyUsers: DailyUsersRow[] = [];
+  pageTemplates: string[] = [];
+  pageDetail: PageDetailRows | null = null;
+  toolNames: string[] = [];
+  toolDetail: ToolDetailRows | null = null;
   users: UserSummaryRow[] = [];
   profile: UserProfileRows | null = null;
   timeline: TimelineEventRow[] = [];
@@ -188,6 +227,39 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
     const index = this.calls.filter((c) => c.method === 'summarizeActivityByApp').length;
     this.calls.push({ method: 'summarizeActivityByApp', args: [filter] });
     return this.activityByApp[index] ?? [];
+  }
+
+  async listDailyUsers(filter: TrafficFilter): Promise<DailyUsersRow[]> {
+    this.calls.push({ method: 'listDailyUsers', args: [filter] });
+    return this.dailyUsers;
+  }
+
+  async listPageTemplates(filter: TrafficFilter): Promise<string[]> {
+    this.calls.push({ method: 'listPageTemplates', args: [filter] });
+    return this.pageTemplates;
+  }
+
+  async getPageDetail(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    grain: Grain,
+  ): Promise<PageDetailRows | null> {
+    this.calls.push({ method: 'getPageDetail', args: [pathTemplate, filter, grain] });
+    return this.pageDetail;
+  }
+
+  async listToolNames(filter: TrafficFilter): Promise<string[]> {
+    this.calls.push({ method: 'listToolNames', args: [filter] });
+    return this.toolNames;
+  }
+
+  async getToolDetail(
+    tool: string,
+    filter: TrafficFilter,
+    grain: Grain,
+  ): Promise<ToolDetailRows | null> {
+    this.calls.push({ method: 'getToolDetail', args: [tool, filter, grain] });
+    return this.toolDetail;
   }
 
   async listUsers(filter: TrafficFilter, options: UserListOptions): Promise<UserSummaryRow[]> {

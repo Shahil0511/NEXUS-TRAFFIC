@@ -1,6 +1,6 @@
 'use client';
 
-import type { TimeWindowQuery, UserSummaryDto } from '@nexus/shared';
+import type { TimeWindowQuery, UserSort, UserSummaryDto } from '@nexus/shared';
 import { Search, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
@@ -20,6 +20,7 @@ import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
 import { useUserList } from './useUserList';
+import { useUserListParams } from './useUserListParams';
 import { useUserSearch } from './useUserSearch';
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -27,10 +28,11 @@ const SEARCH_DEBOUNCE_MS = 300;
 const PAGE_SIZE = 50;
 
 /**
- * The table columns. Each user opens its profile through the OPAQUE userKey (PAGES); each app
- * chip opens that app's page — so "who uses which app" is one click either way.
+ * The table columns; `sortKey` values are the API whitelist (USER_SORT_VALUES). Each user opens
+ * its profile through the OPAQUE userKey (PAGES); each app chip opens that app's page — so "who
+ * uses which app" is one click either way. "Failed" opens the user's failures on Errors.
  */
-export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSummaryDto>[] {
+export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSummaryDto, UserSort>[] {
   const linkQuery = filterLinkQuery(filters);
   return [
     {
@@ -60,24 +62,54 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
     {
       id: 'requests',
       header: 'API calls',
+      sortKey: 'requests',
       align: 'right',
       cell: (row) => formatInteger(row.requests),
     },
     {
+      id: 'failed',
+      header: 'Failed',
+      sortKey: 'failed',
+      align: 'right',
+      cell: (row) =>
+        row.failedRequests > 0 ? (
+          <Link
+            href={withQuery(PAGES.errors(), { ...linkQuery, userKey: row.userKey })}
+            className="rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+            aria-label={`${formatInteger(row.failedRequests)} failed requests of ${row.email}`}
+          >
+            {formatInteger(row.failedRequests)}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">0</span>
+        ),
+    },
+    {
       id: 'pageViews',
       header: 'Page views',
+      sortKey: 'pageViews',
       align: 'right',
       cell: (row) => formatInteger(row.pageViews),
     },
     {
       id: 'sessions',
       header: 'Sessions',
+      sortKey: 'sessions',
       align: 'right',
       cell: (row) => formatInteger(row.sessions),
     },
     {
+      id: 'firstSeen',
+      header: 'First seen',
+      sortKey: 'firstSeen',
+      align: 'right',
+      className: 'whitespace-nowrap text-muted-foreground',
+      cell: (row) => <RelativeTime iso={row.firstSeenAt} />,
+    },
+    {
       id: 'lastSeen',
       header: 'Last seen',
+      sortKey: 'lastSeen',
       align: 'right',
       className: 'whitespace-nowrap text-muted-foreground',
       cell: (row) => <RelativeTime iso={row.lastSeenAt} />,
@@ -86,19 +118,23 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
 }
 
 /**
- * The Users page: every VERIFIED identity (SSO cookie or app-attested) active in the window, most
- * recently seen first, with the apps each one uses. Browser-claimed emails are never users — they
+ * The Users page: every VERIFIED identity (SSO cookie or app-attested) active in the window, sorted
+ * server-side by any column (`?sort=&dir=`, default most recently seen), with the apps each uses. Browser-claimed emails are never users — they
  * appear, flagged, on sessions. The email search is sent in a POST body and kept in React state
  * only: an email never lands in the URL, the browser history or an access log (ADR 0006).
  */
 export function UsersView() {
   const { filters } = useGlobalFilters();
+  const { sort, dir, setSort } = useUserListParams();
   const [draft, setDraft] = useState('');
   const search = useDebouncedValue(draft, SEARCH_DEBOUNCE_MS).trim();
   const searching = search !== '';
 
-  const listed = useUserList({ ...filters, limit: PAGE_SIZE }, { enabled: !searching });
-  const found = useUserSearch({ ...filters, search, limit: PAGE_SIZE }, { enabled: searching });
+  const listed = useUserList({ ...filters, sort, dir, limit: PAGE_SIZE }, { enabled: !searching });
+  const found = useUserSearch(
+    { ...filters, search, sort, dir, limit: PAGE_SIZE },
+    { enabled: searching },
+  );
   const query = searching ? found : listed;
 
   const rows = useMemo(() => query.data?.pages.flatMap((page) => page.items), [query.data]);
@@ -142,6 +178,8 @@ export function UsersView() {
               columns={columns}
               rows={rows}
               rowKey={(row) => row.userKey}
+              sort={{ sort, dir }}
+              onSortChange={setSort}
               loading={query.isPending}
               empty={
                 <EmptyState

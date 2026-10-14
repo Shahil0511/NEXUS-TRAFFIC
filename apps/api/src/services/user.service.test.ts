@@ -10,6 +10,7 @@ import {
   userSummaryRow,
 } from '../../test/fixtures/analytics-rows';
 import {
+  FakeApiRequestQueries,
   FakeAppSlugs,
   FakeWebEventQueries,
   KNOWN_APP_ID,
@@ -18,6 +19,7 @@ import {
 import { decodeOffsetCursor, encodeKeysetCursor, encodeOffsetCursor } from '../db/sql';
 import { BadRequestError, NotFoundError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
+import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
 import { UserService } from './user.service';
@@ -29,17 +31,21 @@ const ID_3 = 'aaaaaaaa-0000-4000-8000-000000000003';
 
 function build() {
   const webEvents = new FakeWebEventQueries();
+  const requests = new FakeApiRequestQueries();
   const service = new UserService(
     webEvents as unknown as WebEventQueryRepository,
+    requests as unknown as ApiRequestQueryRepository,
     new FakeAppSlugs() as unknown as AppSlugResolver,
     new FixedClock(NOW),
   );
-  return { service, webEvents };
+  return { service, webEvents, requests };
 }
 
 const listQuery = (overrides: Partial<UserListQuery> = {}): UserListQuery => ({
   range: '24h',
   limit: 2,
+  sort: 'lastSeen',
+  dir: 'desc',
   ...overrides,
 });
 
@@ -56,7 +62,7 @@ describe('UserService.search', () => {
     const page = await service.search({ ...listQuery({ app: KNOWN_APP_SLUG }), search: 'some' });
     const [filter, options] = webEvents.argsOf('listUsers')[0] ?? [];
     expect(filter).toMatchObject({ appId: KNOWN_APP_ID, to: NOW });
-    expect(options).toEqual({ search: 'some', limit: 3, offset: 0 });
+    expect(options).toEqual({ search: 'some', sort: 'lastSeen', dir: 'desc', limit: 3, offset: 0 });
     expect(page.items[0]?.email).toBe('someone@libas.in');
   });
 });
@@ -68,7 +74,13 @@ describe('UserService.list', () => {
     const page = await service.list(listQuery({ app: KNOWN_APP_SLUG }));
     const [filter, options] = webEvents.argsOf('listUsers')[0] ?? [];
     expect(filter).toMatchObject({ appId: KNOWN_APP_ID, to: NOW });
-    expect(options).toEqual({ search: undefined, limit: 3, offset: 0 });
+    expect(options).toEqual({
+      search: undefined,
+      sort: 'lastSeen',
+      dir: 'desc',
+      limit: 3,
+      offset: 0,
+    });
     expect(page.items[0]).toMatchObject({
       userKey: USER_KEY_HEX,
       email: 'someone@libas.in',
@@ -104,6 +116,7 @@ describe('UserService.profile', () => {
       summary: userSummaryRow(),
       topTools: [{ app_slug: 'ebo-sales', tool: 'export-csv', uses: 3 }],
       topPages: [{ app_slug: 'ebo-sales', path_template: '/home', views: 4 }],
+      perApp: [],
       countries: ['IN'],
     };
     const dto = await service.profile(USER_KEY_HEX, { range: '7d' });
@@ -182,5 +195,69 @@ describe('UserService.timeline', () => {
     const plain = await service.timeline(USER_KEY_HEX, timelineQuery(), PLAIN_VIEWER);
     expect(plain.items[0]?.ip).toBeNull();
     expect(JSON.stringify(plain)).not.toContain('8.8.8.8');
+  });
+});
+
+describe('UserService.activity', () => {
+  it('gap-fills DAU per IST day and counts WAU/MAU ending at the window end', async () => {
+    const { service, webEvents } = build();
+    webEvents.dailyUsers = [{ day: new Date('2026-09-30T18:30:00Z'), users: 3 }];
+    webEvents.identifiedUsers = [5, 9];
+    const dto = await service.activity({ range: '7d' });
+    expect(dto.points.length).toBeGreaterThanOrEqual(7);
+    expect(dto.points.find((p) => p.day === '2026-09-30T18:30:00.000Z')?.users).toBe(3);
+    expect(dto.points.every((p) => p.users >= 0)).toBe(true);
+    expect(dto.wau).toBe(5);
+    expect(dto.mau).toBe(9);
+    const [wau, mau] = webEvents.argsOf('countIdentifiedUsers').map((args) => args[0]);
+    expect(wau).toMatchObject({ from: new Date(NOW.getTime() - 7 * 86_400_000), to: NOW });
+    expect(mau).toMatchObject({ from: new Date(NOW.getTime() - 30 * 86_400_000), to: NOW });
+  });
+});
+
+describe('UserService.profile (routes and apps)', () => {
+  it("adds the user's top API routes from the request repository", async () => {
+    const { service, webEvents, requests } = build();
+    webEvents.profile = {
+      summary: userSummaryRow(),
+      topTools: [],
+      topPages: [],
+      perApp: [
+        {
+          app_slug: 'ebo-sales',
+          requests: 4,
+          page_views: 2,
+          tool_uses: 1,
+          sessions: 1,
+          last_seen_at: NOW,
+        },
+      ],
+      countries: [],
+    };
+    requests.userTopEndpoints = [
+      {
+        endpoint_id: ID_1,
+        app_slug: 'ebo-sales',
+        method: 'GET',
+        route_template: '/api/x',
+        calls: 4,
+        failed: 1,
+      },
+    ];
+    const dto = await service.profile(USER_KEY_HEX, { range: '7d' });
+    expect(dto.topEndpoints).toEqual([
+      {
+        endpointId: ID_1,
+        app: 'ebo-sales',
+        method: 'GET',
+        routeTemplate: '/api/x',
+        calls: 4,
+        failed: 1,
+      },
+    ]);
+    expect(dto.perApp[0]).toMatchObject({ app: 'ebo-sales', requests: 4, pageViews: 2 });
+    expect(requests.argsOf('listUserTopEndpoints')[0]?.[0]).toEqual(
+      Buffer.from(USER_KEY_HEX, 'hex'),
+    );
   });
 });

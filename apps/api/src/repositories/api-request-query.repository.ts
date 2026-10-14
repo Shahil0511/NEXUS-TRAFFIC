@@ -30,12 +30,15 @@ import type {
   ApiRequestRow,
   AppTrafficRow,
   EndpointDetailRows,
+  PageApiCallRow,
   EndpointStatsRow,
   ErrorSummaryRows,
   ErrorTotalsRow,
   StatusCountRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserEndpointRow,
+  UserUsageRow,
 } from '../domain/rows';
 
 // ─── SQL fragments (trusted, frozen) ────────────────────────────────────────
@@ -44,6 +47,8 @@ import type {
 export const SLOWEST_SAMPLES_LIMIT = 20;
 /** How many endpoints the Errors page lists as "top failing". */
 export const TOP_FAILING_ENDPOINTS_LIMIT = 10;
+/** How many users the "top callers" / "most affected users" panels list. */
+export const TOP_USERS_LIMIT = 10;
 
 /** The only kind that counts for latency (SERVER_EVENT_KIND_VALUES; streams are excluded). */
 const LATENCY_KIND: ServerEventKind = 'http';
@@ -86,7 +91,7 @@ const SAMPLE_COLUMNS = `r.occurred_at, ${keysetTimeExpr('r.occurred_at')} AS occ
   r.claimed_email, r.identity_source, host(r.ip) AS ip, r.ip_class, r.geo_country, r.geo_region,
   r.geo_city`;
 
-/** The time window (partition pruning) + optional app / endpoint scope, as AND-able conditions. */
+/** The time window (partition pruning) + optional app / endpoint / user scope, as AND-able conditions. */
 export function scopeConditions(filter: TrafficFilter, params: ParamList): string[] {
   const conditions = [
     `r.occurred_at >= ${params.add(filter.from)}`,
@@ -95,6 +100,7 @@ export function scopeConditions(filter: TrafficFilter, params: ParamList): strin
   if (filter.appId !== undefined) conditions.push(`r.app_id = ${params.add(filter.appId)}`);
   if (filter.endpointId !== undefined)
     conditions.push(`r.endpoint_id = ${params.add(filter.endpointId)}`);
+  if (filter.userKey !== undefined) conditions.push(`r.user_key = ${params.add(filter.userKey)}`);
   return conditions;
 }
 
@@ -175,7 +181,9 @@ export class ApiRequestQueryRepository {
               count(*) AS requests,
               count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS errors,
               ${latencyPercentile(0.95)} AS p95_ms,
-              max(r.occurred_at) AS last_event_at
+              max(r.occurred_at) AS last_event_at,
+              count(*) FILTER (WHERE r.user_key IS NOT NULL) AS identified,
+              count(*) FILTER (WHERE r.session_id IS NOT NULL) AS linked
          FROM traffic.api_requests r
         WHERE ${scopeConditions(filter, params).join(' AND ')}
         GROUP BY r.app_id`,
@@ -232,37 +240,45 @@ export class ApiRequestQueryRepository {
       exec,
     );
     if (!stats) return null;
-    const [timeseries, statusBreakdown, slowest] = await Promise.all([
+    const [timeseries, statusBreakdown, slowest, uniqueUsers, topUsers] = await Promise.all([
       this.timeseries(scoped, grain, exec),
       this.countByStatus(scoped, null, exec),
       this.listSlowest(scoped, SLOWEST_SAMPLES_LIMIT, exec),
+      this.countUsers(scoped, false, exec),
+      this.listTopUsers(scoped, false, TOP_USERS_LIMIT, exec),
     ]);
-    return { stats, timeseries, statusBreakdown, slowest };
+    return { stats, timeseries, statusBreakdown, slowest, uniqueUsers, topUsers };
   }
 
-  /** Failure totals, failures per status, the request/error series and the top failing endpoints. */
+  /**
+   * Failure totals, failures per status, the request/error series, the top failing endpoints and
+   * the verified users hit by failures (count + the most affected).
+   */
   async summarizeErrors(
     filter: TrafficFilter,
     grain: Grain,
     exec: Executor = this.db,
   ): Promise<ErrorSummaryRows> {
-    const [totals, byStatus, timeseries, topEndpoints] = await Promise.all([
-      this.countFailures(filter, exec),
-      this.countByStatus(filter, 'all', exec),
-      this.timeseries(filter, grain, exec),
-      this.queryEndpointStats(
-        filter,
-        {
-          sort: 'errors',
-          dir: 'desc',
-          limit: TOP_FAILING_ENDPOINTS_LIMIT,
-          offset: 0,
-          onlyFailing: true,
-        },
-        exec,
-      ),
-    ]);
-    return { totals, byStatus, timeseries, topEndpoints };
+    const [totals, byStatus, timeseries, topEndpoints, usersAffected, topAffectedUsers] =
+      await Promise.all([
+        this.countFailures(filter, exec),
+        this.countByStatus(filter, 'all', exec),
+        this.timeseries(filter, grain, exec),
+        this.queryEndpointStats(
+          filter,
+          {
+            sort: 'errors',
+            dir: 'desc',
+            limit: TOP_FAILING_ENDPOINTS_LIMIT,
+            offset: 0,
+            onlyFailing: true,
+          },
+          exec,
+        ),
+        this.countUsers(filter, true, exec),
+        this.listTopUsers(filter, true, TOP_USERS_LIMIT, exec),
+      ]);
+    return { totals, byStatus, timeseries, topEndpoints, usersAffected, topAffectedUsers };
   }
 
   /** Failed requests (status class), newest first, keyset-paged on (occurred_at, event_id) DESC. */
@@ -290,7 +306,109 @@ export class ApiRequestQueryRepository {
     return rows;
   }
 
+  /** The routes one verified user calls most (profile "Top API routes"). */
+  async listUserTopEndpoints(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<UserEndpointRow[]> {
+    const params = new ParamList();
+    const where = scopeConditions({ ...filter, userKey }, params);
+    const { rows } = await exec.query<UserEndpointRow>(
+      `SELECT r.endpoint_id, a.slug AS app_slug, r.method, r.route_template,
+              count(*) AS calls,
+              count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS failed
+         FROM traffic.api_requests r
+         JOIN traffic.apps a ON a.id = r.app_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY r.endpoint_id, a.slug, r.method, r.route_template
+        ORDER BY calls DESC, r.route_template ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * The routes called while a page was open: api_requests whose `page_view_id` is a page view of
+   * (app, path template) in the window. Both tables are window-bounded (partition pruning).
+   */
+  async listPageApiCalls(
+    pathTemplate: string,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<PageApiCallRow[]> {
+    const params = new ParamList();
+    const where = scopeConditions(filter, params);
+    const views = [
+      `w.occurred_at >= ${params.add(filter.from)}`,
+      `w.occurred_at < ${params.add(filter.to)}`,
+      `w.event_type = 'page_view'`,
+      `w.path_template = ${params.add(pathTemplate)}`,
+    ];
+    if (filter.appId !== undefined) views.push(`w.app_id = ${params.add(filter.appId)}`);
+    where.push(
+      `r.page_view_id IN (SELECT w.event_id FROM traffic.web_events w WHERE ${views.join(' AND ')})`,
+    );
+    const { rows } = await exec.query<PageApiCallRow>(
+      `SELECT r.endpoint_id, r.method, r.route_template,
+              count(*) AS calls,
+              count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS failed,
+              ${latencyPercentile(0.95)} AS p95_ms
+         FROM traffic.api_requests r
+        WHERE ${where.join(' AND ')}
+        GROUP BY r.endpoint_id, r.method, r.route_template
+        ORDER BY calls DESC, r.route_template ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
   // ─── Building blocks of the composite methods ─────────────────────────────
+
+  /** Distinct verified users in scope; `failedOnly` = only those who got a failure. */
+  private async countUsers(
+    filter: TrafficFilter,
+    failedOnly: boolean,
+    exec: Executor,
+  ): Promise<number> {
+    const params = new ParamList();
+    const where = [...scopeConditions(filter, params), 'r.user_key IS NOT NULL'];
+    if (failedOnly) where.push(FAILURE_PREDICATES.all);
+    const { rows } = await exec.query<{ users: number }>(
+      `SELECT count(DISTINCT r.user_key) AS users
+         FROM traffic.api_requests r
+        WHERE ${where.join(' AND ')}`,
+      params.values,
+    );
+    return rows[0]?.users ?? 0;
+  }
+
+  /** Verified users by calls in scope, most first; `failedOnly` counts failures instead. */
+  private async listTopUsers(
+    filter: TrafficFilter,
+    failedOnly: boolean,
+    limit: number,
+    exec: Executor,
+  ): Promise<UserUsageRow[]> {
+    const params = new ParamList();
+    const where = [...scopeConditions(filter, params), 'r.user_key IS NOT NULL'];
+    if (failedOnly) where.push(FAILURE_PREDICATES.all);
+    const { rows } = await exec.query<UserUsageRow>(
+      `SELECT r.user_key, min(r.user_email) AS user_email, count(*) AS count,
+              max(r.occurred_at) AS last_seen_at
+         FROM traffic.api_requests r
+        WHERE ${where.join(' AND ')}
+        GROUP BY r.user_key
+        ORDER BY count DESC, r.user_key ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
 
   /** Runs the shared endpoint-stats statement (list, detail header, top failing). */
   private async queryEndpointStats(

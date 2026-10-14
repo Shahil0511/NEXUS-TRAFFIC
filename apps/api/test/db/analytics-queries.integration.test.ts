@@ -9,6 +9,7 @@
  * prove the numbers — counts, error rate, percentile_cont, IST bucket alignment, window bounds,
  * ordering and both kinds of pagination. The dataset is described in ./analytics-seed.ts.
  */
+import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -293,6 +294,14 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
   });
 
   describe('EndpointService.detail', () => {
+    it("counts the route's unique users and ranks its top callers by calls", async () => {
+      const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, ADMIN);
+      expect(dto.uniqueUsers).toBe(dto.topUsers.length);
+      const calls = dto.topUsers.map((user) => user.count);
+      expect([...calls].sort((a, b) => b - a)).toEqual(calls);
+      expect(calls.reduce((sum, n) => sum + n, 0)).toBeLessThanOrEqual(dto.endpoint.calls);
+    });
+
     it('returns stats, the series, the status breakdown and the slowest http calls', async () => {
       const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, ADMIN);
       expect(dto.endpoint.calls).toBe(EXPECTED.calls.reportExport);
@@ -347,6 +356,17 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
       expect(new Set(dto.topEndpoints.map((e) => e.endpointId))).toEqual(
         new Set([ENDPOINT_IDS.reportExport, ENDPOINT_IDS.leaveList]),
       );
+    });
+
+    it('counts the users hit by failures, and scopes to one user', async () => {
+      const all = await errors.summary({ range: '24h' });
+      expect(all.usersAffected).toBe(all.topAffectedUsers.length);
+      const top = all.topAffectedUsers[0];
+      if (top) {
+        const one = await errors.summary({ range: '24h', userKey: top.userKey });
+        expect(one.total).toBe(top.count);
+        expect(one.usersAffected).toBe(1);
+      }
     });
 
     it('scopes every number to one route when endpointId is given', async () => {
@@ -435,9 +455,10 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     const webEvents = new WebEventQueryRepository(queryPool);
     const appSlugs = new AppSlugResolver(new AppRepository(queryPool));
     const clock = new FixedClock(seed.now);
-    users = new UserService(webEvents, appSlugs, clock);
+    const requests = new ApiRequestQueryRepository(queryPool);
+    users = new UserService(webEvents, requests, appSlugs, clock);
     journeys = new JourneyService(webEvents, appSlugs, clock);
-    pages = new PageService(webEvents, appSlugs, clock);
+    pages = new PageService(webEvents, requests, appSlugs, clock);
     tools = new ToolService(webEvents, appSlugs, clock);
     geo = new GeoService(webEvents, appSlugs, clock);
   });
@@ -449,19 +470,22 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
 
   // ─── Users ────────────────────────────────────────────────────────────────
 
+  /** The list defaults the API's schema applies (range 24h, most recently seen first). */
+  const LIST = { range: '24h', sort: 'lastSeen', dir: 'desc' } as const;
+
   describe('UserService', () => {
     it('lists ONLY verified users over both tables, most recently seen first', async () => {
-      const page = await users.list({ range: '24h', limit: 50 });
+      const page = await users.list({ ...LIST, limit: 50 });
       expect(page.items).toMatchObject(JOURNEY_EXPECTED.users);
       expect(page.items.map((u) => u.userKey)).toEqual([userKeyHex(USER_B), userKeyHex(USER_A)]);
       expect(JSON.stringify(page)).not.toContain(CLAIMED_EMAIL);
     });
 
     it('searches by email and offset-pages', async () => {
-      const found = await users.search({ range: '24h', limit: 50, search: 'A@LIBAS' });
+      const found = await users.search({ ...LIST, limit: 50, search: 'A@LIBAS' });
       expect(found.items.map((u) => u.email)).toEqual([USER_A]);
-      const first = await users.list({ range: '24h', limit: 1 });
-      const second = await users.list({ range: '24h', limit: 1, cursor: first.nextCursor ?? '' });
+      const first = await users.list({ ...LIST, limit: 1 });
+      const second = await users.list({ ...LIST, limit: 1, cursor: first.nextCursor ?? '' });
       expect([...first.items, ...second.items].map((u) => u.email)).toEqual([USER_B, USER_A]);
       expect(second.nextCursor).toBeNull();
     });
@@ -601,7 +625,13 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
 
   it('PageService.list: views, sessions, avg/p50 visible time and exits per template', async () => {
     const dto = await pages.list({ range: '24h', limit: 50 });
-    expect(dto.items).toEqual(JOURNEY_EXPECTED.pages);
+    expect(dto.items.map(({ pageId: _id, distinctUsers: _users, ...rest }) => rest)).toEqual(
+      JOURNEY_EXPECTED.pages,
+    );
+    for (const page of dto.items) {
+      expect(page.pageId).toBe(toPageId(page.app, page.pathTemplate));
+      expect(page.distinctUsers).toBeLessThanOrEqual(page.uniqueSessions);
+    }
     const hrOnly = await pages.list({ range: '24h', limit: 50, app: HR_SLUG });
     expect(hrOnly.items.map((p) => p.pathTemplate)).toEqual(['/leaves']);
   });
@@ -615,6 +645,57 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     const trend = dto.items[0]?.trend ?? [];
     expect(trend).toHaveLength(24);
     expect(trend.reduce((sum, p) => sum + p.uses, 0)).toBe(2);
+  });
+
+  // ─── Wave 2 drill-downs ───────────────────────────────────────────────────
+
+  describe('drill-downs (pages, tools, users)', () => {
+    it('PageService.detail agrees with the list and its trend adds up to the views', async () => {
+      const list = await pages.list({ range: '24h', limit: 50 });
+      const home = list.items.find((p) => p.pathTemplate === '/home')!;
+      const dto = await pages.detail(home.app, home.pageId, { range: '24h' });
+      expect(dto.page).toEqual(home);
+      expect(dto.trend.reduce((sum, p) => sum + p.views, 0)).toBe(home.views);
+      expect(dto.topUsers.reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(home.views);
+      for (const link of [...dto.cameFrom, ...dto.wentTo]) {
+        expect(link.pageId).toBe(toPageId(home.app, link.pathTemplate));
+        expect(link.pathTemplate).not.toBe('/home');
+      }
+      await expect(
+        pages.detail(home.app, toPageId(home.app, '/never-seen'), { range: '24h' }),
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('ToolService.detail: users, pages and actions add up to the uses', async () => {
+      const dto = await tools.detail(SALES_SLUG, toToolId(SALES_SLUG, 'export-csv'), {
+        range: '24h',
+      });
+      expect(dto.tool).toMatchObject({ tool: 'export-csv', uses: 2, distinctUsers: 1 });
+      expect(dto.pages.reduce((sum, p) => sum + p.uses, 0)).toBe(2);
+      expect(dto.actions.reduce((sum, a) => sum + a.uses, 0)).toBe(2);
+      expect(dto.topUsers.reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(2);
+    });
+
+    it('UserService.list sorts by a whitelisted key in both directions', async () => {
+      const desc = await users.list({ ...LIST, sort: 'pageViews', limit: 50 });
+      expect(desc.items.map((u) => u.email)).toEqual([USER_A, USER_B]);
+      const asc = await users.list({ ...LIST, sort: 'pageViews', dir: 'asc', limit: 50 });
+      expect(asc.items.map((u) => u.email)).toEqual([USER_B, USER_A]);
+    });
+
+    it('UserService.profile: per-app activity and top routes', async () => {
+      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' });
+      expect(dto.perApp).toMatchObject([{ app: SALES_SLUG, requests: 1, pageViews: 3 }]);
+      expect(dto.topEndpoints.reduce((sum, e) => sum + e.calls, 0)).toBe(1);
+    });
+
+    it('UserService.activity: daily users never exceed WAU, WAU never exceeds MAU', async () => {
+      const dto = await users.activity({ range: '24h' });
+      expect(dto.points.length).toBeGreaterThan(0);
+      expect(Math.max(...dto.points.map((p) => p.users))).toBeLessThanOrEqual(dto.wau);
+      expect(dto.wau).toBeGreaterThanOrEqual(2);
+      expect(dto.mau).toBeGreaterThanOrEqual(dto.wau);
+    });
   });
 
   // ─── Geography ────────────────────────────────────────────────────────────

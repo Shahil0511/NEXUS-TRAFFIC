@@ -1,4 +1,4 @@
-import type { StatusCountDto, TimeWindowDto, TimeseriesPointDto } from './common';
+import type { StatusCountDto, TimeWindowDto, TimeseriesPointDto, UserUsageDto } from './common';
 import type { EndpointStatsDto } from './endpoints';
 
 /** GET ROUTES.errors.summary */
@@ -10,4 +10,8 @@ export interface ErrorSummaryDto {
   byStatus: StatusCountDto[];
   timeseries: TimeseriesPointDto[];
   topEndpoints: EndpointStatsDto[];
+  /** Distinct verified users who got at least one failed response. */
+  usersAffected: number;
+  /** The users hit by the most failures (`count` = failed requests). */
+  topAffectedUsers: UserUsageDto[];
 }

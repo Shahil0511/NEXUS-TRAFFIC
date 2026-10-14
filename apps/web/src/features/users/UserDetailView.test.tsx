@@ -76,4 +76,19 @@ describe('UserDetailView', () => {
     expect(within(alert).getByText('no activity for this user')).toBeInTheDocument();
     expect(within(alert).getByText(/Request ID req-7/)).toBeInTheDocument();
   });
+
+  it("shows the apps used and the top API routes, and links to the user's failures", async () => {
+    useProfileHandlers();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?range=7d' });
+    const routes = await screen.findByRole('list', { name: 'Top API routes' });
+    expect(
+      within(routes)
+        .getByRole('link', { name: /\/api\/orders\/:id/ })
+        .getAttribute('href'),
+    ).toBe('/endpoints/6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11?range=7d');
+    expect(screen.getByRole('table', { name: 'Apps used' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /View failures/ }).getAttribute('href')).toBe(
+      `/errors?range=7d&userKey=${USER_KEY}`,
+    );
+  });
 });
