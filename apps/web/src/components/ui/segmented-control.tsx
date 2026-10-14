@@ -9,6 +9,9 @@ export interface SegmentedOption<V extends string> {
   label: string;
   /** Accessible name when `label` is an abbreviation (e.g. "24h" → "Last 24 hours"). */
   ariaLabel?: string;
+  /** Not selectable here; `disabledReason` says why (tooltip + accessible description). */
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export interface SegmentedControlProps<V extends string> {
@@ -47,8 +50,14 @@ export function SegmentedControl<V extends string>({
         <ToggleGroup.Item
           key={option.value}
           value={option.value}
-          aria-label={option.ariaLabel ?? option.label}
-          className="h-7 cursor-pointer rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-input/40"
+          aria-label={
+            option.disabled && option.disabledReason
+              ? `${option.ariaLabel ?? option.label} (${option.disabledReason})`
+              : (option.ariaLabel ?? option.label)
+          }
+          disabled={option.disabled}
+          title={option.disabled ? option.disabledReason : undefined}
+          className="h-7 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 data-[state=on]:bg-card data-[state=on]:text-foreground data-[state=on]:shadow-sm dark:data-[state=on]:bg-input/40"
         >
           {option.label}
         </ToggleGroup.Item>

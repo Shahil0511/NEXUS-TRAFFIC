@@ -12,6 +12,10 @@
 export const PAGES = {
   /** @see ../app/(dashboard)/page.tsx */
   overview: () => '/',
+  /** @see ../app/(dashboard)/applications/page.tsx */
+  applications: () => '/applications',
+  /** @see ../app/(dashboard)/applications/[app]/page.tsx (registered app slug, validated by the page) */
+  applicationDetail: (app: string) => `/applications/${encodeURIComponent(app)}`,
   /** @see ../app/(dashboard)/live/page.tsx */
   live: () => '/live',
   /** @see ../app/(dashboard)/endpoints/page.tsx */

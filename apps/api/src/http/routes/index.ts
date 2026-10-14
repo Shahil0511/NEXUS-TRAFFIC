@@ -17,6 +17,7 @@ import {
   expireKeyBodySchema,
   geoQuerySchema,
   liveSnapshotQuerySchema,
+  overviewAppsQuerySchema,
   overviewSummaryQuerySchema,
   overviewTimeseriesQuerySchema,
   pageListQuerySchema,
@@ -31,6 +32,7 @@ import {
   userKeyParamsSchema,
   userListQuerySchema,
   userProfileQuerySchema,
+  userSearchBodySchema,
   userTimelineQuerySchema,
 } from '@nexus/shared';
 import { Router } from 'express';
@@ -127,6 +129,7 @@ export function buildRouter(c: Container): Router {
     validateQuery(overviewTimeseriesQuerySchema),
     ctl.overview.timeseries,
   );
+  r.get(ROUTES.overview.apps.path, ...dashboard, validateQuery(overviewAppsQuerySchema), ctl.overview.apps);
 
   // ─── Dashboard: API routes ────────────────────────────────────────────────
   r.get(
@@ -159,6 +162,14 @@ export function buildRouter(c: Container): Router {
 
   // ─── Dashboard: users ─────────────────────────────────────────────────────
   r.get(ROUTES.users.list.path, ...dashboard, validateQuery(userListQuerySchema), ctl.users.list);
+  // POST so the typed email stays out of the URL (ADR 0006); registered before `/:userKey`.
+  r.post(
+    ROUTES.users.search.path,
+    ...dashboard,
+    mw.dashboardJsonBody,
+    validateBody(userSearchBodySchema),
+    ctl.users.search,
+  );
   r.get(
     ROUTES.users.profile.path,
     ...dashboard,

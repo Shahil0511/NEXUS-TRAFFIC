@@ -30,6 +30,12 @@ export interface LiveEventDto {
   durationMs: number | null;
   tool: string | null;
   userEmail: string | null;
+  /** Opaque user id (verified identities only) → the user's page. */
+  userKey: string | null;
+  /** `api` events only: the stored route → the route's page. */
+  endpointId: string | null;
+  /** Browser session (replay link when the event is a browser event). */
+  sessionId: string | null;
   /** null for non-admin viewers. */
   ip: string | null;
   country: string | null;

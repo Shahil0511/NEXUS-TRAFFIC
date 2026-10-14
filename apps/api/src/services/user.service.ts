@@ -8,6 +8,7 @@ import {
   type UserListQuery,
   type UserProfileDto,
   type UserProfileQuery,
+  type UserSearchBody,
   type UserSummaryDto,
   type UserTimelineQuery,
 } from '@nexus/shared';
@@ -36,22 +37,20 @@ export class UserService {
 
   /**
    * Verified users (sso_cookie / app_attested) over API calls + browser events, most recently seen
-   * first, optional email search, offset-cursor paged. Counts only → MAX_COUNT_RANGE_MS.
+   * first, offset-cursor paged. Counts only → MAX_COUNT_RANGE_MS.
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUsers
    */
   async list(query: UserListQuery): Promise<CursorPage<UserSummaryDto>> {
-    const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
-    const offset = decodeOffsetCursor(query.cursor);
+    return this.listMatching(query, undefined);
+  }
 
-    const rows = await this.webEvents.listUsers(filter, {
-      search: query.search,
-      limit: pageFetchSize(query.limit),
-      offset,
-    });
-    return toCursorPage(rows, query.limit, mapUserSummary, () =>
-      encodeOffsetCursor(offset + query.limit),
-    );
+  /**
+   * Same list, narrowed to emails containing `search`. The search arrives in a POST body, never in
+   * a URL (ADR 0006), so a typed email cannot end up in an access log.
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUsers
+   */
+  async search(body: UserSearchBody): Promise<CursorPage<UserSummaryDto>> {
+    return this.listMatching(body, body.search);
   }
 
   /**
@@ -91,6 +90,25 @@ export class UserService {
       query.limit,
       (row) => mapTimelineItem(row, viewer),
       (last) => encodeKeysetCursor(last.occurred_at_key, last.event_id),
+    );
+  }
+
+  /** The list + search body: window → app id → one page of users. */
+  private async listMatching(
+    query: UserListQuery,
+    search: string | undefined,
+  ): Promise<CursorPage<UserSummaryDto>> {
+    const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
+    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const offset = decodeOffsetCursor(query.cursor);
+
+    const rows = await this.webEvents.listUsers(filter, {
+      search,
+      limit: pageFetchSize(query.limit),
+      offset,
+    });
+    return toCursorPage(rows, query.limit, mapUserSummary, () =>
+      encodeOffsetCursor(offset + query.limit),
     );
   }
 }

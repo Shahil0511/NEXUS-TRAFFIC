@@ -3,28 +3,33 @@
 import type { TimeWindowQuery, UserSummaryDto } from '@nexus/shared';
 import { Search, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
+import { AppChipList } from '@/components/AppChip';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { LoadMoreButton } from '@/components/LoadMoreButton';
 import { PageHeader } from '@/components/PageHeader';
+import { RelativeTime } from '@/components/RelativeTime';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { formatDateTime, formatInteger } from '@/lib/format';
+import { formatInteger } from '@/lib/format';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
 import { useUserList } from './useUserList';
-import { useUserListParams } from './useUserListParams';
+import { useUserSearch } from './useUserSearch';
 
 const SEARCH_DEBOUNCE_MS = 300;
 /** Rows per "Load more". */
 const PAGE_SIZE = 50;
 
-/** The table columns; each user opens its profile through the OPAQUE userKey (PAGES). */
+/**
+ * The table columns. Each user opens its profile through the OPAQUE userKey (PAGES); each app
+ * chip opens that app's page — so "who uses which app" is one click either way.
+ */
 export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSummaryDto>[] {
   const linkQuery = filterLinkQuery(filters);
   return [
@@ -33,28 +38,28 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
       header: 'User',
       className: 'w-full max-w-0',
       cell: (row) => (
-        <Link
-          href={withQuery(PAGES.userDetail(row.userKey), linkQuery)}
-          className="flex min-w-0 items-center gap-2.5 rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
-        >
+        <span className="flex min-w-0 items-center gap-2.5">
           <span
             aria-hidden="true"
             className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-foreground uppercase"
           >
             {row.email.slice(0, 2)}
           </span>
-          <span className="min-w-0">
-            <span className="block truncate">{row.email}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">
-              {row.apps.join(' · ')}
-            </span>
+          <span className="min-w-0 space-y-1">
+            <Link
+              href={withQuery(PAGES.userDetail(row.userKey), linkQuery)}
+              className="block truncate rounded-sm outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              {row.email}
+            </Link>
+            <AppChipList apps={row.apps} linkQuery={linkQuery} />
           </span>
-        </Link>
+        </span>
       ),
     },
     {
       id: 'requests',
-      header: 'Requests',
+      header: 'API calls',
       align: 'right',
       cell: (row) => formatInteger(row.requests),
     },
@@ -74,36 +79,28 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
       id: 'lastSeen',
       header: 'Last seen',
       align: 'right',
-      className: 'text-muted-foreground',
-      cell: (row) => <time dateTime={row.lastSeenAt}>{formatDateTime(row.lastSeenAt)}</time>,
+      className: 'whitespace-nowrap text-muted-foreground',
+      cell: (row) => <RelativeTime iso={row.lastSeenAt} />,
     },
   ];
 }
 
 /**
  * The Users page: every VERIFIED identity (SSO cookie or app-attested) active in the window, most
- * recently seen first. Browser-claimed emails are never users — they appear, flagged, on sessions.
- * Search is debounced into the URL; pages load on demand.
+ * recently seen first, with the apps each one uses. Browser-claimed emails are never users — they
+ * appear, flagged, on sessions. The email search is sent in a POST body and kept in React state
+ * only: an email never lands in the URL, the browser history or an access log (ADR 0006).
  */
 export function UsersView() {
   const { filters } = useGlobalFilters();
-  const { search, setSearch } = useUserListParams();
-  const [draft, setDraft] = useState(search);
-  const settled = useDebouncedValue(draft, SEARCH_DEBOUNCE_MS);
+  const [draft, setDraft] = useState('');
+  const search = useDebouncedValue(draft, SEARCH_DEBOUNCE_MS).trim();
+  const searching = search !== '';
 
-  // Push ONLY when the typed value settles — a URL change from elsewhere (back button) must not
-  // be overwritten by a stale draft.
-  const searchRef = useRef(search);
-  searchRef.current = search;
-  useEffect(() => {
-    if (settled !== searchRef.current) setSearch(settled);
-  }, [settled, setSearch]);
+  const listed = useUserList({ ...filters, limit: PAGE_SIZE }, { enabled: !searching });
+  const found = useUserSearch({ ...filters, search, limit: PAGE_SIZE }, { enabled: searching });
+  const query = searching ? found : listed;
 
-  const query = useUserList({
-    ...filters,
-    search: search === '' ? undefined : search,
-    limit: PAGE_SIZE,
-  });
   const rows = useMemo(() => query.data?.pages.flatMap((page) => page.items), [query.data]);
   const columns = useMemo(() => userColumns(filters), [filters]);
 
@@ -118,7 +115,7 @@ export function UsersView() {
           </span>
         }
         actions={
-          <label className="relative block w-72">
+          <label className="relative block w-full sm:w-72">
             <span className="sr-only">Search users</span>
             <Search
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
@@ -130,11 +127,12 @@ export function UsersView() {
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Search by email…"
               className="pl-8"
+              autoComplete="off"
             />
           </label>
         }
       />
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden" aria-busy={query.isFetching}>
         {query.isError ? (
           <ErrorState error={query.error} onRetry={() => void query.refetch()} />
         ) : (
@@ -148,11 +146,11 @@ export function UsersView() {
               empty={
                 <EmptyState
                   title={
-                    search ? 'No user matches your search' : 'No identified users in this window'
+                    searching ? 'No user matches your search' : 'No identified users in this window'
                   }
                   description={
-                    search
-                      ? 'Search matches the email address, e.g. buyer@libas.in.'
+                    searching
+                      ? 'Search matches part of the email address, e.g. buyer@libas.in.'
                       : 'Users appear once an app sends verified identities (SSO cookie or app-attested). Try a longer range.'
                   }
                 />

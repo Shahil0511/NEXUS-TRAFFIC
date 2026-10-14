@@ -1,17 +1,19 @@
 'use client';
 
+import { useIsFetching } from '@tanstack/react-query';
 import { Activity, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
+import { CommandPalette } from '@/components/CommandPalette';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { Badge } from '@/components/ui/badge';
 import { ViewerBadge } from '@/components/ViewerBadge';
 import { AppSelect } from '@/features/filters/AppSelect';
 import { RangePicker } from '@/features/filters/RangePicker';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { isNavItemActive, NAV_SECTIONS, type NavItem } from '@/lib/nav';
+import { isNavItemActive, NAV_SECTIONS, pageFiltersFor, type NavItem } from '@/lib/nav';
 import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
@@ -20,8 +22,9 @@ export const MAIN_CONTENT_ID = 'main-content';
 
 /**
  * WHY: the frame of every dashboard page — sidebar navigation (from NAV_SECTIONS, so no href is
- * typed here), a top bar with the GLOBAL filters (app + range, kept in the URL) and the signed-in
- * viewer. Navigation carries the current filters along, so switching pages keeps the context.
+ * typed here), a top bar with search (Ctrl+K), the GLOBAL filters the current page uses (app +
+ * range, kept in the URL) and the signed-in viewer. Navigation carries the current filters along,
+ * so switching pages keeps the context.
  * A skip link and landmarks (nav/header/main) make it keyboard- and screen-reader-friendly.
  */
 export function AppShell({ children }: { children: ReactNode }) {
@@ -135,22 +138,43 @@ function NavLink({ item, href, active }: { item: NavItem; href: string; active: 
 
 // ─── Top bar ─────────────────────────────────────────────────────────────────
 
+/**
+ * WHY: a thin bar under the header while ANY query loads — data refreshing in the background
+ * (a filter change keeps the old numbers on screen) must still be visible.
+ */
+function FetchingBar() {
+  const fetching = useIsFetching() > 0;
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'pointer-events-none absolute inset-x-0 bottom-0 h-0.5 origin-left bg-primary transition-opacity duration-300',
+        fetching ? 'animate-pulse opacity-70' : 'opacity-0',
+      )}
+    />
+  );
+}
+
 function TopBar() {
+  const pathname = usePathname();
+  const pageFilters = pageFiltersFor(pathname);
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-border bg-background/80 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <CommandPalette />
       <div
         role="group"
         aria-label="Global filters"
-        className="flex min-w-0 flex-1 items-center gap-2"
+        className="flex min-w-0 flex-1 items-center justify-end gap-2"
       >
-        <AppSelect className="w-40 xl:w-52" />
-        <RangePicker />
+        {pageFilters.app ? <AppSelect className="w-40 xl:w-52" /> : null}
+        {pageFilters.range ? <RangePicker maxRangeMs={pageFilters.maxRangeMs} /> : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <ThemeToggle />
         <span aria-hidden="true" className="h-5 w-px bg-border" />
         <ViewerBadge />
       </div>
+      <FetchingBar />
     </header>
   );
 }

@@ -45,6 +45,8 @@ export interface SessionEventDto {
   method: string | null;
   status: number | null;
   durationMs: number | null;
+  /** `api` events only: the stored route (opaque id → the route's page). */
+  endpointId: string | null;
 }
 
 /** GET ROUTES.journeys.session (404 when the session has no events in the window). */

@@ -1,7 +1,7 @@
 'use client';
 
 import type { GeoQuery } from '@nexus/shared';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query/keys';
@@ -15,5 +15,7 @@ export function useGeoCountries(query: GeoQuery) {
   return useQuery({
     queryKey: qk.geo.countries(query),
     queryFn: ({ signal }) => api.geo.countries(query, { signal }),
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

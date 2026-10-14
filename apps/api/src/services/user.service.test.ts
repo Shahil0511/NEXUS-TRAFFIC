@@ -49,14 +49,26 @@ const timelineQuery = (overrides: Partial<UserTimelineQuery> = {}): UserTimeline
   ...overrides,
 });
 
-describe('UserService.list', () => {
-  it('resolves the app, passes search, fetches limit + 1 and maps users with hex keys', async () => {
+describe('UserService.search', () => {
+  it('passes the email substring from the BODY to the same list query', async () => {
     const { service, webEvents } = build();
     webEvents.users = [userSummaryRow()];
-    const page = await service.list(listQuery({ app: KNOWN_APP_SLUG, search: 'some' }));
+    const page = await service.search({ ...listQuery({ app: KNOWN_APP_SLUG }), search: 'some' });
     const [filter, options] = webEvents.argsOf('listUsers')[0] ?? [];
     expect(filter).toMatchObject({ appId: KNOWN_APP_ID, to: NOW });
     expect(options).toEqual({ search: 'some', limit: 3, offset: 0 });
+    expect(page.items[0]?.email).toBe('someone@libas.in');
+  });
+});
+
+describe('UserService.list', () => {
+  it('resolves the app, fetches limit + 1 and maps users with hex keys', async () => {
+    const { service, webEvents } = build();
+    webEvents.users = [userSummaryRow()];
+    const page = await service.list(listQuery({ app: KNOWN_APP_SLUG }));
+    const [filter, options] = webEvents.argsOf('listUsers')[0] ?? [];
+    expect(filter).toMatchObject({ appId: KNOWN_APP_ID, to: NOW });
+    expect(options).toEqual({ search: undefined, limit: 3, offset: 0 });
     expect(page.items[0]).toMatchObject({
       userKey: USER_KEY_HEX,
       email: 'someone@libas.in',

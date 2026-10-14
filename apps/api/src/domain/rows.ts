@@ -105,7 +105,30 @@ export interface TrafficSummaryRow {
   errors: number;
   /** p95 of duration_ms over kind = 'http' only; null when there is no http row. */
   p95_ms: number | null;
-  identified_users: number;
+}
+
+/**
+ * The API-call half of one app's row on the Applications page.
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeTrafficByApp
+ */
+export interface AppTrafficRow extends TrafficSummaryRow {
+  app_id: string;
+  last_event_at: Date | null;
+}
+
+/**
+ * The browser + people half of one app's row on the Applications page.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.summarizeActivityByApp
+ */
+export interface AppActivityRow {
+  app_id: string;
+  /** Distinct verified users over api_requests ∪ web_events. */
+  users: number;
+  page_views: number;
+  /** Distinct browser sessions. */
+  sessions: number;
+  tool_uses: number;
+  last_event_at: Date | null;
 }
 
 /**
@@ -236,6 +259,8 @@ export interface TimelineEventRow {
   tool: string | null;
   visible_ms: number | null;
   name: string | null;
+  /** `api` rows only. */
+  endpoint_id: string | null;
   ip: string | null;
 }
 
@@ -279,6 +304,8 @@ export interface SessionEventRow {
   method: string | null;
   status_code: number | null;
   duration_ms: number | null;
+  /** `api` rows only. */
+  endpoint_id: string | null;
 }
 
 /** Everything the session replay needs (null from the repository when the session has no rows). */
@@ -380,6 +407,10 @@ export interface LiveEventRow {
   duration_ms: number | null;
   tool: string | null;
   user_email: string | null;
+  user_key: Buffer | null;
+  /** `api` rows only. */
+  endpoint_id: string | null;
+  session_id: string | null;
   ip: string | null;
   geo_country: string | null;
   geo_city: string | null;

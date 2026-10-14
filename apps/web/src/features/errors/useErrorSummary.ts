@@ -1,7 +1,7 @@
 'use client';
 
 import type { ErrorSummaryQuery } from '@nexus/shared';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query/keys';
@@ -16,5 +16,7 @@ export function useErrorSummary(query: ErrorSummaryQuery) {
   return useQuery({
     queryKey: qk.errors.summary(query),
     queryFn: ({ signal }) => api.errors.summary(query, { signal }),
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

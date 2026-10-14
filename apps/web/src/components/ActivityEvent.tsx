@@ -6,16 +6,19 @@ import {
 } from '@nexus/shared';
 import {
   ArrowLeftRight,
+  ArrowUpRight,
   FileText,
   Hourglass,
   MousePointerClick,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
+import Link from 'next/link';
 
 import { MethodBadge } from '@/components/MethodBadge';
 import { StatusCode } from '@/components/StatusCode';
 import { formatDuration } from '@/lib/format';
+import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
 /**
@@ -24,7 +27,15 @@ import { cn } from '@/lib/utils';
  */
 export type ActivityEventLike = Pick<
   TimelineItemDto,
-  'kind' | 'path' | 'tool' | 'visibleMs' | 'name' | 'method' | 'status' | 'durationMs'
+  | 'kind'
+  | 'path'
+  | 'tool'
+  | 'visibleMs'
+  | 'name'
+  | 'method'
+  | 'status'
+  | 'durationMs'
+  | 'endpointId'
 >;
 
 export const ACTIVITY_KIND_META: Record<TimelineItemKind, { label: string; icon: LucideIcon }> = {
@@ -88,15 +99,19 @@ function PathText({ path }: { path: string }) {
 /**
  * WHY: one line that says what happened — the API call with its verb, status and duration, the
  * page with its visible time, the tool used on a page, or a custom event. Paths, tool and event
- * names are ingested data: rendered as TEXT, never as links (ai-context/05-conventions.md §5).
+ * names are ingested data: rendered as TEXT, never as links (ai-context/05-conventions.md §5);
+ * an API call gets a separate "route" link built from its OPAQUE endpointId.
  */
 export function ActivityEventSummary({
   event,
   hidePagePath = false,
+  linkQuery,
 }: {
   event: ActivityEventLike;
   /** In a session replay a tool/custom event sits under its page already: skip "on /path". */
   hidePagePath?: boolean;
+  /** The current filters; given → API calls link to their route's page. */
+  linkQuery?: Readonly<Record<string, string | undefined>>;
 }) {
   const onPage = hidePagePath ? null : (
     <>
@@ -119,6 +134,16 @@ export function ActivityEventSummary({
             <span className="shrink-0 text-[11px] text-muted-foreground tabular">
               {formatDuration(event.durationMs)}
             </span>
+          ) : null}
+          {event.endpointId && linkQuery ? (
+            <Link
+              href={withQuery(PAGES.endpointDetail(event.endpointId), linkQuery)}
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-sm text-[11px] text-muted-foreground outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+            >
+              Route
+              <ArrowUpRight className="size-3" aria-hidden="true" />
+              <span className="sr-only"> details for this call</span>
+            </Link>
           ) : null}
         </span>
       );

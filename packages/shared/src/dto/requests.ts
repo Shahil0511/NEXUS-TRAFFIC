@@ -15,6 +15,8 @@ export interface RequestSampleDto {
   durationMs: number;
   errorCode: string | null;
   requestId: string | null;
+  /** The browser session that made the call (tracker header); null for server-to-server calls. */
+  sessionId: string | null;
   actor: ActorDto;
 }
 

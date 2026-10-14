@@ -35,13 +35,18 @@ export class ErrorService {
   ) {}
 
   /**
-   * Totals (4xx / 5xx), failures per status, the gap-filled series and the top failing endpoints.
+   * Totals (4xx / 5xx), failures per status, the gap-filled series and the top failing endpoints,
+   * optionally of ONE route (`endpointId`, the Errors page opened from a route) — so the numbers
+   * above the list describe the same requests as the list.
    * The top endpoints carry latency percentiles → capped at MAX_PERCENTILE_RANGE_MS.
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.summarizeErrors
    */
   async summary(query: ErrorSummaryQuery): Promise<ErrorSummaryDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = {
+      ...currentFilter(window, await this.appSlugs.resolve(query.app)),
+      endpointId: query.endpointId,
+    };
 
     const rows = await this.requests.summarizeErrors(filter, window.grain);
     return {

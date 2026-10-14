@@ -2,6 +2,7 @@ import { ACTIVE_USER_WINDOW_MS, ERROR_CODES } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import { trafficBucketRow, trafficSummaryRow } from '../../test/fixtures/analytics-rows';
+import { appRow } from '../../test/fixtures/app-rows';
 import {
   FakeApiRequestQueries,
   FakeAppSlugs,
@@ -10,12 +11,27 @@ import {
 } from '../../test/fixtures/fake-query-repositories';
 import { AppError, NotFoundError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
+import type { AppRow } from '../domain/rows';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
+import type { AppRepository } from '../repositories/app.repository';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
 import { OverviewService } from './overview.service';
 
 const NOW = new Date('2026-10-01T10:00:00.000Z');
+
+const OTHER_APP_ID = '99999999-9999-4999-8999-999999999999';
+
+/** The registered apps (AppRepository.list), in slug order like the real query. */
+class FakeApps implements Pick<AppRepository, 'list'> {
+  rows: AppRow[] = [
+    appRow({ id: KNOWN_APP_ID, slug: 'ebo-sales', display_name: 'EBO Sales' }),
+    appRow({ id: OTHER_APP_ID, slug: 'hr-portal', display_name: 'HR Portal' }),
+  ];
+  async list(): Promise<AppRow[]> {
+    return this.rows;
+  }
+}
 
 function build() {
   const requests = new FakeApiRequestQueries();
@@ -23,6 +39,7 @@ function build() {
   const service = new OverviewService(
     requests as unknown as ApiRequestQueryRepository,
     webEvents as unknown as WebEventQueryRepository,
+    new FakeApps() as unknown as AppRepository,
     new FakeAppSlugs() as unknown as AppSlugResolver,
     new FixedClock(NOW),
   );
@@ -33,10 +50,11 @@ describe('OverviewService.summary', () => {
   it('compares every KPI with the previous equal-length window', async () => {
     const { service, requests, webEvents } = build();
     requests.summaries = [
-      trafficSummaryRow({ requests: 200, errors: 10, p95_ms: 150, identified_users: 12 }),
-      trafficSummaryRow({ requests: 100, errors: 10, p95_ms: 100, identified_users: 0 }),
+      trafficSummaryRow({ requests: 200, errors: 10, p95_ms: 150 }),
+      trafficSummaryRow({ requests: 100, errors: 10, p95_ms: 100 }),
     ];
     webEvents.pageViews = [30, 20];
+    webEvents.identifiedUsers = [12, 0];
     webEvents.activeUsers = 4;
 
     const dto = await service.summary({ range: '24h' });
@@ -101,6 +119,62 @@ describe('OverviewService.summary', () => {
     await expect(service.summary({ range: '24h', app: 'nope' })).rejects.toBeInstanceOf(
       NotFoundError,
     );
+  });
+});
+
+describe('OverviewService.apps', () => {
+  it('lists every registered app busiest first, silent apps with zeros, with deltas', async () => {
+    const { service, requests, webEvents } = build();
+    const seenAt = new Date('2026-10-01T09:30:00Z');
+    requests.trafficByApp = [
+      [{ app_id: OTHER_APP_ID, requests: 50, errors: 5, p95_ms: 120.123, last_event_at: seenAt }],
+      [{ app_id: OTHER_APP_ID, requests: 25, errors: 0, p95_ms: 90, last_event_at: seenAt }],
+    ];
+    webEvents.activityByApp = [
+      [
+        {
+          app_id: OTHER_APP_ID,
+          users: 4,
+          page_views: 10,
+          sessions: 3,
+          tool_uses: 2,
+          last_event_at: new Date('2026-10-01T09:45:00Z'),
+        },
+      ],
+      [],
+    ];
+
+    const dto = await service.apps({ range: '24h' });
+
+    expect(dto.items.map((item) => item.app)).toEqual(['hr-portal', 'ebo-sales']);
+    expect(dto.items[0]).toEqual({
+      app: 'hr-portal',
+      displayName: 'HR Portal',
+      requests: { value: 50, previous: 25, deltaPct: 100 },
+      errorRate: { value: 10, previous: 0, deltaPct: null },
+      p95Ms: 120.12,
+      pageViews: { value: 10, previous: 0, deltaPct: null },
+      users: { value: 4, previous: 0, deltaPct: null },
+      sessions: 3,
+      toolUses: 2,
+      lastEventAt: '2026-10-01T09:45:00.000Z',
+    });
+    expect(dto.items[1]).toMatchObject({
+      app: 'ebo-sales',
+      requests: { value: 0 },
+      errorRate: { value: null },
+      lastEventAt: null,
+    });
+  });
+
+  it('narrows to the filtered app and scopes every query to it', async () => {
+    const { service, requests, webEvents } = build();
+    const dto = await service.apps({ range: '24h', app: 'ebo-sales' });
+    expect(dto.items.map((item) => item.app)).toEqual(['ebo-sales']);
+    expect(requests.argsOf('summarizeTrafficByApp')[0]?.[0]).toMatchObject({ appId: KNOWN_APP_ID });
+    expect(webEvents.argsOf('summarizeActivityByApp')[1]?.[0]).toMatchObject({
+      appId: KNOWN_APP_ID,
+    });
   });
 });
 

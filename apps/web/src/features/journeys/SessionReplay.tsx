@@ -15,6 +15,8 @@ export interface SessionReplayProps {
   events: readonly SessionEventDto[];
   /** Session start (ISO) — every event shows its offset from it. */
   startedAt: string;
+  /** The current filters; given → API calls link to their route's page. */
+  linkQuery?: Readonly<Record<string, string | undefined>>;
 }
 
 /** "+1:05" since the session started, with the IST instant as the tooltip. */
@@ -32,10 +34,10 @@ function Offset({ occurredAt, startMs }: { occurredAt: string; startMs: number }
 
 /**
  * WHY: a session read as a story — each page in order with the time it was actually visible, and
- * under it the tools used and the API calls it made. Every value is ingested data rendered as
- * text (never a link).
+ * under it the tools used and the API calls it made. Every ingested value is rendered as text;
+ * an API call additionally links to its route through the opaque endpointId.
  */
-export function SessionReplay({ events, startedAt }: SessionReplayProps) {
+export function SessionReplay({ events, startedAt, linkQuery }: SessionReplayProps) {
   const steps = useMemo(() => groupSessionSteps(events), [events]);
   const startMs = Date.parse(startedAt);
   // A lead-in step (events before the first page view) has no number, so pages count from 1.
@@ -49,6 +51,7 @@ export function SessionReplay({ events, startedAt }: SessionReplayProps) {
           pageNumber={step.page ? index + 1 - leadIn : null}
           isLast={index === steps.length - 1}
           startMs={startMs}
+          linkQuery={linkQuery}
         />
       ))}
     </ol>
@@ -61,9 +64,10 @@ interface ReplayStepProps {
   pageNumber: number | null;
   isLast: boolean;
   startMs: number;
+  linkQuery?: Readonly<Record<string, string | undefined>>;
 }
 
-function ReplayStep({ step, pageNumber, isLast, startMs }: ReplayStepProps) {
+function ReplayStep({ step, pageNumber, isLast, startMs, linkQuery }: ReplayStepProps) {
   const { page, events } = step;
   return (
     <li className={cn('relative grid grid-cols-[1.75rem_1fr] gap-x-3', !isLast && 'pb-5')}>
@@ -109,7 +113,7 @@ function ReplayStep({ step, pageNumber, isLast, startMs }: ReplayStepProps) {
               <li key={event.eventId} className="flex min-w-0 items-center gap-2 text-xs">
                 <ActivityKindIcon kind={event.kind} />
                 <span className="min-w-0 flex-1">
-                  <ActivityEventSummary event={event} hidePagePath />
+                  <ActivityEventSummary event={event} hidePagePath linkQuery={linkQuery} />
                 </span>
                 <Offset occurredAt={event.occurredAt} startMs={startMs} />
               </li>

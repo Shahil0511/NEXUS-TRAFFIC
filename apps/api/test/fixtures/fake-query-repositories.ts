@@ -14,6 +14,8 @@ import type {
 } from '../../src/domain/filters';
 import type {
   ApiRequestRow,
+  AppActivityRow,
+  AppTrafficRow,
   EndpointDetailRows,
   EndpointStatsRow,
   ErrorSummaryRows,
@@ -55,7 +57,8 @@ type RequestQueryMethods =
   | 'listEndpointStats'
   | 'getEndpointDetail'
   | 'summarizeErrors'
-  | 'listFailures';
+  | 'listFailures'
+  | 'summarizeTrafficByApp';
 
 export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, RequestQueryMethods> {
   readonly calls: Array<{ method: RequestQueryMethods; args: unknown[] }> = [];
@@ -70,6 +73,8 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     topEndpoints: [],
   };
   failures: ApiRequestRow[] = [];
+  /** Returned in call order (current window first, then previous). */
+  trafficByApp: AppTrafficRow[][] = [];
 
   /** Returns `summaries` in call order (current window first, then previous). */
   async summarizeTraffic(filter: TrafficFilter): Promise<TrafficSummaryRow> {
@@ -110,6 +115,12 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     return this.failures;
   }
 
+  async summarizeTrafficByApp(filter: TrafficFilter): Promise<AppTrafficRow[]> {
+    const index = this.calls.filter((c) => c.method === 'summarizeTrafficByApp').length;
+    this.calls.push({ method: 'summarizeTrafficByApp', args: [filter] });
+    return this.trafficByApp[index] ?? [];
+  }
+
   argsOf(method: RequestQueryMethods): unknown[][] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args);
   }
@@ -119,6 +130,8 @@ type WebQueryMethods =
   | 'summarizePageViews'
   | 'pageViewTimeseries'
   | 'countActiveUsers'
+  | 'countIdentifiedUsers'
+  | 'summarizeActivityByApp'
   | 'listUsers'
   | 'getUserProfile'
   | 'listUserTimeline'
@@ -135,6 +148,9 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   pageViews: number[] = [0, 0];
   pageViewBuckets: PageViewBucketRow[] = [];
   activeUsers = 0;
+  /** Returned in call order (current window first, then previous). */
+  identifiedUsers: number[] = [0, 0];
+  activityByApp: AppActivityRow[][] = [];
   users: UserSummaryRow[] = [];
   profile: UserProfileRows | null = null;
   timeline: TimelineEventRow[] = [];
@@ -160,6 +176,18 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   async countActiveUsers(filter: TrafficFilter): Promise<number> {
     this.calls.push({ method: 'countActiveUsers', args: [filter] });
     return this.activeUsers;
+  }
+
+  async countIdentifiedUsers(filter: TrafficFilter): Promise<number> {
+    const index = this.calls.filter((c) => c.method === 'countIdentifiedUsers').length;
+    this.calls.push({ method: 'countIdentifiedUsers', args: [filter] });
+    return this.identifiedUsers[index] ?? 0;
+  }
+
+  async summarizeActivityByApp(filter: TrafficFilter): Promise<AppActivityRow[]> {
+    const index = this.calls.filter((c) => c.method === 'summarizeActivityByApp').length;
+    this.calls.push({ method: 'summarizeActivityByApp', args: [filter] });
+    return this.activityByApp[index] ?? [];
   }
 
   async listUsers(filter: TrafficFilter, options: UserListOptions): Promise<UserSummaryRow[]> {

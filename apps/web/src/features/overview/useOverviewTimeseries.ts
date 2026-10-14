@@ -1,7 +1,7 @@
 'use client';
 
 import type { OverviewTimeseriesQuery } from '@nexus/shared';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query/keys';
@@ -15,5 +15,7 @@ export function useOverviewTimeseries(query: OverviewTimeseriesQuery) {
   return useQuery({
     queryKey: qk.overview.timeseries(query),
     queryFn: ({ signal }) => api.overview.timeseries(query, { signal }),
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

@@ -28,6 +28,7 @@ import type {
 } from '../domain/filters';
 import type {
   ApiRequestRow,
+  AppTrafficRow,
   EndpointDetailRows,
   EndpointStatsRow,
   ErrorSummaryRows,
@@ -143,7 +144,10 @@ function endpointStatsStatement(
 export class ApiRequestQueryRepository {
   constructor(private readonly db: Pool) {}
 
-  /** Overview KPIs: requests, failures (>= 400), p95 (http only), distinct identified users. */
+  /**
+   * Overview KPIs: requests, failures (>= 400), p95 (http only). Identified users are counted over
+   * BOTH tables by WebEventQueryRepository.countIdentifiedUsers.
+   */
   async summarizeTraffic(
     filter: TrafficFilter,
     exec: Executor = this.db,
@@ -152,13 +156,32 @@ export class ApiRequestQueryRepository {
     const { rows } = await exec.query<TrafficSummaryRow>(
       `SELECT count(*) AS requests,
               count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS errors,
-              ${latencyPercentile(0.95)} AS p95_ms,
-              count(DISTINCT r.user_key) AS identified_users
+              ${latencyPercentile(0.95)} AS p95_ms
          FROM traffic.api_requests r
         WHERE ${scopeConditions(filter, params).join(' AND ')}`,
       params.values,
     );
-    return rows[0] ?? { requests: 0, errors: 0, p95_ms: null, identified_users: 0 };
+    return rows[0] ?? { requests: 0, errors: 0, p95_ms: null };
+  }
+
+  /** The same totals per app (apps without calls are absent), plus the newest call. */
+  async summarizeTrafficByApp(
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<AppTrafficRow[]> {
+    const params = new ParamList();
+    const { rows } = await exec.query<AppTrafficRow>(
+      `SELECT r.app_id,
+              count(*) AS requests,
+              count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS errors,
+              ${latencyPercentile(0.95)} AS p95_ms,
+              max(r.occurred_at) AS last_event_at
+         FROM traffic.api_requests r
+        WHERE ${scopeConditions(filter, params).join(' AND ')}
+        GROUP BY r.app_id`,
+      params.values,
+    );
+    return rows;
   }
 
   /** Requests / 4xx / 5xx / p95 per IST-aligned bucket; only buckets with rows (gaps filled later). */

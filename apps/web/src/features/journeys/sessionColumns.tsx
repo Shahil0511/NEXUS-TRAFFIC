@@ -51,7 +51,7 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
       id: 'user',
       header: 'User',
       className: 'max-w-56',
-      cell: (row) => <ActorCell actor={sessionActor(row)} />,
+      cell: (row) => <ActorCell actor={sessionActor(row)} linkQuery={linkQuery} />,
     },
     {
       id: 'pageViews',

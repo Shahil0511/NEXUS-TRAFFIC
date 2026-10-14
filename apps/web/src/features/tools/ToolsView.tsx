@@ -3,6 +3,7 @@
 import type { Grain, ToolUsageDto } from '@nexus/shared';
 import { useMemo } from 'react';
 
+import { AppChip } from '@/components/AppChip';
 import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
 import { Sparkline } from '@/components/charts/Sparkline';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
@@ -12,7 +13,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { RankedList } from '@/components/RankedList';
-import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { PagesToolsTabs } from '@/features/pages/PagesToolsTabs';
 import { formatDateTime, formatInteger, formatWindowCaption, GRAIN_LABELS } from '@/lib/format';
 
@@ -50,18 +51,21 @@ function trendLabel(tool: ToolUsageDto, grain: Grain): string {
   )} to ${formatInteger(Math.max(...values))}`;
 }
 
-export function toolColumns(grain: Grain): DataTableColumn<ToolUsageDto>[] {
+export function toolColumns(
+  grain: Grain,
+  linkQuery: Readonly<Record<string, string | undefined>> = {},
+): DataTableColumn<ToolUsageDto>[] {
   return [
     {
       id: 'tool',
       header: 'Tool',
       className: 'w-full max-w-0',
       cell: (row) => (
-        <span className="block min-w-0">
+        <span className="block min-w-0 space-y-1">
           <span className="block truncate font-medium" title={row.tool}>
             {row.tool}
           </span>
-          <span className="block truncate text-[11px] text-muted-foreground">{row.app}</span>
+          <AppChip app={row.app} linkQuery={linkQuery} />
         </span>
       ),
     },
@@ -110,7 +114,8 @@ export function ToolsView() {
   const grain = tools.data?.window.grain ?? 'hour';
   const bars = useMemo(() => mostUsedBars(items ?? []), [items]);
   const reach = useMemo(() => widestReach(items ?? []), [items]);
-  const columns = useMemo(() => toolColumns(grain), [grain]);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  const columns = useMemo(() => toolColumns(grain, linkQuery), [grain, linkQuery]);
 
   return (
     <div className="space-y-6">

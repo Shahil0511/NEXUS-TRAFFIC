@@ -3,11 +3,12 @@
 import {
   MAX_COUNT_RANGE_MS,
   MAX_PERCENTILE_RANGE_MS,
+  RANGE_DURATIONS_MS,
   RANGE_VALUES,
   type RangePreset,
 } from '@nexus/shared';
 import { CalendarRange } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,9 +25,24 @@ type PresetRange = Exclude<RangePreset, 'custom'>;
 const CUSTOM: RangePreset = 'custom';
 const DAY_MS = 86_400_000;
 
-const PRESET_OPTIONS: readonly SegmentedOption<PresetRange>[] = RANGE_VALUES.filter(
+const PRESETS: readonly PresetRange[] = RANGE_VALUES.filter(
   (value): value is PresetRange => value !== CUSTOM,
-).map((value) => ({ value, ...RANGE_LABELS[value] }));
+);
+
+/** The presets, those longer than the page accepts disabled with the reason (pure; tested). */
+export function presetOptions(maxRangeMs: number): SegmentedOption<PresetRange>[] {
+  return PRESETS.map((value) => {
+    const tooLong = RANGE_DURATIONS_MS[value] > maxRangeMs;
+    return {
+      value,
+      ...RANGE_LABELS[value],
+      disabled: tooLong,
+      disabledReason: tooLong
+        ? `this page covers at most ${Math.floor(maxRangeMs / DAY_MS)} days`
+        : undefined,
+    };
+  });
+}
 
 /** "1 Oct, 09:00 → 2 Oct, 18:30" for the custom button label. */
 function customLabel(from: string | undefined, to: string | undefined): string {
@@ -37,17 +53,25 @@ function customLabel(from: string | undefined, to: string | undefined): string {
 /**
  * WHY: the global time window. Presets are one click (segmented control, arrow keys move between
  * them); "Custom" opens a popover with two IST datetime fields. The values land in the URL via
- * useGlobalFilters, so every query key — and the shared link — changes with them.
+ * useGlobalFilters, so every query key — and the shared link — changes with them. Presets longer
+ * than the page's `maxRangeMs` (the API's cap for its queries) are disabled, not hidden.
  */
-export function RangePicker({ className }: { className?: string }) {
+export function RangePicker({
+  className,
+  maxRangeMs = MAX_COUNT_RANGE_MS,
+}: {
+  className?: string;
+  maxRangeMs?: number;
+}) {
   const { filters, setRange, setCustomRange } = useGlobalFilters();
   const isCustom = filters.range === CUSTOM;
+  const options = useMemo(() => presetOptions(maxRangeMs), [maxRangeMs]);
   return (
     <div className={cn('flex items-center gap-1.5', className)}>
       <SegmentedControl<PresetRange | ''>
         ariaLabel="Time range"
         value={isCustom ? '' : (filters.range as PresetRange)}
-        options={PRESET_OPTIONS}
+        options={options}
         onValueChange={(value) => {
           if (value) setRange(value);
         }}

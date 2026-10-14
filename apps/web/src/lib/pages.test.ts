@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { MAX_COUNT_RANGE_MS, MAX_PERCENTILE_RANGE_MS } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { isNavItemActive, NAV_ITEMS } from './nav';
+import { isNavItemActive, NAV_ITEMS, pageFiltersFor } from './nav';
 import { PAGES, withQuery } from './pages';
 
 const PAGES_FILE = path.join(__dirname, 'pages.ts');
@@ -58,5 +59,24 @@ describe('NAV_ITEMS', () => {
     expect(isNavItemActive(byId('endpoints'), '/endpoints/abc')).toBe(true);
     expect(isNavItemActive(byId('endpoints'), '/endpointsX')).toBe(false);
     expect(isNavItemActive(byId('pages'), '/tools')).toBe(true);
+  });
+});
+
+describe('pageFiltersFor', () => {
+  it('shows only the filters a page reads, with its range cap (detail pages inherit)', () => {
+    expect(pageFiltersFor('/')).toEqual({
+      app: true,
+      range: true,
+      maxRangeMs: MAX_PERCENTILE_RANGE_MS,
+    });
+    expect(pageFiltersFor('/users/abc').maxRangeMs).toBe(MAX_COUNT_RANGE_MS);
+    expect(pageFiltersFor('/live')).toMatchObject({ range: false });
+    expect(pageFiltersFor('/applications/ebo-sales')).toMatchObject({ app: false, range: true });
+    expect(pageFiltersFor('/apps')).toMatchObject({ app: false, range: false });
+  });
+
+  it('does not confuse /applications with /apps', () => {
+    const apps = NAV_ITEMS.find((item) => item.id === 'apps')!;
+    expect(isNavItemActive(apps, '/applications')).toBe(false);
   });
 });

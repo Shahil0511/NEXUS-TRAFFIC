@@ -305,6 +305,7 @@ describe('mapSessionSummary / mapSessionEvent', () => {
       method: null,
       status: null,
       durationMs: null,
+      endpointId: null,
     });
   });
 });

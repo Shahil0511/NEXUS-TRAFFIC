@@ -5,6 +5,7 @@ import { Activity, ArrowLeft, Gauge, Hourglass, Timer, TriangleAlert, Zap } from
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
+import { AppChip } from '@/components/AppChip';
 import { ChartLegend } from '@/components/charts/ChartLegend';
 import { ERROR_SERIES, ErrorsChart } from '@/components/charts/ErrorsChart';
 import { LatencyChart } from '@/components/charts/LatencyChart';
@@ -18,13 +19,13 @@ import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
 import { PAGES, withQuery } from '@/lib/pages';
+import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
 import { useEndpointDetail } from './useEndpointDetail';
 
@@ -94,7 +95,9 @@ interface DetailContentProps {
 
 function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
   const { endpoint, window } = detail;
-  const columns = useMemo(() => requestSampleColumns({ showRoute: false }), []);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  const columns = useMemo(() => requestSampleColumns({ showRoute: false, linkQuery }), [linkQuery]);
+  useDocumentTitle(`${endpoint.method} ${endpoint.routeTemplate}`);
   const failuresHref = withQuery(PAGES.errors(), {
     ...filterLinkQuery(filters),
     endpointId: endpoint.endpointId,
@@ -107,7 +110,7 @@ function DetailContent({ detail, filters, eyebrow }: DetailContentProps) {
         description={
           <span className="flex flex-wrap items-center gap-2">
             <MethodBadge method={endpoint.method} />
-            <Badge variant="outline">{endpoint.app}</Badge>
+            <AppChip app={endpoint.app} linkQuery={linkQuery} />
             <span>{formatWindowCaption(window)}</span>
           </span>
         }

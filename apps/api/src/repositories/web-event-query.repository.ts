@@ -37,6 +37,7 @@ import type {
 } from '../domain/filters';
 import type {
   ActivityBucketRow,
+  AppActivityRow,
   GeoCityRow,
   GeoCountryRow,
   LiveEventRow,
@@ -127,7 +128,8 @@ interface UserStatsQuery extends UserListOptions {
 
 /**
  * One row per verified user over api_requests ∪ web_events: list, search and the profile header.
- * Users are ordered most recently seen first (ties: user_key).
+ * Users are ordered most recently seen first (ties: user_key). `sessions` counts BROWSER sessions
+ * only — the ones Journeys lists — so "3 sessions" always opens 3 replayable sessions.
  */
 function userStatsStatement(
   filter: TrafficFilter,
@@ -162,7 +164,7 @@ function userStatsStatement(
            count(*) FILTER (WHERE u.kind = '${API_KIND}') AS requests,
            count(*) FILTER (WHERE u.failed) AS failed_requests,
            count(*) FILTER (WHERE u.kind = '${PAGE_VIEW}') AS page_views,
-           count(DISTINCT u.session_id) AS sessions,
+           count(DISTINCT u.session_id) FILTER (WHERE u.kind <> '${API_KIND}') AS sessions,
            array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps
       FROM activity u
       JOIN traffic.apps a ON a.id = u.app_id
@@ -326,6 +328,59 @@ export class WebEventQueryRepository {
     return rows[0]?.active_users ?? 0;
   }
 
+  /**
+   * Distinct VERIFIED users in the window over API calls + browser events — the Overview KPI, with
+   * the same definition as the Users page (userStatsStatement), so the two numbers agree.
+   */
+  async countIdentifiedUsers(filter: TrafficFilter, exec: Executor = this.db): Promise<number> {
+    const params = new ParamList();
+    const api = [...windowConditions('r', filter, params), 'r.user_key IS NOT NULL'];
+    const web = [...windowConditions('w', filter, params), 'w.user_key IS NOT NULL'];
+    const { rows } = await exec.query<{ users: number }>(
+      `SELECT count(DISTINCT u.user_key) AS users
+         FROM (
+           SELECT r.user_key FROM traffic.api_requests r WHERE ${api.join(' AND ')}
+           UNION ALL
+           SELECT w.user_key FROM traffic.web_events w WHERE ${web.join(' AND ')}
+         ) u`,
+      params.values,
+    );
+    return rows[0]?.users ?? 0;
+  }
+
+  /**
+   * Per app (apps without any event are absent): distinct verified users over BOTH tables, page
+   * views, browser sessions, tool uses and the newest event — the Applications page.
+   */
+  async summarizeActivityByApp(
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<AppActivityRow[]> {
+    const params = new ParamList();
+    const api = windowConditions('r', filter, params).join(' AND ');
+    const web = windowConditions('w', filter, params).join(' AND ');
+    const { rows } = await exec.query<AppActivityRow>(
+      `SELECT h.app_id,
+              count(DISTINCT h.user_key) AS users,
+              count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
+              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS sessions,
+              count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
+              max(h.occurred_at) AS last_event_at
+         FROM (
+           SELECT r.app_id, r.user_key, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind
+             FROM traffic.api_requests r
+            WHERE ${api}
+           UNION ALL
+           SELECT w.app_id, w.user_key, w.session_id, w.occurred_at, w.event_type AS kind
+             FROM traffic.web_events w
+            WHERE ${web}
+         ) h
+        GROUP BY h.app_id`,
+      params.values,
+    );
+    return rows;
+  }
+
   // ─── Live ─────────────────────────────────────────────────────────────────
 
   /** Page views and tool uses per IST-aligned bucket (Live backfill; gaps filled by the service). */
@@ -365,7 +420,8 @@ export class WebEventQueryRepository {
       `SELECT * FROM (
          (SELECT r.occurred_at, r.event_id, '${API_KIND}'::text AS kind, a.slug AS app_slug, r.path,
                  r.method, r.status_code::int AS status_code, r.duration_ms::float8 AS duration_ms,
-                 NULL::text AS tool, r.user_email, host(r.ip) AS ip, r.geo_country, r.geo_city
+                 NULL::text AS tool, r.user_email, r.user_key, r.endpoint_id, r.session_id,
+                 host(r.ip) AS ip, r.geo_country, r.geo_city
             FROM traffic.api_requests r
             JOIN traffic.apps a ON a.id = r.app_id
            WHERE ${api.join(' AND ')}
@@ -374,7 +430,8 @@ export class WebEventQueryRepository {
          UNION ALL
          (SELECT w.occurred_at, w.event_id, w.event_type, a.slug, w.path,
                  NULL::text, NULL::int, NULL::float8,
-                 w.tool, w.user_email, host(w.ip), w.geo_country, w.geo_city
+                 w.tool, w.user_email, w.user_key, NULL::uuid, w.session_id,
+                 host(w.ip), w.geo_country, w.geo_city
             FROM traffic.web_events w
             JOIN traffic.apps a ON a.id = w.app_id
            WHERE ${web.join(' AND ')}
@@ -453,7 +510,8 @@ export class WebEventQueryRepository {
                  '${API_KIND}'::text AS kind, a.slug AS app_slug, r.path, r.session_id,
                  r.identity_source, r.method, r.status_code::int AS status_code,
                  r.duration_ms::float8 AS duration_ms, NULL::text AS tool,
-                 NULL::bigint AS visible_ms, NULL::text AS name, host(r.ip) AS ip
+                 NULL::bigint AS visible_ms, NULL::text AS name, r.endpoint_id,
+                 host(r.ip) AS ip
             FROM traffic.api_requests r
             JOIN traffic.apps a ON a.id = r.app_id
            WHERE ${api.join(' AND ')}
@@ -464,7 +522,7 @@ export class WebEventQueryRepository {
                  w.event_type, a.slug, w.path, w.session_id,
                  w.identity_source, NULL::text, NULL::int,
                  NULL::float8, w.tool,
-                 ${visibleMs}, w.name, host(w.ip)
+                 ${visibleMs}, w.name, NULL::uuid, host(w.ip)
             FROM traffic.web_events w
             JOIN traffic.apps a ON a.id = w.app_id
            WHERE ${web.join(' AND ')}
@@ -759,7 +817,8 @@ export class WebEventQueryRepository {
     const { rows } = await exec.query<SessionEventRow>(
       `SELECT w.event_id, w.occurred_at, w.seq, w.event_type AS kind, w.path, w.tool,
               ${pageViewVisibleMs(filter, params)} AS visible_ms, w.name,
-              NULL::text AS method, NULL::int AS status_code, NULL::float8 AS duration_ms
+              NULL::text AS method, NULL::int AS status_code, NULL::float8 AS duration_ms,
+              NULL::uuid AS endpoint_id
          FROM traffic.web_events w
         WHERE ${where.join(' AND ')}
         ORDER BY ${SESSION_ORDER}
@@ -783,7 +842,8 @@ export class WebEventQueryRepository {
     const { rows } = await exec.query<SessionEventRow>(
       `SELECT r.event_id, r.occurred_at, NULL::int AS seq, '${API_KIND}'::text AS kind, r.path,
               NULL::text AS tool, NULL::bigint AS visible_ms, NULL::text AS name, r.method,
-              r.status_code::int AS status_code, r.duration_ms::float8 AS duration_ms
+              r.status_code::int AS status_code, r.duration_ms::float8 AS duration_ms,
+              r.endpoint_id
          FROM traffic.api_requests r
         WHERE ${where.join(' AND ')}
         ORDER BY r.occurred_at, r.event_id

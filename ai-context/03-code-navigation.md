@@ -201,11 +201,12 @@ apps/api/src/domain/mappers.ts                         mapEndpointStats → Endp
 
 | ROUTES leaf | Controller / service method | Repository method(s) | Notes |
 |---|---|---|---|
-| `overview.summary` | `OverviewController.summary` / `OverviewService.summary` | `ApiRequestQueryRepository.summarizeTraffic`, `WebEventQueryRepository.summarizePageViews` / `countActiveUsers` | current + previous window → `domain/compute-deltas.ts`; active users = last `ACTIVE_USER_WINDOW_MS` |
+| `overview.summary` | `OverviewController.summary` / `OverviewService.summary` | `ApiRequestQueryRepository.summarizeTraffic`, `WebEventQueryRepository.summarizePageViews` / `countIdentifiedUsers` / `countActiveUsers` | current + previous window → `domain/compute-deltas.ts`; identified users over BOTH tables; active users = last `ACTIVE_USER_WINDOW_MS` |
+| `overview.apps` | `OverviewController.apps` / `OverviewService.apps` | `ApiRequestQueryRepository.summarizeTrafficByApp`, `WebEventQueryRepository.summarizeActivityByApp`, `AppRepository.list` | one row per registered app (silent apps = zeros), deltas via `mapAppTraffic`; [ADR 0006](decisions/0006-navigation-search-and-applications.md) |
 | `overview.timeseries` | `OverviewController.timeseries` / `OverviewService.timeseries` | `ApiRequestQueryRepository.timeseries`, `WebEventQueryRepository.pageViewTimeseries` | `bucketExpr` (IST) in `apps/api/src/db/sql.ts`; gaps → `domain/timeseries-gaps.ts` |
 | `endpoints.list` | `EndpointController.list` / `EndpointService.list` | `listEndpointStats` | offset cursor (`encodeOffsetCursor`) |
 | `endpoints.detail` | `EndpointController.detail` / `EndpointService.detail` | `getEndpointDetail` | by stored `endpoint_id`; 404 when no rows; slowest samples role-masked |
-| `errors.summary` | `ErrorController.summary` / `ErrorService.summary` | `summarizeErrors` | totals, by status, series, top failing endpoints |
+| `errors.summary` | `ErrorController.summary` / `ErrorService.summary` | `summarizeErrors` | totals, by status, series, top failing endpoints; optional `endpointId` scope |
 | `errors.list` | `ErrorController.list` / `ErrorService.list` | `listFailures` | keyset `(occurred_at, event_id)` DESC; counts cap `MAX_COUNT_RANGE_MS` |
 
 Read-side rules (all in `apps/api/src/repositories/api-request-query.repository.ts`): every query is
@@ -240,7 +241,8 @@ apps/api/src/domain/mappers.ts                         mapSessionSummary (IP adm
 
 | ROUTES leaf | Controller / service method | Repository method | Notes |
 |---|---|---|---|
-| `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, email search, offset cursor |
+| `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, offset cursor; `sessions` = browser sessions |
+| `users.search` | `UserController.search` / `UserService.search` | `listUsers` | **POST** body `userSearchBodySchema` — the email never travels in a URL (ADR 0006) |
 | `users.profile` | `.profile` | `getUserProfile` | by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows |
 | `users.timeline` | `.timeline` | `listUserTimeline` | API ∪ browser, keyset `(occurred_at, event_id)` DESC; IP admin-only |
 | `journeys.sessions` | `JourneyController.sessions` / `JourneyService.sessions` | `listSessions` | strongest identity (`IDENTITY_RANKS`), entry/exit page, optional `userKey`, offset cursor |
@@ -259,12 +261,20 @@ Web half (page → View → hook → `api.*`; every View reads the global filter
 
 | Page (`apps/web/src/app/(dashboard)/…`) | View (`apps/web/src/features/…`) | Hook(s) → `api.*` | Notes |
 |---|---|---|---|
-| `users/` | `users/UsersView.tsx` | `useUserList` → `users.list` | `?q=` search (`useUserListParams`), "Load more"; link `PAGES.userDetail(userKey)` |
+| `users/` | `users/UsersView.tsx` | `useUserList` → `users.list`, `useUserSearch` → `users.search` | search text in React state only (never the URL); "Load more"; link `PAGES.userDetail(userKey)`, app chips |
 | `users/[userKey]/` | `users/UserDetailView.tsx` | `useUserProfile` → `users.profile`, `useUserTimeline` → `users.timeline` | `userKeyParamsSchema` → 404; timeline columns in `userTimelineColumns.tsx` |
 | `journeys/` | `journeys/JourneysView.tsx` | `useTopPaths` → `journeys.topPaths`, `useSessionList` → `journeys.sessions` | `?userKey=` (`useSessionListParams`, from a profile's "View sessions"); `ClaimedBadge` via `ActorCell` |
 | `journeys/[app]/[sessionId]/` | `journeys/SessionDetailView.tsx` | `useSessionDetail` → `journeys.session` | see the chain above |
 | `pages/` · `tools/` | `pages/PagesView.tsx` · `tools/ToolsView.tsx` | `usePageStats` → `pages.list` · `useToolUsage` → `tools.usage` | ONE nav entry ("Pages & Tools", `alsoActiveOn`); `PagesToolsTabs` switches routes |
 | `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution |
+
+| `applications/` | `applications/ApplicationsView.tsx` | `useAppTraffic` → `overview.apps` | per-app table (`appTrafficColumns.tsx`); the app filter is hidden here |
+| `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file |
+
+Navigation helpers: `components/CommandPalette.tsx` (Ctrl/⌘+K, mounted in `AppShell` TopBar),
+`components/AppChip.tsx` (app → its page), `UserLink` in `components/ActorCell.tsx` (verified user → profile),
+`components/RelativeTime.tsx`, `lib/useDocumentTitle.ts` (masked emails only), `NavItem.filters` +
+`pageFiltersFor` in `lib/nav.ts` (which global filters a page shows, and its range cap).
 
 Shared UI of these pages: `components/ActivityEvent.tsx` (timeline/replay row), `components/RankedList.tsx`,
 `components/charts/RankedBarChart.tsx`, `components/charts/Sparkline.tsx`; `formatCountry` / `formatElapsed`

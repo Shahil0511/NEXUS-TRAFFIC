@@ -1,4 +1,5 @@
-import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from 'lucide-react';
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus, type LucideIcon } from 'lucide-react';
+import Link from 'next/link';
 
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,6 +19,8 @@ export interface KpiCardProps {
   hint?: string;
   icon?: LucideIcon;
   loading?: boolean;
+  /** Where the breakdown behind this number lives (a PAGES href); makes the whole card a link. */
+  href?: string;
 }
 
 type Tone = 'good' | 'bad' | 'flat';
@@ -34,7 +37,14 @@ const TONE_CLASS: Record<Tone, string> = {
   flat: 'bg-muted text-muted-foreground',
 };
 
-function DeltaPill({ deltaPct, polarity }: { deltaPct: number | null; polarity: DeltaPolarity }) {
+/** The "↑ 12 %" pill, coloured by meaning (also used in table cells, e.g. Applications). */
+export function DeltaPill({
+  deltaPct,
+  polarity,
+}: {
+  deltaPct: number | null;
+  polarity: DeltaPolarity;
+}) {
   if (deltaPct === null) {
     return <span className="text-[11px] text-muted-foreground">no previous data</span>;
   }
@@ -67,12 +77,26 @@ export function KpiCard({
   hint,
   icon: Icon,
   loading = false,
+  href,
 }: KpiCardProps) {
-  return (
-    <Card className="gap-3 p-4" aria-busy={loading}>
+  const card = (
+    <Card
+      className={cn(
+        'h-full gap-3 p-4',
+        href && 'transition-colors group-hover:bg-muted/50 group-hover:ring-primary/30',
+      )}
+      aria-busy={loading}
+    >
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium text-muted-foreground">{label}</h3>
-        {Icon ? <Icon className="size-4 text-muted-foreground/70" aria-hidden="true" /> : null}
+        {href ? (
+          <ArrowRight
+            className="size-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+            aria-hidden="true"
+          />
+        ) : Icon ? (
+          <Icon className="size-4 text-muted-foreground/70" aria-hidden="true" />
+        ) : null}
       </div>
       {loading ? (
         <div className="space-y-2">
@@ -89,5 +113,14 @@ export function KpiCard({
         </div>
       )}
     </Card>
+  );
+  if (!href) return card;
+  return (
+    <Link
+      href={href}
+      className="group block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      {card}
+    </Link>
   );
 }

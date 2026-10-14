@@ -74,6 +74,9 @@ function SessionsPanel() {
   const sessions = useSessionList({ ...filters, userKey, limit: PAGE_SIZE });
   const rows = useMemo(() => sessions.data?.pages.flatMap((page) => page.items), [sessions.data]);
   const columns = useMemo(() => sessionColumns(filters), [filters]);
+  // The chip names the user from the rows (verified email of their sessions), never from the URL.
+  const userLabel =
+    (userKey && rows?.find((row) => row.userKey === userKey)?.userEmail) || 'One user only';
 
   return (
     <Panel
@@ -86,9 +89,10 @@ function SessionsPanel() {
             variant="secondary"
             size="sm"
             onClick={clearUser}
-            aria-label="Show sessions of every user"
+            className="max-w-72"
+            aria-label={`Remove user filter ${userLabel}`}
           >
-            One user only
+            <span className="truncate">{userLabel}</span>
             <X aria-hidden="true" />
           </Button>
         ) : null

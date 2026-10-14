@@ -19,9 +19,7 @@ import type { GuideChapter } from '@/lib/guide';
 export type Tone = 'success' | 'warning' | 'destructive' | 'muted';
 
 const MS_PER_SECOND = 1000;
-const MS_PER_MINUTE = 60_000;
 const MS_PER_HOUR = 3_600_000;
-const MS_PER_DAY = 86_400_000;
 
 export const STATUS_COPY: Record<IntegrationStatus, { label: string; tone: Tone }> = {
   healthy: { label: 'Healthy', tone: 'success' },
@@ -91,16 +89,8 @@ export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   },
 };
 
-/** 42_000 → "42 s ago", 5_400_000 → "1 h ago", 3 days → "3 d ago"; future/now → "just now". */
-export function formatAgo(iso: string | null, nowMs: number): string | null {
-  if (!iso) return null;
-  const ms = nowMs - new Date(iso).getTime();
-  if (ms < MS_PER_SECOND) return 'just now';
-  if (ms < MS_PER_MINUTE) return `${Math.floor(ms / MS_PER_SECOND)} s ago`;
-  if (ms < MS_PER_HOUR) return `${Math.floor(ms / MS_PER_MINUTE)} min ago`;
-  if (ms < MS_PER_DAY) return `${Math.floor(ms / MS_PER_HOUR)} h ago`;
-  return `${Math.floor(ms / MS_PER_DAY)} d ago`;
-}
+/** Moved to lib/format.ts (every page shows relative times now); re-exported for this page. */
+export { formatAgo } from '@/lib/format';
 
 /** Signed clock skew: 120 → "+120 ms", -90_000 → "−90.0 s", null → "—". */
 export function formatSkew(ms: number | null): string {

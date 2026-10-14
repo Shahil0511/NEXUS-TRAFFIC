@@ -22,6 +22,7 @@ import {
   type ApiKeyDto,
   type AppCreatedDto,
   type AppDto,
+  type AppTrafficDto,
   type CreateAppBody,
   type CreateKeyBody,
   type CursorPage,
@@ -42,6 +43,7 @@ import {
   type LiveSnapshotDto,
   type LiveSnapshotQuery,
   type MeDto,
+  type OverviewAppsQuery,
   type OverviewSummaryDto,
   type OverviewSummaryQuery,
   type OverviewTimeseriesDto,
@@ -63,6 +65,7 @@ import {
   type UserListQuery,
   type UserProfileDto,
   type UserProfileQuery,
+  type UserSearchBody,
   type UserSummaryDto,
   type UserTimelineQuery,
   type WindowedListDto,
@@ -192,6 +195,8 @@ export const api = {
       request<OverviewSummaryDto>(ROUTES.overview.summary, q, o),
     timeseries: (q: OverviewTimeseriesQuery, o?: CallOptions) =>
       request<OverviewTimeseriesDto>(ROUTES.overview.timeseries, q, o),
+    apps: (q: OverviewAppsQuery, o?: CallOptions) =>
+      request<WindowedListDto<AppTrafficDto>>(ROUTES.overview.apps, q, o),
   },
   endpoints: {
     list: (q: EndpointListQuery, o?: CallOptions) =>
@@ -211,6 +216,9 @@ export const api = {
   users: {
     list: (q: UserListQuery, o?: CallOptions) =>
       request<CursorPage<UserSummaryDto>>(ROUTES.users.list, q, o),
+    /** POST: the typed email travels in the body, never in a URL (ADR 0006). */
+    search: (body: UserSearchBody, o?: CallOptions) =>
+      request<CursorPage<UserSummaryDto>>(ROUTES.users.search, undefined, { ...o, body }),
     profile: (userKey: string, q: UserProfileQuery, o?: CallOptions) =>
       request<UserProfileDto, typeof ROUTES.users.profile>(ROUTES.users.profile, q, {
         ...o,

@@ -2,8 +2,11 @@
 
 import { LIVE_SNAPSHOT_MINUTES, LIVE_TICK_MS, type LiveEventDto } from '@nexus/shared';
 import { Activity, Gauge, Pause, Play, Radio, TriangleAlert } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { ActivityEventSummary, ActivityKindBadge } from '@/components/ActivityEvent';
+import { UserLink } from '@/components/ActorCell';
+import { AppChip } from '@/components/AppChip';
 import { TrafficChart } from '@/components/charts/TrafficChart';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
@@ -35,6 +38,7 @@ const TICK_SECONDS = LIVE_TICK_MS / 1000;
 export function LiveView() {
   const { filters } = useGlobalFilters();
   const live = useLiveFeed({ app: filters.app });
+  const columns = useMemo(() => liveColumns({ app: filters.app }), [filters.app]);
   const ticks = live.snapshot.data?.ticks ?? [];
   const current = latestTick(ticks);
   const loading = live.snapshot.isPending;
@@ -119,7 +123,7 @@ export function LiveView() {
         ) : (
           <DataTable
             caption="Live activity, newest first"
-            columns={LIVE_COLUMNS}
+            columns={columns}
             rows={live.snapshot.isPending ? undefined : live.events}
             rowKey={(row) => row.eventId}
             loading={live.snapshot.isPending}
@@ -174,14 +178,17 @@ function placeOf(event: LiveEventDto): string | null {
 }
 
 /**
- * WHO did it. The IP appears ONLY when the API sent one (admin sockets; viewer payloads carry
- * none). Ingested values are rendered as text, never as links.
+ * WHO did it — a verified user links to their page through the opaque userKey. The IP appears
+ * ONLY when the API sent one (admin sockets; viewer payloads carry none). Other ingested values
+ * are rendered as text, never as links.
  */
-function LiveActorCell({ event }: { event: LiveEventDto }) {
+function LiveActorCell({ event, linkQuery }: { event: LiveEventDto; linkQuery: LinkQuery }) {
   const secondary = [event.ip, placeOf(event)].filter((part): part is string => !!part).join(' · ');
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      {event.userEmail ? (
+      {event.userEmail && event.userKey ? (
+        <UserLink userKey={event.userKey} email={event.userEmail} linkQuery={linkQuery} />
+      ) : event.userEmail ? (
         <span className="truncate">{event.userEmail}</span>
       ) : (
         <span className="text-muted-foreground italic">anonymous</span>
@@ -193,39 +200,49 @@ function LiveActorCell({ event }: { event: LiveEventDto }) {
   );
 }
 
-const LIVE_COLUMNS: readonly DataTableColumn<LiveEventDto>[] = [
-  {
-    id: 'time',
-    header: 'Time',
-    cell: (event) => (
-      <span className="text-xs text-muted-foreground tabular">
-        {formatDateTime(event.occurredAt)}
-      </span>
-    ),
-    className: 'w-36',
-  },
-  {
-    id: 'app',
-    header: 'App',
-    cell: (event) => <span className="font-mono text-xs">{event.app}</span>,
-    className: 'w-32',
-  },
-  {
-    id: 'kind',
-    header: 'Kind',
-    cell: (event) => <ActivityKindBadge kind={event.kind} />,
-    className: 'w-28',
-  },
-  {
-    id: 'event',
-    header: 'Event',
-    cell: (event) => <ActivityEventSummary event={{ ...event, visibleMs: null, name: null }} />,
-    className: 'max-w-md',
-  },
-  {
-    id: 'actor',
-    header: 'User',
-    cell: (event) => <LiveActorCell event={event} />,
-    className: 'max-w-64',
-  },
-];
+type LinkQuery = Readonly<Record<string, string | undefined>>;
+
+/** The stream's columns; links carry `linkQuery` (the app filter — Live has no range). */
+function liveColumns(linkQuery: LinkQuery): DataTableColumn<LiveEventDto>[] {
+  return [
+    {
+      id: 'time',
+      header: 'Time',
+      cell: (event) => (
+        <span className="text-xs text-muted-foreground tabular">
+          {formatDateTime(event.occurredAt)}
+        </span>
+      ),
+      className: 'w-36',
+    },
+    {
+      id: 'app',
+      header: 'App',
+      cell: (event) => <AppChip app={event.app} linkQuery={linkQuery} />,
+      className: 'w-32',
+    },
+    {
+      id: 'kind',
+      header: 'Kind',
+      cell: (event) => <ActivityKindBadge kind={event.kind} />,
+      className: 'w-28',
+    },
+    {
+      id: 'event',
+      header: 'Event',
+      cell: (event) => (
+        <ActivityEventSummary
+          event={{ ...event, visibleMs: null, name: null }}
+          linkQuery={linkQuery}
+        />
+      ),
+      className: 'max-w-md',
+    },
+    {
+      id: 'actor',
+      header: 'User',
+      cell: (event) => <LiveActorCell event={event} linkQuery={linkQuery} />,
+      className: 'max-w-64',
+    },
+  ];
+}

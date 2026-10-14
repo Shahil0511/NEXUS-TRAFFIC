@@ -3,6 +3,7 @@ import { PlayCircle } from 'lucide-react';
 import Link from 'next/link';
 
 import { ActivityEventSummary, ActivityKindBadge } from '@/components/ActivityEvent';
+import { AppChip } from '@/components/AppChip';
 import type { DataTableColumn } from '@/components/DataTable';
 import { filterLinkQuery } from '@/features/filters/useGlobalFilters';
 import { EMPTY_VALUE, formatDateTime } from '@/lib/format';
@@ -30,15 +31,15 @@ export function userTimelineColumns(filters: TimeWindowQuery): DataTableColumn<T
       id: 'detail',
       header: 'Detail',
       className: 'w-full max-w-0',
-      cell: (row) => <ActivityEventSummary event={row} />,
+      cell: (row) => <ActivityEventSummary event={row} linkQuery={linkQuery} />,
     },
     {
       id: 'app',
       header: 'App',
       className: 'max-w-44',
       cell: (row) => (
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate">{row.app}</span>
+        <span className="flex min-w-0 flex-col items-start gap-0.5">
+          <AppChip app={row.app} linkQuery={linkQuery} />
           {row.ip ? (
             <span className="truncate font-mono text-[11px] text-muted-foreground">{row.ip}</span>
           ) : null}

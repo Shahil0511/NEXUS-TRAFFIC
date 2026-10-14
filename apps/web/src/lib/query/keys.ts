@@ -13,6 +13,7 @@ import type {
   ErrorSummaryQuery,
   GeoQuery,
   LiveSnapshotQuery,
+  OverviewAppsQuery,
   OverviewSummaryQuery,
   OverviewTimeseriesQuery,
   PageListQuery,
@@ -22,6 +23,7 @@ import type {
   TopPathsQuery,
   UserListQuery,
   UserProfileQuery,
+  UserSearchBody,
   UserTimelineQuery,
 } from '@nexus/shared';
 
@@ -29,6 +31,7 @@ import type {
 export type EndpointListKeyQuery = Omit<EndpointListQuery, 'cursor'>;
 export type ErrorListKeyQuery = Omit<ErrorListQuery, 'cursor'>;
 export type UserListKeyQuery = Omit<UserListQuery, 'cursor'>;
+export type UserSearchKeyBody = Omit<UserSearchBody, 'cursor'>;
 export type UserTimelineKeyQuery = Omit<UserTimelineQuery, 'cursor'>;
 export type SessionListKeyQuery = Omit<SessionListQuery, 'cursor'>;
 
@@ -45,6 +48,7 @@ export const qk = {
     all: ['overview'] as const,
     summary: (q: OverviewSummaryQuery) => ['overview', 'summary', q] as const,
     timeseries: (q: OverviewTimeseriesQuery) => ['overview', 'timeseries', q] as const,
+    apps: (q: OverviewAppsQuery) => ['overview', 'apps', q] as const,
   },
   endpoints: {
     all: ['endpoints'] as const,
@@ -60,6 +64,8 @@ export const qk = {
   users: {
     all: ['users'] as const,
     list: (q: UserListKeyQuery) => ['users', 'list', q] as const,
+    /** The search text is part of the in-memory key only — never of a URL. */
+    search: (q: UserSearchKeyBody) => ['users', 'search', q] as const,
     profile: (userKey: string, q: UserProfileQuery) => ['users', 'profile', userKey, q] as const,
     timeline: (userKey: string, q: UserTimelineKeyQuery) =>
       ['users', 'timeline', userKey, q] as const,

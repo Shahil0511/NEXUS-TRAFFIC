@@ -19,6 +19,10 @@ export type OverviewSummaryQuery = z.infer<typeof overviewSummaryQuerySchema>;
 export const overviewTimeseriesQuerySchema = timeWindowQuerySchema;
 export type OverviewTimeseriesQuery = z.infer<typeof overviewTimeseriesQuerySchema>;
 
+/** The `app` value narrows the list to one row (the application detail page). */
+export const overviewAppsQuerySchema = timeWindowQuerySchema;
+export type OverviewAppsQuery = z.infer<typeof overviewAppsQuerySchema>;
+
 // ─── endpoints ──────────────────────────────────────────────────────────────
 export const ENDPOINT_SORT_VALUES = ['calls', 'errorRate', 'p50', 'p95', 'p99', 'avg'] as const;
 export type EndpointSort = (typeof ENDPOINT_SORT_VALUES)[number];
@@ -40,7 +44,10 @@ export type EndpointDetailQuery = z.infer<typeof endpointDetailQuerySchema>;
 export const STATUS_CLASS_VALUES = ['all', '4xx', '5xx'] as const;
 export type StatusClass = (typeof STATUS_CLASS_VALUES)[number];
 
-export const errorSummaryQuerySchema = timeWindowQuerySchema;
+/** `endpointId` scopes the totals, chart and status codes to one route (Errors opened from a route). */
+export const errorSummaryQuerySchema = timeWindowQuerySchema.safeExtend({
+  endpointId: z.uuid().optional(),
+});
 export type ErrorSummaryQuery = z.infer<typeof errorSummaryQuerySchema>;
 
 export const errorListQuerySchema = timeWindowQuerySchema.safeExtend({
@@ -54,11 +61,16 @@ export type ErrorListQuery = z.infer<typeof errorListQuerySchema>;
 /** userKey = hex HMAC-SHA256 of the email (64 chars). */
 export const userKeySchema = z.string().regex(/^[0-9a-f]{64}$/, 'invalid user key');
 
-export const userListQuerySchema = timeWindowQuerySchema.safeExtend({
-  search: z.string().trim().max(100).optional(),
+/** No `search` here: an email must never be in a URL — searching is ROUTES.users.search (POST). */
+export const userListQuerySchema = timeWindowQuerySchema.safeExtend({ ...pageQueryShape });
+export type UserListQuery = z.infer<typeof userListQuerySchema>;
+
+/** BODY of ROUTES.users.search: the list query plus the email substring (ADR 0006). */
+export const userSearchBodySchema = timeWindowQuerySchema.safeExtend({
+  search: z.string().trim().min(1).max(100),
   ...pageQueryShape,
 });
-export type UserListQuery = z.infer<typeof userListQuerySchema>;
+export type UserSearchBody = z.infer<typeof userSearchBodySchema>;
 
 export const userKeyParamsSchema = z.object({ userKey: userKeySchema });
 export type UserKeyParams = z.infer<typeof userKeyParamsSchema>;

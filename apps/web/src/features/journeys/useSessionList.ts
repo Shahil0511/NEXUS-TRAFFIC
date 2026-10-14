@@ -1,6 +1,6 @@
 'use client';
 
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk, type SessionListKeyQuery } from '@/lib/query/keys';
@@ -18,5 +18,7 @@ export function useSessionList(query: SessionListKeyQuery) {
       api.journeys.sessions({ ...query, cursor: pageParam }, { signal }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

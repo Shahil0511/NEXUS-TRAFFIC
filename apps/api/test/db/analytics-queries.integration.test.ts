@@ -82,7 +82,13 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     const webEvents = new WebEventQueryRepository(queryPool);
     const appSlugs = new AppSlugResolver(new AppRepository(queryPool));
     const clock = new FixedClock(seed.now);
-    overview = new OverviewService(requests, webEvents, appSlugs, clock);
+    overview = new OverviewService(
+      requests,
+      webEvents,
+      new AppRepository(queryPool),
+      appSlugs,
+      clock,
+    );
     endpoints = new EndpointService(requests, appSlugs, clock);
     errors = new ErrorService(requests, appSlugs, clock);
   });
@@ -145,6 +151,26 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
       await expect(overview.summary({ range: '90d' })).rejects.toMatchObject({
         code: ERROR_CODES.RANGE_TOO_LARGE,
       });
+    });
+  });
+
+  describe('OverviewService.apps', () => {
+    it('one row per registered app whose numbers match the scoped Overview', async () => {
+      const dto = await overview.apps({ range: '24h' });
+      const bySlug = new Map(dto.items.map((item) => [item.app, item]));
+      for (const slug of [SALES_SLUG, HR_SLUG]) {
+        const scoped = await overview.summary({ range: '24h', app: slug });
+        expect(bySlug.get(slug)?.requests).toEqual(scoped.requests);
+        expect(bySlug.get(slug)?.errorRate).toEqual(scoped.errorRate);
+        expect(bySlug.get(slug)?.pageViews).toEqual(scoped.pageViews);
+        expect(bySlug.get(slug)?.users).toEqual(scoped.identifiedUsers);
+      }
+      expect(bySlug.get(HR_SLUG)?.errorRate.value).toBe(50);
+    });
+
+    it('narrows to the app filter', async () => {
+      const dto = await overview.apps({ range: '24h', app: HR_SLUG });
+      expect(dto.items.map((item) => item.app)).toEqual([HR_SLUG]);
     });
   });
 
@@ -322,6 +348,14 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
         new Set([ENDPOINT_IDS.reportExport, ENDPOINT_IDS.leaveList]),
       );
     });
+
+    it('scopes every number to one route when endpointId is given', async () => {
+      const all = await errors.summary({ range: '24h' });
+      const route = all.topEndpoints.find((e) => e.endpointId === ENDPOINT_IDS.leaveList)!;
+      const dto = await errors.summary({ range: '24h', endpointId: ENDPOINT_IDS.leaveList });
+      expect(dto.total).toBe(route.errors4xx + route.errors5xx);
+      expect(dto.topEndpoints.map((e) => e.endpointId)).toEqual([ENDPOINT_IDS.leaveList]);
+    });
   });
 
   describe('ErrorService.list', () => {
@@ -424,7 +458,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     });
 
     it('searches by email and offset-pages', async () => {
-      const found = await users.list({ range: '24h', limit: 50, search: 'A@LIBAS' });
+      const found = await users.search({ range: '24h', limit: 50, search: 'A@LIBAS' });
       expect(found.items.map((u) => u.email)).toEqual([USER_A]);
       const first = await users.list({ range: '24h', limit: 1 });
       const second = await users.list({ range: '24h', limit: 1, cursor: first.nextCursor ?? '' });
@@ -548,7 +582,9 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
       const missing = (app: string, sessionId: string, range: '24h' | '15m' = '24h') =>
         journeys.session(app, sessionId, { range }, ADMIN);
       await expect(missing(HR_SLUG, seed.sessions.j1)).rejects.toMatchObject({ statusCode: 404 });
-      await expect(missing(SALES_SLUG, seed.sessions.j3)).rejects.toMatchObject({ statusCode: 404 });
+      await expect(missing(SALES_SLUG, seed.sessions.j3)).rejects.toMatchObject({
+        statusCode: 404,
+      });
       // J1 ended 54 minutes before now: nothing of it falls in the last 15 minutes.
       await expect(missing(SALES_SLUG, seed.sessions.j1, '15m')).rejects.toMatchObject({
         statusCode: 404,
@@ -606,22 +642,32 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     const hourBefore = () => ({ from: new Date(seed.now.getTime() - HOUR), to: seed.now });
 
     async function ownerCount(sql: string): Promise<number> {
-      const { rows } = await db.ownerPool.query<{ n: string }>(sql, [hourBefore().from, hourBefore().to]);
+      const { rows } = await db.ownerPool.query<{ n: string }>(sql, [
+        hourBefore().from,
+        hourBefore().to,
+      ]);
       return Number(rows[0]?.n);
     }
 
     it('activityTimeseries: minute buckets whose totals equal the page views / tool uses of the window', async () => {
-      const buckets = await new WebEventQueryRepository(queryPool).activityTimeseries(hourBefore(), 'minute');
+      const buckets = await new WebEventQueryRepository(queryPool).activityTimeseries(
+        hourBefore(),
+        'minute',
+      );
       expect(buckets.length).toBeGreaterThan(0);
       for (const b of buckets) expect(new Date(b.bucket).getUTCSeconds()).toBe(0);
       const times = buckets.map((b) => new Date(b.bucket).getTime());
       expect(times).toEqual([...times].sort((x, y) => x - y));
       const window = `occurred_at >= $1 AND occurred_at < $2`;
       expect(buckets.reduce((sum, b) => sum + Number(b.page_views), 0)).toBe(
-        await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'page_view'`),
+        await ownerCount(
+          `SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'page_view'`,
+        ),
       );
       expect(buckets.reduce((sum, b) => sum + Number(b.tool_uses), 0)).toBe(
-        await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'tool_use'`),
+        await ownerCount(
+          `SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type = 'tool_use'`,
+        ),
       );
     });
 
@@ -630,8 +676,9 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
       const all = await repo.listRecentEvents(hourBefore(), 500);
       const window = `occurred_at >= $1 AND occurred_at < $2`;
       expect(all).toHaveLength(
-        (await ownerCount(`SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type <> 'page_time'`)) +
-          (await ownerCount(`SELECT count(*) AS n FROM traffic.api_requests WHERE ${window}`)),
+        (await ownerCount(
+          `SELECT count(*) AS n FROM traffic.web_events WHERE ${window} AND event_type <> 'page_time'`,
+        )) + (await ownerCount(`SELECT count(*) AS n FROM traffic.api_requests WHERE ${window}`)),
       );
       expect(all.some((e) => e.kind === 'page_time')).toBe(false);
       expect(new Set(all.map((e) => e.kind)).has('api')).toBe(true);

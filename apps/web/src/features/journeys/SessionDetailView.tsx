@@ -16,10 +16,10 @@ import { type ReactNode } from 'react';
 import { ClaimedBadge } from '@/components/ClaimedBadge';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { AppChip } from '@/components/AppChip';
 import { KpiCard } from '@/components/KpiCard';
 import { PageHeader } from '@/components/PageHeader';
 import { ListSkeleton, Panel } from '@/components/Panel';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -131,7 +131,7 @@ function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) 
         title={title}
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Badge variant="outline">{summary.app}</Badge>
+            <AppChip app={summary.app} linkQuery={filterLinkQuery(filters)} />
             <span>Started {formatDateTime(summary.startedAt)} IST</span>
             <SessionIdentity session={summary} />
           </span>
@@ -177,7 +177,11 @@ function DetailContent({ title, detail, filters, eyebrow }: DetailContentProps) 
         description="Each page with its visible time, then the tools used and API calls made on it"
       >
         {events.length > 0 ? (
-          <SessionReplay events={events} startedAt={summary.startedAt} />
+          <SessionReplay
+            events={events}
+            startedAt={summary.startedAt}
+            linkQuery={filterLinkQuery(filters)}
+          />
         ) : (
           <EmptyState title="No events recorded" />
         )}

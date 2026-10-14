@@ -1,7 +1,7 @@
 'use client';
 
 import type { OverviewSummaryQuery } from '@nexus/shared';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk } from '@/lib/query/keys';
@@ -15,5 +15,7 @@ export function useOverviewSummary(query: OverviewSummaryQuery) {
   return useQuery({
     queryKey: qk.overview.summary(query),
     queryFn: ({ signal }) => api.overview.summary(query, { signal }),
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

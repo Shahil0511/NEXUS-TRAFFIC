@@ -81,7 +81,7 @@ export function trafficBucketRow(overrides: Partial<TrafficBucketRow> = {}): Tra
 }
 
 export function trafficSummaryRow(overrides: Partial<TrafficSummaryRow> = {}): TrafficSummaryRow {
-  return { requests: 100, errors: 5, p95_ms: 200, identified_users: 7, ...overrides };
+  return { requests: 100, errors: 5, p95_ms: 200, ...overrides };
 }
 
 // ─── S3 browser analytics rows ──────────────────────────────────────────────
@@ -122,6 +122,7 @@ export function timelineEventRow(overrides: Partial<TimelineEventRow> = {}): Tim
     tool: null,
     visible_ms: 4200,
     name: null,
+    endpoint_id: null,
     ip: '8.8.8.8',
     ...overrides,
   };
@@ -162,6 +163,7 @@ export function sessionEventRow(overrides: Partial<SessionEventRow> = {}): Sessi
     method: null,
     status_code: null,
     duration_ms: null,
+    endpoint_id: null,
     ...overrides,
   };
 }

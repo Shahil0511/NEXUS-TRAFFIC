@@ -214,6 +214,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     overview: new OverviewService(
       repositories.apiRequestQuery,
       repositories.webEventQuery,
+      repositories.apps,
       appSlugs,
       clock,
     ),

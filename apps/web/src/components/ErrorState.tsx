@@ -1,8 +1,10 @@
 'use client';
 
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import { ERROR_CODES } from '@nexus/shared';
+import { AlertTriangle, CalendarRange, RotateCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { ApiError } from '@/lib/apiError';
 import { cn } from '@/lib/utils';
 
@@ -28,9 +30,38 @@ function describe(error: unknown): {
   };
 }
 
+/** The preset a too-long range falls back to (the longest one every page accepts). */
+const SAFE_RANGE = '30d';
+
+/** WHY: a range the page cannot cover is the user's choice, not a failure — offer the fix. */
+function RangeTooLargeState({ className }: { className?: string }) {
+  const { setRange } = useGlobalFilters();
+  return (
+    <div
+      role="status"
+      className={cn(
+        'flex flex-col items-center justify-center gap-2 px-6 py-10 text-center',
+        className,
+      )}
+    >
+      <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-accent-foreground">
+        <CalendarRange className="size-5" aria-hidden="true" />
+      </span>
+      <p className="text-sm font-semibold">This range is too long for this view</p>
+      <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
+        Latency and time-on-page views cover at most 31 days. Pick a shorter range to see the data.
+      </p>
+      <Button variant="outline" size="sm" className="mt-2" onClick={() => setRange(SAFE_RANGE)}>
+        Show the last 30 days
+      </Button>
+    </div>
+  );
+}
+
 /**
  * WHY: a failed query explains itself — the API's message and code, plus the request id the user
- * can quote (it is in every api log line) — and offers a retry.
+ * can quote (it is in every api log line) — and offers a retry. A too-long range gets its own
+ * friendly state with a one-click fix instead of an error.
  */
 export function ErrorState({
   error,
@@ -39,6 +70,7 @@ export function ErrorState({
   className,
 }: ErrorStateProps) {
   const { message, code, requestId } = describe(error);
+  if (code === ERROR_CODES.RANGE_TOO_LARGE) return <RangeTooLargeState className={className} />;
   return (
     <div
       role="alert"

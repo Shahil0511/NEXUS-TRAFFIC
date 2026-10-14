@@ -9,6 +9,7 @@ import type {
   SdkHealthDto,
 } from '@nexus/shared';
 import {
+  ArrowRight,
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
@@ -205,6 +206,13 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
           <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{health.app}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          <Link
+            href={PAGES.applicationDetail(health.app)}
+            className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            View traffic
+            <ArrowRight className="size-3" aria-hidden="true" />
+          </Link>
           {health.isActive ? null : <Badge variant="destructive">disabled</Badge>}
           <Badge variant={status.tone}>
             <StatusIcon aria-hidden="true" />

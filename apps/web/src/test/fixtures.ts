@@ -3,6 +3,7 @@
  * breaks the fixtures at compile time instead of silently drifting.
  */
 import type {
+  AppTrafficDto,
   AppDto,
   CursorPage,
   EndpointDetailDto,
@@ -58,6 +59,41 @@ export const OVERVIEW_SUMMARY: OverviewSummaryDto = {
   pageViews: { value: 3_210, previous: null, deltaPct: null },
   identifiedUsers: { value: 42, previous: 40, deltaPct: 5 },
   activeUsersNow: 7,
+};
+
+export function appTraffic(overrides: Partial<AppTrafficDto> = {}): AppTrafficDto {
+  return {
+    app: 'ebo-sales',
+    displayName: 'EBO Sales',
+    requests: { value: 9_000, previous: 6_000, deltaPct: 50 },
+    errorRate: { value: 1.5, previous: 3, deltaPct: -50 },
+    p95Ms: 320,
+    pageViews: { value: 2_400, previous: 2_000, deltaPct: 20 },
+    users: { value: 38, previous: 30, deltaPct: 26.67 },
+    sessions: 120,
+    toolUses: 64,
+    lastEventAt: '2026-10-01T07:59:00.000Z',
+    ...overrides,
+  };
+}
+
+export const APP_TRAFFIC: WindowedListDto<AppTrafficDto> = {
+  window: WINDOW,
+  items: [
+    appTraffic(),
+    appTraffic({
+      app: 'hr-portal',
+      displayName: 'HR Portal',
+      requests: { value: 0, previous: 0, deltaPct: null },
+      errorRate: { value: null, previous: null, deltaPct: null },
+      p95Ms: null,
+      pageViews: { value: 0, previous: 0, deltaPct: null },
+      users: { value: 0, previous: 0, deltaPct: null },
+      sessions: 0,
+      toolUses: 0,
+      lastEventAt: null,
+    }),
+  ],
 };
 
 export function timeseriesPoint(bucket: string, requests: number): TimeseriesPointDto {
@@ -118,6 +154,7 @@ export function failedRequest(eventId: string, status = 500): FailedRequestDto {
     durationMs: 1_234,
     errorCode: 'ORDER_LOOKUP_FAILED',
     requestId: `req-${eventId.slice(0, 4)}`,
+    sessionId: null,
     actor: {
       userKey: null,
       userEmail: 'buyer@libas.in',
@@ -200,6 +237,7 @@ export function timelineItem(
     tool: kind === 'tool_use' ? 'export-csv' : null,
     visibleMs: kind === 'page_view' ? 65_000 : null,
     name: null,
+    endpointId: kind === 'api' ? '6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11' : null,
     ip: null,
     ...overrides,
   };
@@ -254,6 +292,7 @@ export function sessionEvent(
     method: kind === 'api' ? 'GET' : null,
     status: kind === 'api' ? 200 : null,
     durationMs: kind === 'api' ? 120 : null,
+    endpointId: kind === 'api' ? '6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11' : null,
     ...overrides,
   };
 }

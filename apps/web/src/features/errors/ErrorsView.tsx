@@ -18,7 +18,8 @@ import { QueryState } from '@/components/QueryState';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl, type SegmentedOption } from '@/components/ui/segmented-control';
-import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { useEndpointDetail } from '@/features/endpoints/useEndpointDetail';
+import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatInteger, formatWindowCaption } from '@/lib/format';
 
 import { TopFailingEndpoints } from './TopFailingEndpoints';
@@ -46,7 +47,9 @@ const STATUS_CLASS_OPTIONS: readonly SegmentedOption<StatusClass>[] = STATUS_CLA
  */
 export function ErrorsView() {
   const { filters } = useGlobalFilters();
-  const summary = useErrorSummary(filters);
+  const { endpointId } = useErrorListParams();
+  // Scoped like the list below: opened from a route, every number describes that route only.
+  const summary = useErrorSummary({ ...filters, endpointId });
 
   return (
     <div className="space-y-6">
@@ -135,12 +138,37 @@ export function ErrorsView() {
 
 // ─── Failed requests ─────────────────────────────────────────────────────────
 
+/**
+ * WHY: "One route only ×" must say WHICH route — the template comes from the route's own query
+ * (keyed by the opaque endpointId; the same cache entry as its page), never from the URL.
+ */
+function RouteFilterChip({ endpointId, onClear }: { endpointId: string; onClear: () => void }) {
+  const { filters } = useGlobalFilters();
+  const route = useEndpointDetail(endpointId, filters);
+  const label = route.data
+    ? `${route.data.endpoint.method} ${route.data.endpoint.routeTemplate}`
+    : 'One route only';
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={onClear}
+      className="max-w-72"
+      aria-label={`Remove route filter ${label}`}
+    >
+      <span className="truncate font-mono text-xs">{label}</span>
+      <X aria-hidden="true" />
+    </Button>
+  );
+}
+
 function FailedRequestsPanel() {
   const { filters } = useGlobalFilters();
   const { statusClass, endpointId, setStatusClass, clearEndpoint } = useErrorListParams();
   const failures = useFailedRequests({ ...filters, statusClass, endpointId, limit: PAGE_SIZE });
   const rows = useMemo(() => failures.data?.pages.flatMap((page) => page.items), [failures.data]);
-  const columns = useMemo(() => requestSampleColumns({ showRoute: true }), []);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  const columns = useMemo(() => requestSampleColumns({ showRoute: true, linkQuery }), [linkQuery]);
 
   return (
     <Panel
@@ -149,17 +177,7 @@ function FailedRequestsPanel() {
       contentClassName="px-0 pb-0"
       aside={
         <div className="flex items-center gap-2">
-          {endpointId ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={clearEndpoint}
-              aria-label="Show failures of every route"
-            >
-              One route only
-              <X aria-hidden="true" />
-            </Button>
-          ) : null}
+          {endpointId ? <RouteFilterChip endpointId={endpointId} onClear={clearEndpoint} /> : null}
           <SegmentedControl
             ariaLabel="Status class"
             value={statusClass}

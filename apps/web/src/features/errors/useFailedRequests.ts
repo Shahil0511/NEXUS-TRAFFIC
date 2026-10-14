@@ -1,6 +1,6 @@
 'use client';
 
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 import { qk, type ErrorListKeyQuery } from '@/lib/query/keys';
@@ -19,5 +19,7 @@ export function useFailedRequests(query: ErrorListKeyQuery) {
       api.errors.list({ ...query, cursor: pageParam }, { signal }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    // A filter change keeps the current rows on screen until the new ones arrive (no flicker).
+    placeholderData: keepPreviousData,
   });
 }

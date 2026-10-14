@@ -1,9 +1,11 @@
 'use client';
 
 import type { OverviewSummaryDto, TimeseriesPointDto } from '@nexus/shared';
-import { Activity, Eye, Gauge, Radio, TriangleAlert, UserCheck } from 'lucide-react';
+import { Activity, ArrowRight, Eye, Gauge, Radio, TriangleAlert, UserCheck } from 'lucide-react';
 import Link from 'next/link';
+import { useMemo } from 'react';
 
+import { AppChip } from '@/components/AppChip';
 import { ChartLegend } from '@/components/charts/ChartLegend';
 import { ERROR_SERIES, ErrorsChart } from '@/components/charts/ErrorsChart';
 import { LatencyChart } from '@/components/charts/LatencyChart';
@@ -15,6 +17,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { Button } from '@/components/ui/button';
+import { useAppTraffic } from '@/features/applications/useAppTraffic';
 import { TopFailingEndpoints } from '@/features/errors/TopFailingEndpoints';
 import { useErrorSummary } from '@/features/errors/useErrorSummary';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
@@ -40,9 +43,13 @@ function hasNoErrors(points: readonly TimeseriesPointDto[]): boolean {
   return points.every((point) => point.errors4xx === 0 && point.errors5xx === 0);
 }
 
+/** How many apps the Overview's "Applications" panel previews (busiest first). */
+const TOP_APPS = 5;
+
 /**
- * The Overview page: headline KPIs with deltas, traffic / error / latency charts and the routes
- * that fail most — the "is everything OK?" screen.
+ * The Overview page: headline KPIs with deltas (each card opens its breakdown), traffic / error /
+ * latency charts, the busiest applications and the routes that fail most — the "is everything
+ * OK?" screen.
  *
  * WHY THREE QUERIES: summary (KPIs), timeseries (charts) and errors.summary (top failing routes)
  * load and fail independently, so one slow panel never blanks the page. All three are keyed by
@@ -53,6 +60,7 @@ export function OverviewView() {
   const summary = useOverviewSummary(filters);
   const timeseries = useOverviewTimeseries(filters);
   const errors = useErrorSummary(filters);
+  const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
 
   return (
     <div className="space-y-6">
@@ -65,7 +73,7 @@ export function OverviewView() {
         }
       />
 
-      <KpiGrid summary={summary.data} loading={summary.isPending} />
+      <KpiGrid summary={summary.data} loading={summary.isPending} linkQuery={linkQuery} />
       {summary.isError ? (
         <ErrorState
           error={summary.error}
@@ -142,7 +150,7 @@ export function OverviewView() {
           description="Most 4xx + 5xx responses"
           aside={
             <Button asChild variant="ghost" size="sm">
-              <Link href={withQuery(PAGES.errors(), filterLinkQuery(filters))}>All errors</Link>
+              <Link href={withQuery(PAGES.errors(), linkQuery)}>All errors</Link>
             </Button>
           }
         >
@@ -151,7 +159,81 @@ export function OverviewView() {
           </QueryState>
         </Panel>
       </div>
+
+      <AppsPanel filters={filters} linkQuery={linkQuery} />
     </div>
+  );
+}
+
+// ─── Applications at a glance ────────────────────────────────────────────────
+
+/**
+ * WHY: "which app is busy, which one is failing, how many people use each" without leaving the
+ * Overview — the top of the Applications table, each app one click from its own page.
+ */
+function AppsPanel({
+  filters,
+  linkQuery,
+}: {
+  filters: Parameters<typeof useAppTraffic>[0];
+  linkQuery: Record<string, string | undefined>;
+}) {
+  const apps = useAppTraffic(filters);
+  const items = apps.data?.items.slice(0, TOP_APPS);
+  return (
+    <Panel
+      title="Applications"
+      description="Busiest first: users, API calls and error rate per app"
+      aside={
+        <Button asChild variant="ghost" size="sm">
+          <Link href={withQuery(PAGES.applications(), { ...linkQuery, app: undefined })}>
+            All applications <ArrowRight aria-hidden="true" />
+          </Link>
+        </Button>
+      }
+    >
+      <QueryState
+        query={apps}
+        skeleton={<ListSkeleton />}
+        isEmpty={items?.length === 0}
+        empty={<EmptyState title="No apps registered yet" />}
+      >
+        {() => (
+          <ul className="divide-y divide-border" aria-label="Applications">
+            {items!.map((app) => (
+              <li key={app.app} className="flex flex-wrap items-center gap-x-6 gap-y-1 py-2.5">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <Link
+                    href={withQuery(PAGES.applicationDetail(app.app), {
+                      ...linkQuery,
+                      app: undefined,
+                    })}
+                    className="truncate rounded-sm font-medium outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring/60"
+                  >
+                    {app.displayName}
+                  </Link>
+                  <AppChip app={app.app} linkQuery={linkQuery} className="hidden sm:inline-flex" />
+                </span>
+                <dl className="flex items-center gap-6 text-xs">
+                  <div className="text-right">
+                    <dt className="text-muted-foreground">Users</dt>
+                    <dd className="font-semibold tabular">{formatInteger(app.users.value)}</dd>
+                  </div>
+                  <div className="text-right">
+                    <dt className="text-muted-foreground">API calls</dt>
+                    <dd className="font-semibold tabular">{formatCompact(app.requests.value)}</dd>
+                  </div>
+                  <div className="text-right">
+                    <dt className="text-muted-foreground">Errors</dt>
+                    <dd className="font-semibold tabular">{formatPercent(app.errorRate.value)}</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
+      </QueryState>
+    </Panel>
   );
 }
 
@@ -160,9 +242,11 @@ export function OverviewView() {
 function KpiGrid({
   summary,
   loading,
+  linkQuery,
 }: {
   summary: OverviewSummaryDto | undefined;
   loading: boolean;
+  linkQuery: Record<string, string | undefined>;
 }) {
   if (!loading && !summary) return null;
   return (
@@ -177,6 +261,7 @@ function KpiGrid({
         value={formatCompact(summary?.requests.value)}
         deltaPct={summary?.requests.deltaPct ?? null}
         hint={summary ? `${formatInteger(summary.requests.value)} total` : undefined}
+        href={withQuery(PAGES.endpoints(), linkQuery)}
       />
       <KpiCard
         label="Error rate"
@@ -185,6 +270,7 @@ function KpiGrid({
         value={formatPercent(summary?.errorRate.value)}
         deltaPct={summary?.errorRate.deltaPct ?? null}
         polarity="down-is-good"
+        href={withQuery(PAGES.errors(), linkQuery)}
       />
       <KpiCard
         label="p95 latency"
@@ -193,6 +279,7 @@ function KpiGrid({
         value={formatDuration(summary?.p95Ms.value)}
         deltaPct={summary?.p95Ms.deltaPct ?? null}
         polarity="down-is-good"
+        href={withQuery(PAGES.endpoints(), { ...linkQuery, sort: 'p95' })}
       />
       <KpiCard
         label="Active users now"
@@ -200,6 +287,7 @@ function KpiGrid({
         loading={loading}
         value={formatInteger(summary?.activeUsersNow)}
         hint="last 5 minutes"
+        href={withQuery(PAGES.live(), { app: linkQuery.app })}
       />
       <KpiCard
         label="Page views"
@@ -207,6 +295,7 @@ function KpiGrid({
         loading={loading}
         value={formatCompact(summary?.pageViews.value)}
         deltaPct={summary?.pageViews.deltaPct ?? null}
+        href={withQuery(PAGES.pages(), linkQuery)}
       />
       <KpiCard
         label="Identified users"
@@ -214,6 +303,7 @@ function KpiGrid({
         loading={loading}
         value={formatInteger(summary?.identifiedUsers.value)}
         deltaPct={summary?.identifiedUsers.deltaPct ?? null}
+        href={withQuery(PAGES.users(), linkQuery)}
       />
     </section>
   );

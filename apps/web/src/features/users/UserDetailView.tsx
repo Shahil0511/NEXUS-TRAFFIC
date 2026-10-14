@@ -5,6 +5,7 @@ import { Activity, ArrowLeft, Eye, TriangleAlert, Waypoints } from 'lucide-react
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
+import { AppChip, AppChipList } from '@/components/AppChip';
 import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -20,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatCountry, formatDateTime, formatInteger, formatPercent } from '@/lib/format';
 import { PAGES, withQuery } from '@/lib/pages';
+import { maskEmail, useDocumentTitle } from '@/lib/useDocumentTitle';
 
 import { userTimelineColumns } from './userTimelineColumns';
 import { useUserProfile } from './useUserProfile';
@@ -106,7 +108,9 @@ interface ProfileContentProps {
 
 function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentProps) {
   const { summary } = profile;
-  const sessionsHref = withQuery(PAGES.journeys(), { ...filterLinkQuery(filters), userKey });
+  const linkQuery = filterLinkQuery(filters);
+  const sessionsHref = withQuery(PAGES.journeys(), { ...linkQuery, userKey });
+  useDocumentTitle(maskEmail(summary.email));
   const failedShare =
     summary.requests > 0 ? (profile.failedRequests / summary.requests) * PERCENT : null;
   return (
@@ -116,13 +120,9 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
         title={summary.email}
         description={
           <span className="flex flex-wrap items-center gap-2">
-            {summary.apps.map((app) => (
-              <Badge key={app} variant="outline">
-                {app}
-              </Badge>
-            ))}
+            <AppChipList apps={summary.apps} linkQuery={linkQuery} max={6} />
             <span>
-              First seen {formatDateTime(profile.firstSeenAt)} · last seen{' '}
+              First seen in this range {formatDateTime(profile.firstSeenAt)} · last seen{' '}
               {formatDateTime(summary.lastSeenAt)} IST
             </span>
           </span>
@@ -145,7 +145,13 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
           hint={failedShare !== null ? `${formatPercent(failedShare)} of requests` : undefined}
         />
         <KpiCard label="Page views" icon={Eye} value={formatInteger(summary.pageViews)} />
-        <KpiCard label="Sessions" icon={Waypoints} value={formatInteger(summary.sessions)} />
+        <KpiCard
+          label="Sessions"
+          icon={Waypoints}
+          value={formatInteger(summary.sessions)}
+          hint="browser sessions"
+          href={summary.sessions > 0 ? sessionsHref : undefined}
+        />
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -156,7 +162,7 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
               items={profile.topPages.map((page) => ({
                 key: `${page.app}|${page.pathTemplate}`,
                 label: <span className="font-mono">{page.pathTemplate}</span>,
-                sublabel: page.app,
+                sublabel: <AppChip app={page.app} linkQuery={linkQuery} />,
                 value: page.views,
               }))}
             />
@@ -171,7 +177,7 @@ function ProfileContent({ userKey, profile, filters, eyebrow }: ProfileContentPr
               items={profile.topTools.map((tool) => ({
                 key: `${tool.app}|${tool.tool}`,
                 label: tool.tool,
-                sublabel: tool.app,
+                sublabel: <AppChip app={tool.app} linkQuery={linkQuery} />,
                 value: tool.uses,
               }))}
             />

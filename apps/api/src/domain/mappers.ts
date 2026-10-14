@@ -6,6 +6,7 @@ import type {
   ActorDto,
   ApiKeyDto,
   AppDto,
+  AppTrafficDto,
   EndpointStatsDto,
   ExposedKeyDto,
   GeoCityDto,
@@ -30,12 +31,15 @@ import type {
 } from '@nexus/shared';
 
 import { userKeyToHex } from '../enrichment/user-key.hasher';
+import { computeMetric } from './compute-deltas';
 import type { ApiRequestInsert, WebEventInsert } from './inserts';
 import { percentOf, roundOrNull, roundTo } from './numbers';
 import type {
   ApiKeyRow,
   ApiRequestRow,
+  AppActivityRow,
   AppRow,
+  AppTrafficRow,
   EndpointStatsRow,
   ExposedKeyRow,
   GeoCityRow,
@@ -197,7 +201,46 @@ export function mapRequestSample(row: ApiRequestRow, viewer: Viewer): RequestSam
     durationMs: roundTo(row.duration_ms),
     errorCode: row.error_code,
     requestId: row.request_id,
+    sessionId: row.session_id,
     actor: mapActor(row, viewer),
+  };
+}
+
+/** The four per-app rows behind one Applications row (absent = no events in that window). */
+export interface AppTrafficSources {
+  traffic: AppTrafficRow | undefined;
+  previousTraffic: AppTrafficRow | undefined;
+  activity: AppActivityRow | undefined;
+  previousActivity: AppActivityRow | undefined;
+}
+
+/** Newest of two nullable timestamps. */
+function latestOf(a: Date | null | undefined, b: Date | null | undefined): Date | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+/**
+ * WHY: one row of the Applications page. An app with no events in a window counts as zeros, so
+ * a silent integration shows up as 0 instead of disappearing.
+ */
+export function mapAppTraffic(app: AppRow, sources: AppTrafficSources): AppTrafficDto {
+  const { traffic, previousTraffic, activity, previousActivity } = sources;
+  return {
+    app: app.slug,
+    displayName: app.display_name,
+    requests: computeMetric(traffic?.requests ?? 0, previousTraffic?.requests ?? 0),
+    errorRate: computeMetric(
+      percentOf(traffic?.errors ?? 0, traffic?.requests ?? 0),
+      percentOf(previousTraffic?.errors ?? 0, previousTraffic?.requests ?? 0),
+    ),
+    p95Ms: roundOrNull(traffic?.p95_ms ?? null),
+    pageViews: computeMetric(activity?.page_views ?? 0, previousActivity?.page_views ?? 0),
+    users: computeMetric(activity?.users ?? 0, previousActivity?.users ?? 0),
+    sessions: activity?.sessions ?? 0,
+    toolUses: activity?.tool_uses ?? 0,
+    lastEventAt: latestOf(traffic?.last_event_at, activity?.last_event_at)?.toISOString() ?? null,
   };
 }
 
@@ -260,6 +303,7 @@ export function mapTimelineItem(row: TimelineEventRow, viewer: Viewer): Timeline
     tool: row.tool,
     visibleMs: row.visible_ms,
     name: row.name,
+    endpointId: row.endpoint_id,
     ip: ipFor(row.ip, viewer),
   };
 }
@@ -300,6 +344,7 @@ export function mapSessionEvent(row: SessionEventRow): SessionEventDto {
     method: row.method,
     status: row.status_code,
     durationMs: roundOrNull(row.duration_ms),
+    endpointId: row.endpoint_id,
   };
 }
 
@@ -383,6 +428,9 @@ export function mapLiveEvent(row: LiveEventRow, viewer: Viewer): LiveEventDto {
     durationMs: roundOrNull(row.duration_ms),
     tool: row.tool,
     userEmail: row.user_email,
+    userKey: userKeyToHex(row.user_key),
+    endpointId: row.endpoint_id,
+    sessionId: row.session_id,
     ip: ipFor(row.ip, viewer),
     country: row.geo_country,
     city: row.geo_city,
@@ -405,6 +453,9 @@ export function liveEventOfApiRequest(appSlug: string, row: ApiRequestInsert): L
     durationMs: roundTo(row.durationMs),
     tool: null,
     userEmail: row.userEmail,
+    userKey: userKeyToHex(row.userKey),
+    endpointId: row.endpointId,
+    sessionId: row.sessionId,
     ip: row.ip,
     country: row.geoCountry,
     city: row.geoCity,
@@ -424,6 +475,9 @@ export function liveEventOfWebEvent(appSlug: string, row: WebEventInsert): LiveE
     durationMs: null,
     tool: row.tool,
     userEmail: row.userEmail,
+    userKey: userKeyToHex(row.userKey),
+    endpointId: null,
+    sessionId: row.sessionId,
     ip: row.ip,
     country: row.geoCountry,
     city: row.geoCity,

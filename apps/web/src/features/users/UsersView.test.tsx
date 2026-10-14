@@ -54,14 +54,31 @@ describe('UsersView', () => {
     expect(calls.at(-1)?.get('cursor')).toBe(NEXT_CURSOR);
   });
 
-  it('searches by email (debounced) and explains an empty result', async () => {
+  it('searches by email in a POST body — never in a URL — and explains an empty result', async () => {
     const calls = useUserHandlers();
+    const bodies: unknown[] = [];
+    server.use(
+      http.post(routeUrl(ROUTES.users.search), async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ items: [], nextCursor: null });
+      }),
+    );
+    const urls: string[] = [];
     const user = userEvent.setup();
-    renderWithProviders(<UsersView />);
+    renderWithProviders(<UsersView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
     await screen.findByText('buyer@libas.in');
 
     await user.type(screen.getByRole('searchbox', { name: 'Search users' }), 'nobody');
-    await waitFor(() => expect(calls.at(-1)?.get('search')).toBe('nobody'));
+    await waitFor(() => expect(bodies.at(-1)).toMatchObject({ search: 'nobody' }));
     expect(await screen.findByText('No user matches your search')).toBeInTheDocument();
+    expect(calls.every((params) => !params.has('search'))).toBe(true);
+    expect(urls.every((query) => !query.includes('nobody'))).toBe(true);
+  });
+
+  it('shows the apps each user uses, each opening that app', async () => {
+    useUserHandlers();
+    renderWithProviders(<UsersView />);
+    const chip = await screen.findByRole('link', { name: 'ebo-sales' });
+    expect(chip.getAttribute('href')).toBe('/applications/ebo-sales');
   });
 });

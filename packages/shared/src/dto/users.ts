@@ -10,6 +10,7 @@ export interface UserSummaryDto {
   lastSeenAt: string;
   requests: number;
   pageViews: number;
+  /** Distinct BROWSER sessions (the ones Journeys can replay). */
   sessions: number;
   apps: string[];
 }
@@ -53,6 +54,8 @@ export interface TimelineItemDto {
   visibleMs: number | null;
   /** `custom` events only. */
   name: string | null;
+  /** `api` items only: the stored route (opaque id → the route's page). */
+  endpointId: string | null;
   /** ADMINS ONLY; null for every other viewer. */
   ip: string | null;
 }

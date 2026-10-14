@@ -1,7 +1,11 @@
 /**
- * ROUTES.overview.* — the Overview page (KPI cards + traffic chart).
+ * ROUTES.overview.* — the Overview page (KPI cards + traffic chart) and the Applications page.
  */
-import { overviewSummaryQuerySchema, overviewTimeseriesQuerySchema } from '@nexus/shared';
+import {
+  overviewAppsQuerySchema,
+  overviewSummaryQuerySchema,
+  overviewTimeseriesQuerySchema,
+} from '@nexus/shared';
 import type { RequestHandler } from 'express';
 
 import type { OverviewService } from '../../services/overview.service';
@@ -24,6 +28,14 @@ export class OverviewController {
   timeseries: RequestHandler = async (_req, res) => {
     requireViewer(res);
     const body = await this.overview.timeseries(validQuery(res, overviewTimeseriesQuerySchema));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/overview.service.ts OverviewService.apps */
+  apps: RequestHandler = async (_req, res) => {
+    requireViewer(res);
+    const body = await this.overview.apps(validQuery(res, overviewAppsQuerySchema));
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

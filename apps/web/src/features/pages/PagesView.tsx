@@ -3,6 +3,7 @@
 import type { PageStatsDto } from '@nexus/shared';
 import { useMemo } from 'react';
 
+import { AppChip } from '@/components/AppChip';
 import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
@@ -11,7 +12,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { QueryState } from '@/components/QueryState';
 import { RankedList } from '@/components/RankedList';
-import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
 
 import { PagesToolsTabs } from './PagesToolsTabs';
@@ -46,56 +47,61 @@ function topExitPages(pages: readonly PageStatsDto[]): PageStatsDto[] {
     .slice(0, EXIT_ROWS);
 }
 
-const PAGE_COLUMNS: DataTableColumn<PageStatsDto>[] = [
-  {
-    id: 'page',
-    header: 'Page',
-    className: 'w-full max-w-0',
-    cell: (row) => (
-      <span className="block min-w-0">
-        <span className="block truncate font-mono text-xs" title={row.pathTemplate}>
-          {row.pathTemplate}
+/** The table columns; the app chip opens the app's page (links carry `linkQuery`). */
+function pageColumns(
+  linkQuery: Readonly<Record<string, string | undefined>>,
+): DataTableColumn<PageStatsDto>[] {
+  return [
+    {
+      id: 'page',
+      header: 'Page',
+      className: 'w-full max-w-0',
+      cell: (row) => (
+        <span className="block min-w-0 space-y-1">
+          <span className="block truncate font-mono text-xs" title={row.pathTemplate}>
+            {row.pathTemplate}
+          </span>
+          <AppChip app={row.app} linkQuery={linkQuery} />
         </span>
-        <span className="block truncate text-[11px] text-muted-foreground">{row.app}</span>
-      </span>
-    ),
-  },
-  { id: 'views', header: 'Views', align: 'right', cell: (row) => formatInteger(row.views) },
-  {
-    id: 'sessions',
-    header: 'Sessions',
-    align: 'right',
-    cell: (row) => formatInteger(row.uniqueSessions),
-  },
-  {
-    id: 'avg',
-    header: 'Avg visible',
-    align: 'right',
-    cell: (row) => formatDuration(row.avgVisibleMs),
-  },
-  {
-    id: 'p50',
-    header: 'p50 visible',
-    align: 'right',
-    cell: (row) => formatDuration(row.p50VisibleMs),
-  },
-  {
-    id: 'exits',
-    header: 'Exits',
-    align: 'right',
-    cell: (row) => (
-      <span className="flex flex-col items-end">
-        <span>{formatInteger(row.exits)}</span>
-        <span className="text-[11px] text-muted-foreground">
-          {formatPercent(
-            row.uniqueSessions > 0 ? (row.exits / row.uniqueSessions) * PERCENT : null,
-          )}
-          <span className="sr-only"> of sessions</span>
+      ),
+    },
+    { id: 'views', header: 'Views', align: 'right', cell: (row) => formatInteger(row.views) },
+    {
+      id: 'sessions',
+      header: 'Sessions',
+      align: 'right',
+      cell: (row) => formatInteger(row.uniqueSessions),
+    },
+    {
+      id: 'avg',
+      header: 'Avg visible',
+      align: 'right',
+      cell: (row) => formatDuration(row.avgVisibleMs),
+    },
+    {
+      id: 'p50',
+      header: 'p50 visible',
+      align: 'right',
+      cell: (row) => formatDuration(row.p50VisibleMs),
+    },
+    {
+      id: 'exits',
+      header: 'Exits',
+      align: 'right',
+      cell: (row) => (
+        <span className="flex flex-col items-end">
+          <span>{formatInteger(row.exits)}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {formatPercent(
+              row.uniqueSessions > 0 ? (row.exits / row.uniqueSessions) * PERCENT : null,
+            )}
+            <span className="sr-only"> of sessions</span>
+          </span>
         </span>
-      </span>
-    ),
-  },
-];
+      ),
+    },
+  ];
+}
 
 /**
  * The Pages tab of "Pages & Tools": how long each page is actually looked at (VISIBLE time —
@@ -105,6 +111,7 @@ export function PagesView() {
   const { filters } = useGlobalFilters();
   const pages = usePageStats({ ...filters, limit: PAGE_LIMIT });
   const items = pages.data?.items;
+  const columns = useMemo(() => pageColumns(filterLinkQuery(filters)), [filters]);
   const longest = useMemo(() => longestMedianPages(items ?? []), [items]);
   const exits = useMemo(() => topExitPages(items ?? []), [items]);
 
@@ -177,7 +184,7 @@ export function PagesView() {
         ) : (
           <DataTable
             caption="Pages"
-            columns={PAGE_COLUMNS}
+            columns={columns}
             rows={items}
             rowKey={pageKey}
             loading={pages.isPending}

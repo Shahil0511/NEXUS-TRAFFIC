@@ -17,6 +17,52 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-14 — UX Wave 1: linked navigation, Ctrl+K search, Applications page, consistent numbers
+
+**Done** ([ADR 0006](decisions/0006-navigation-search-and-applications.md); from a multi-agent UX audit)
+- **Contract** (`packages/shared`): `ROUTES.overview.apps` (GET) + `AppTrafficDto`; `ROUTES.users.search`
+  (POST, `userSearchBodySchema`) and `search` removed from `userListQuerySchema`; `errorSummaryQuerySchema.endpointId`;
+  ids for links: `RequestSampleDto.sessionId`, `TimelineItemDto.endpointId`, `SessionEventDto.endpointId`,
+  `LiveEventDto.userKey/endpointId/sessionId`.
+- **API**: `OverviewService.apps` (`summarizeTrafficByApp` + `summarizeActivityByApp` + `AppRepository.list`,
+  `mapAppTraffic`); `UserService.search`; identified users over both tables (`countIdentifiedUsers`);
+  users' `sessions` = browser sessions; `ErrorService.summary` scoped by `endpointId`. No migration.
+- **Web**: Applications list + app page (`features/applications/`); `CommandPalette` (Ctrl/⌘+K, "/");
+  `AppChip`, `UserLink`, route links in failed/slowest rows, timelines, replays and Live; KPI cards link to
+  their breakdown (`KpiCard.href`); Overview "Applications" panel; per-page filters + range cap
+  (`NavItem.filters`, disabled presets, `RANGE_TOO_LARGE` → "Show the last 30 days"); named filter chips
+  (route on Errors, user on Journeys); `keepPreviousData` on list hooks + top fetching bar; `RelativeTime`;
+  tab titles on detail pages (masked email); "View traffic" on Integration cards.
+- **Tests**: api 720+ unit, DB/e2e 91 files green (`RUN_DB_TESTS=1`, new: `overview.apps` equals the scoped
+  Overview, route-scoped error summary); web 29 files (new: Applications, CommandPalette, RangePicker,
+  nav filters, POST search never in the URL).
+
+**Read-only check of the deployed database (2026-10-14, `default_transaction_read_only=on`)**
+- 7 apps registered; 6 send server events, nexus-portal browser only. Migrations 0001–0006 applied, partitions to 2026-12.
+- `overview.apps` / `countIdentifiedUsers` over 30 days: ~35 ms / ~16 ms (≈28 k rows) — no index needed yet.
+- **Location is empty everywhere**: 100 % of events have a private/loopback IP (api 7 568 private, 189 loopback,
+  1 public; web 16 811 private) → no geo. Either every user is on the office LAN/VPN or a proxy hides the
+  client IP (check `X-Forwarded-For` on the gateway). Geography is useless until then.
+- **Identity gaps**: ebo-kpiverse and finance-recon send 100 % anonymous API calls and no session ids;
+  ebo-kpiverse browser ingest accepted 0 (1 rejected); nexus-portal ~38 % of page views without a verified user.
+- **Linking gaps** (API call ↔ page view): stockapp 64 %, ebo-sales 29 % of calls without `session_id`.
+- **Unparameterised page templates**: stockapp `/virtual-stock/product/<id>` (one template per product).
+- **Slow / failing routes in the apps (for their teams)**: ebo-kpiverse `/api/style-kpis` p95 ≈ 131 s;
+  ebo-sales `/filters/options` p95 ≈ 31 s with 21 × 500; stockapp `/virtual-stock/search` ≈ 30 s (timeouts, 500/499);
+  ebo-leaderboard `/insights`, `/leaderboards/summary` ≈ 15 s with `QUERY_TIMEOUT` 503s.
+- 13 of 38 users in 30 days use more than one app (the Applications/Users cross-links matter).
+
+**Next (Wave 2)**: who-calls-this-route / user's top routes + per-app split; sortable Users with "Failed" and
+"New"; page and tool detail pages; Errors "users affected"; DAU/WAU/MAU; identity / linking coverage per app on
+Applications; a subnet → office mapping for private IPs (or hide Geography when 100 % private).
+
+**Notes / known issues**
+- `npm test` needs `npm run build -w @nexus/node` first (the express package imports its dist), as CI does.
+- `RUN_DB_TESTS=1` defaults to a test Postgres on :55432; locally, point `TEST_PG_ADMIN_URL` at the dev container (:55434).
+- Breadcrumb `from=` links and a mobile sidebar drawer are not done yet (Wave 3).
+
+---
+
 ## 2026-10-08 — CI/CD: push to `main` deploys to the server (like EBO_SALES)
 
 **Done** ([ADR 0005](decisions/0005-ci-cd-self-hosted-runner.md))

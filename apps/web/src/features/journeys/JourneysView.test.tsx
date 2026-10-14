@@ -53,7 +53,10 @@ describe('JourneysView', () => {
     await screen.findByRole('table', { name: 'Sessions' });
     expect(calls[0]?.get('userKey')).toBe(USER_KEY);
 
-    await user.click(screen.getByRole('button', { name: 'Show sessions of every user' }));
+    // The chip names the user (from the rows, not the URL) and removes the filter.
+    await user.click(
+      await screen.findByRole('button', { name: 'Remove user filter buyer@libas.in' }),
+    );
     await waitFor(() => expect(calls.at(-1)?.get('userKey')).toBeNull());
   });
 

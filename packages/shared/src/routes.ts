@@ -62,6 +62,8 @@ export const ROUTES = {
   overview: {
     summary: { method: 'GET', path: '/v1/overview/summary' },
     timeseries: { method: 'GET', path: '/v1/overview/timeseries' },
+    /** One row per registered app (traffic, errors, users) — the Applications page. */
+    apps: { method: 'GET', path: '/v1/overview/apps' },
   },
   endpoints: {
     list: { method: 'GET', path: '/v1/endpoints' },
@@ -73,6 +75,11 @@ export const ROUTES = {
   },
   users: {
     list: { method: 'GET', path: '/v1/users' },
+    /**
+     * Email search. POST on purpose: a typed email never travels in a URL, so it never reaches an
+     * access log (ADR 0006). A read, not a mutation.
+     */
+    search: { method: 'POST', path: '/v1/users/search' },
     profile: { method: 'GET', path: '/v1/users/:userKey' },
     timeline: { method: 'GET', path: '/v1/users/:userKey/timeline' },
   },
