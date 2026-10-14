@@ -131,6 +131,8 @@ Then open `https://nexus.libas.in/traffic/` in a browser while logged in to the 
 
 ## 7. Updates and rollback
 
+With automatic deploys set up (section 12), a push to `main` does the update. By hand:
+
 ```bash
 bash scripts/deploy.sh                                       # update to the latest main
 git checkout <sha> && SKIP_PULL=1 bash scripts/deploy.sh     # rollback to a known-good commit
@@ -189,3 +191,58 @@ partitioned tables.) Rehearsed on the local stack in S6.
 4. Which host port is Nexus Traffic's (`NEXUS_PORT`, preflight checks it is free)?
 5. Who goes in `DASHBOARD_ADMIN_EMAILS` / `DASHBOARD_ALLOWED_EMAILS`, and who is `DOCS_CONTACT`?
 6. Is 10.150.0.5 already backed up by its owners (then `./backups` is a second copy)?
+
+## 12. Automatic deploys (push to `main` → live)
+
+Same setup as EBO_SALES ([ADR 0005](ai-context/decisions/0005-ci-cd-self-hosted-runner.md)). Once it is
+set up, nobody runs `deploy.sh` by hand: every push to `main` runs
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
+
+1. `ci` on GitHub's machines: typecheck, unit + contract + security tests, DB tests on PostgreSQL 18,
+   generated-file checks. Pull requests stop here; they never deploy.
+2. `deploy` on **this server**, through a GitHub Actions runner installed here (it connects out to
+   github.com; no inbound port). It runs [`scripts/ci-deploy.sh`](scripts/ci-deploy.sh): fetch the
+   commit → `git reset --hard <sha>` → `scripts/deploy.sh` (build while the old version keeps serving →
+   swap → health through the edge). **If the health checks fail it puts the previous commit back and
+   deploys that**, and the GitHub run turns red.
+
+**One-time setup.** The server needs a **git clone** of the repo (an unpacked handoff zip has no `.git`):
+
+```bash
+git clone https://github.com/Shahil0511/NEXUS-TRAFFIC.git nexus-traffic
+# copy .env and backups/ from the old folder into nexus-traffic/ (no `down` needed: the compose
+# project name is fixed, so the first deploy from the new folder takes over the running containers)
+cd nexus-traffic && bash scripts/deploy.sh      # first deploy by hand: proves .env + Docker work
+```
+
+*GitHub admin (owner of NEXUS-TRAFFIC):* repo → Settings → Actions → Runners → *New self-hosted runner*
+→ copy the token after `--token` (valid 1 hour) and send it to the server admin. This is a **different
+token from EBO_SALES'**: a runner belongs to one repo. Nothing else is needed on GitHub.
+
+*Server admin — once, from that clone.* **Windows** (PowerShell, *Run as Administrator*; needs Git for
+Windows, which ships the bash the deploy runs in):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-runner.ps1 -Token <TOKEN> -DryRun   # checks only
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-runner.ps1 -Token <TOKEN>
+```
+
+It asks for **your Windows password once** (the runner service runs as your account, which already has
+Docker Desktop access). Microsoft/Azure AD sign-in refused? Re-run with `-RunAs .\<local-account>`.
+Runner folder: `C:\actions-runner-nexus-traffic` — EBO_SALES' runner stays in `C:\actions-runner`; both
+run side by side. Keep Docker Desktop running (*Start Docker Desktop when you sign in*).
+
+**Linux:**
+
+```bash
+sudo bash scripts/setup-runner.sh <TOKEN>       # runner in /opt/actions-runner-nexus-traffic (systemd)
+```
+
+Check: GitHub → NEXUS-TRAFFIC → Settings → Actions → Runners shows `<host>-nexus-traffic` as **Idle**.
+From then on `git push origin main` deploys by itself; watch it under the repo's **Actions** tab.
+
+- Never hand-edit tracked files in the server clone: each deploy discards them (`.env` and `backups/`
+  are git-ignored and stay).
+- Rollback by hand still works (section 7). The next push to `main` deploys `main` again.
+- Re-running EBO_SALES' `setup-runner.ps1` on the same Windows server deletes **all** runner services,
+  this one included: re-run ours afterwards.

@@ -17,6 +17,39 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-10-08 — CI/CD: push to `main` deploys to the server (like EBO_SALES)
+
+**Done** ([ADR 0005](decisions/0005-ci-cd-self-hosted-runner.md))
+- `.github/workflows/deploy.yml`: `ci` on ubuntu-latest for every push/PR (`npm ci`, typecheck, `npm test`,
+  `npm run test:db` on a `postgres:18-alpine` service, `env:example --check`, `openapi:emit --check`,
+  `docs:build`) → `deploy` on `[self-hosted, nexus-traffic-prod]` for pushes to `main` only, serialized.
+- `scripts/ci-deploy.sh <sha>`: fetches the commit with the job token (no git login on the server),
+  `git reset --hard`, re-execs its new version, runs `SKIP_PULL=1 scripts/deploy.sh`; on failure resets to the
+  previously deployed commit and deploys it again, exit 1. Windows servers run it through Git Bash.
+- `scripts/setup-runner.ps1` / `scripts/setup-runner.sh`: one-time runner install (own folder
+  `C:\actions-runner-nexus-traffic` / `/opt/actions-runner-nexus-traffic`, side by side with EBO_SALES' runner;
+  only replaces its own service), records `DEPLOY_DIR`; refuses a checkout without `.git`.
+- DEPLOY.md section 12 (setup + moving from the handoff zip to a git clone), 06-process.md (files, Git rule:
+  a push to `main` = a production deploy).
+- Verified: PowerShell parser (0 errors, ASCII-only), `bash -n`; `ci-deploy.sh` in a sandbox repo with a fake
+  `deploy.sh` (good deploy, failing deploy → rollback to previous commit, `.env` untouched, path with a space,
+  token + `safe.directory` env path); every `ci` step in a fresh clone (typecheck, build, `npm test` 713 + 151 + …,
+  `test:db` 882/882 on `postgres:18-alpine`, generated-file checks).
+- Fixes found by the fresh clone: `ci` builds `@nexus/shared`, `@nexus/auth`, `@nexus/node` before the tests (package
+  and web tests import their `dist/`); `apps/api/test/ai-context-links.test.ts` skips git-ignored local env files
+  (`apps/api/.env`, `apps/web/.env.local` exist only on a dev machine).
+
+**Next**: the user registers the runner on the server (token from NEXUS-TRAFFIC → Settings → Actions → Runners)
+and pushes; the first real run proves the GitHub side.
+
+**Notes / known issues**
+- Not run against GitHub yet (the runner needs the user's token).
+- `apps/api/test/e2e/live-socket.test.ts` timed out once (10 s) in a full parallel run on Windows, then passed; watch it in CI.
+- EBO_SALES' `setup-runner.ps1` deletes every `actions.runner.*` service when re-run; on a shared Windows server,
+  re-run ours after it.
+
+---
+
 ## 2026-10-05 — One-port hosting (edge nginx) + handoff zip for the Team Lead
 
 **Done** ([ADR 0004](decisions/0004-one-host-port-edge-nginx.md)) — the user hosts Nexus like EBO_SALES: a zip to

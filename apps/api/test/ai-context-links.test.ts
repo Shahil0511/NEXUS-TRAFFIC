@@ -6,7 +6,8 @@
  * - code spans that look like repo paths (`apps/…`, `packages/…`, `scripts/…`, `ops/…`, `docs/…`,
  *   `ai-context/…`, `.github/…`) → resolved from the repo root.
  * Skipped: URLs, pure anchors, globs/placeholders (`*`, `<…>`, `…`, `{…}`, `NNNN`), build output
- * that only exists after a build (`docs/dist/`, `.next/`, `node_modules/`, `backups/`), and the
+ * that only exists after a build (`docs/dist/`, `.next/`, `node_modules/`, `backups/`), local env
+ * files (`.env`, `.env.local`, … — git-ignored, so never in a clean checkout such as CI), and the
  * table under "Per-app hints" in 08-integration-contract.md (paths inside OTHER teams' repos).
  */
 import fs from 'node:fs';
@@ -20,6 +21,8 @@ const ROOT_DOCS = ['DEPLOY.md', 'CLAUDE.md', 'AGENTS.md'];
 const REPO_PATH = /^(?:apps|packages|scripts|ops|docs|ai-context|\.github)\/[^\s]+$/;
 const PLACEHOLDER = /[*<>…{}]|NNNN|YYYY/;
 const BUILD_OUTPUT = /(?:^docs\/dist(?:\/|$))|(?:\.next\/)|(?:node_modules\/)|(?:^backups\/)/;
+/** Git-ignored local env files (`.env`, `.env.local`, …); `.env.example` is committed and checked. */
+const LOCAL_ENV_FILE = /(?:^|\/)\.env(?:\.(?!example$)[\w.-]+)?$/;
 /** Section whose table lists files in other teams' repositories (we never touch D:\server). */
 const OTHER_TEAMS_SECTION = { file: '08-integration-contract.md', heading: /^## Per-app hints/ };
 
@@ -73,6 +76,7 @@ function referencesIn(file: string): Reference[] {
         .split('#')[0];
       if (!candidate || !REPO_PATH.test(candidate)) continue;
       if (PLACEHOLDER.test(candidate) || BUILD_OUTPUT.test(candidate)) continue;
+      if (LOCAL_ENV_FILE.test(candidate)) continue;
       refs.push({
         doc,
         line: number,

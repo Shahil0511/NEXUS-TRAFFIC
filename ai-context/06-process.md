@@ -82,6 +82,9 @@ npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (
 | `ops/backup/restore.sh` | restore a dump into `BACKUP_DATABASE_URL` (schema `traffic` only, all-or-nothing) |
 | `scripts/preflight.sh` | checks Compose ≥ 2.20, `.env` completeness per `DB_APP_ROLE_MODE`, hex secrets, URL-encoded passwords, TCP reachability of the database, `NEXUS_PORT` free, disk ≥ 5 GB (`--localdb` for the local stack) |
 | `scripts/deploy.sh` | preflight → `git pull --ff-only` (skipped without `.git`, i.e. from the handoff zip) → `docker compose up -d --build --remove-orphans` → health checks through the edge port |
+| `scripts/ci-deploy.sh` | run by the self-hosted runner ON the server (never by hand): fetch `<sha>` with the job token → `git reset --hard` → `SKIP_PULL=1 scripts/deploy.sh`; on failure resets to the previous commit and deploys it again ([ADR 0005](decisions/0005-ci-cd-self-hosted-runner.md)) |
+| `scripts/setup-runner.ps1` / `scripts/setup-runner.sh` | one-time server setup for automatic deploys: installs the GitHub Actions runner (label `nexus-traffic-prod`, own folder next to EBO_SALES' runner) as a service, records `DEPLOY_DIR` |
+| `.github/workflows/deploy.yml` | CI/CD: `ci` (typecheck, tests, DB tests on PG 18, generated-file checks) on every push/PR → `deploy` on the server runner for pushes to `main` |
 | `scripts/handoff/make-handoff-zip.ps1` | the zip for the TL: tracked + untracked-not-ignored files + `.env.production` as `.env` (refuses `change-me` / localdb values) — TL steps in `HANDOFF.md` |
 
 Two ways to run the stack ([ADR 0002](decisions/0002-external-database.md)):
@@ -166,14 +169,16 @@ npm run env:example -- --check && npm run openapi:emit -- --check && npm run doc
 - Every commit that changes architecture, contract, tables or conventions updates the matching ai-context file
   and adds a [PROGRESS.md](PROGRESS.md) entry (rule 5 in `CLAUDE.md`).
 - Never commit `.env`, `backups/`, `docs/dist/`, `test-results/`.
-- Push only after the user approved; the TL deploys from `main` (`git pull --ff-only` in `deploy.sh`).
+- Push only after the user approved: **a push to `main` deploys to production** — CI runs, then the server's
+  runner deploys it ([ADR 0005](decisions/0005-ci-cd-self-hosted-runner.md), DEPLOY.md section 12). A red `ci`
+  job means nothing was deployed; a red `deploy` job means the previous commit was put back.
 
 ## Deploy and rollback (summary of DEPLOY.md)
 
 | Action | Command (repo root on the server) |
 |---|---|
-| first time | `.env` from `.env.example` → `bash scripts/preflight.sh` → paste `ops/nginx/nexus-traffic.conf` → `bash scripts/deploy.sh` |
-| update | `bash scripts/deploy.sh` |
+| first time | `git clone` → `.env` from `.env.example` → `bash scripts/preflight.sh` → paste `ops/nginx/nexus-traffic.conf` → `bash scripts/deploy.sh` → `scripts/setup-runner.ps1` (Windows) or `scripts/setup-runner.sh` (Linux) with a runner token |
+| update | `git push origin main` (CI → server runner → `scripts/ci-deploy.sh`); by hand: `bash scripts/deploy.sh` |
 | rollback | `git checkout <sha> && SKIP_PULL=1 bash scripts/deploy.sh` (migrations are additive; older code tolerates newer schema) |
 | backup now | `docker compose exec pg-backup sh /ops/backup/run.sh --once` |
 | restore | `docker compose stop api web` → `docker compose exec pg-backup sh /ops/backup/restore.sh /backups/<file>.dump` → `docker compose up -d` |

@@ -1,0 +1,130 @@
+# CI/CD: every push to main is checked, then deployed to the server by a self-hosted runner.
+#
+#   push to main → `ci` (GitHub-hosted: typecheck, tests, DB tests, generated-file checks)
+#               → `deploy` (runner ON the server: scripts/ci-deploy.sh <sha>)
+#
+# Same shape as EBO_SALES (ADR 0005, ai-context/decisions/0005-ci-cd-self-hosted-runner.md). The server
+# sits on the internal network, so GitHub cannot reach in; the runner installed on it connects OUT to
+# GitHub instead. Pull requests only run `ci`; they never deploy.
+#
+# One-time server setup, from the server's git checkout (DEPLOY.md, "Automatic deploys"):
+#   Windows: powershell -ExecutionPolicy Bypass -File .\scripts\setup-runner.ps1 -Token <TOKEN>
+#   Linux:   sudo bash scripts/setup-runner.sh <TOKEN>
+# Either installs the runner with the label `nexus-traffic-prod` (next to EBO_SALES' runner, which
+# keeps its own folder and label), gives it docker access and records DEPLOY_DIR (the checkout that
+# holds .env) on the runner.
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Typecheck, tests & generated files
+    runs-on: ubuntu-latest
+    services:
+      # Throwaway cluster for the DB suites (each suite creates and drops its own database).
+      # PostgreSQL 18 = the production major (ADR 0002).
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: testpw
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Package tests (node, express, react, web) import @nexus/shared and @nexus/node from dist/,
+      # which a clean checkout does not have.
+      - name: Build shared packages
+        run: |
+          npm run build:shared
+          npm run build -w @nexus/node
+
+      - name: Unit, contract & security tests
+        run: npm test
+
+      - name: DB / e2e tests (PostgreSQL 18)
+        env:
+          TEST_PG_ADMIN_URL: postgres://postgres:testpw@127.0.0.1:55433/postgres
+        run: npm run test:db
+
+      - name: Generated files are up to date
+        run: |
+          npm run env:example -- --check
+          npm run openapi:emit -- --check
+          npm run docs:build
+
+  deploy:
+    name: Deploy to server
+    needs: ci
+    # Only real pushes to main — never pull requests.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # No OS label: the server may be Windows or Linux; the steps below pick the matching shell.
+    runs-on: [self-hosted, nexus-traffic-prod]
+    # Two quick pushes queue instead of racing two `docker compose` runs.
+    concurrency:
+      group: nexus-traffic-deploy-prod
+      cancel-in-progress: false
+    env:
+      # Set on the server by scripts/setup-runner.(ps1|sh) (the runner's .env); a repo variable of
+      # the same name overrides it.
+      DEPLOY_DIR_OVERRIDE: ${{ vars.DEPLOY_DIR }}
+      # ci-deploy.sh fetches the commit with this job token, so the server needs no git credentials.
+      GIT_FETCH_TOKEN: ${{ github.token }}
+      # Fail fast instead of hanging on a credential prompt nobody can answer.
+      GIT_TERMINAL_PROMPT: '0'
+      GCM_INTERACTIVE: never
+      # The runner's service account may not own the checkout ("dubious ownership"); trust it.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: '*'
+    steps:
+      - name: Deploy (Windows server, through Git Bash)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          # Native tools write progress to stderr; check exit codes instead.
+          $ErrorActionPreference = 'Continue'
+          $dir = if ($env:DEPLOY_DIR_OVERRIDE) { $env:DEPLOY_DIR_OVERRIDE } else { $env:DEPLOY_DIR }
+          if (-not $dir) { Write-Host 'DEPLOY_DIR is not set - run scripts\setup-runner.ps1 on the server'; exit 1 }
+          # Git for Windows ships bash: <Git>\cmd\git.exe -> <Git>\bin\bash.exe (never WSL's bash).
+          $bash = $null
+          $git = (Get-Command git -ErrorAction SilentlyContinue).Source
+          $candidates = @("$env:ProgramFiles\Git\bin\bash.exe")
+          if ($git) { $gitDir = Split-Path $git; $candidates = @((Join-Path $gitDir '..\bin\bash.exe'), (Join-Path $gitDir '..\..\bin\bash.exe')) + $candidates }
+          foreach ($c in $candidates) { if (Test-Path -LiteralPath $c) { $bash = (Resolve-Path -LiteralPath $c).Path; break } }
+          if (-not $bash) { Write-Host 'Git Bash (bin\bash.exe of Git for Windows) not found'; exit 1 }
+          Set-Location -LiteralPath $dir
+          & $bash scripts/ci-deploy.sh "${{ github.sha }}"
+          exit $LASTEXITCODE
+
+      - name: Deploy (Linux server)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cd "${DEPLOY_DIR_OVERRIDE:-${DEPLOY_DIR:?DEPLOY_DIR is not set - run scripts/setup-runner.sh on the server}}"
+          bash scripts/ci-deploy.sh "${{ github.sha }}"

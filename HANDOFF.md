@@ -95,3 +95,5 @@ curl -s -o /dev/null -w '%{http_code}\n' https://nexus.libas.in/traffic/        
 - Admins (register apps, issue API keys, see IPs): `DASHBOARD_ADMIN_EMAILS` in `.env`. Everyone with an
   `@libas.in` portal login can view.
 - Full runbook (health checks, rollback, restore, open questions): [`DEPLOY.md`](DEPLOY.md).
+- **Automatic deploys** (every push to `main` goes live, like EBO_SALES) need a `git clone` instead of this
+  zip plus a one-time runner install: [`DEPLOY.md`](DEPLOY.md) section 12.
