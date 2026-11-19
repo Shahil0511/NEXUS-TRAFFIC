@@ -38,7 +38,23 @@ containers kept serving (the build fails before any container is replaced).
   `postgres:18-alpine` — `node dist/db/migrate.js` applies 0001–0012, the api boots,
   `/api/health/ready` = ok / `schemaCurrent: true`, `/api/docs/` serves the guide.
 
-**Next**: push this fix (the next push deploys Phase A + migrations 0007–0012 to production);
+- **Second run (`bc6b48f`, the fix above): Phase A went live, but the run's health step failed
+  falsely.** Images built, `migrate` exited 0 (0007–0012 applied), api and web healthy — then
+  `scripts/deploy.sh` looped on `curl: (23) client returned ERROR on write of 96 bytes`.
+  Cause: `ci-deploy.sh` exports `MSYS_NO_PATHCONV=1` (for docker args), so on the Windows server
+  Git's native curl got the literal path `/dev/null` from `curl -o /dev/null` and could not open
+  it, although the edge answered 200 (96 bytes = the `/api/health/ready` body). A deploy by hand
+  never set that variable, and ADR 0005's sandbox test used a fake `deploy.sh`, so this path had
+  never run. **Fix:** `deploy.sh` `probe()` sends the body to the shell's `/dev/null`
+  (`curl … >/dev/null`, plus `--max-time 10`); reproduced and verified in Git Bash with
+  `MSYS_NO_PATHCONV=1` against the live site (2xx passes, a 404 still fails).
+- Production after that run: v2 is serving (`/api/health/ready` ok + `schemaCurrent`,
+  `POST /v1/ingest/config` answers, the guide lists SDK 1.1.0). The automatic rollback could not
+  replace it, because the previous commit `629a529` does not build (the Dockerfile bug above) —
+  luck, not design: with a buildable previous commit the false health failure would have put the
+  old version back. The server checkout may be left at `629a529` until the next deploy resets it.
+
+**Next**: push the `deploy.sh` fix (the run should end green and leave the checkout on `main`);
 then check the Integration page for all connected apps.
 
 **Notes / known issues**

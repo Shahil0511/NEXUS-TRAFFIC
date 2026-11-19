@@ -30,10 +30,17 @@ nexus_port() {
   printf '%s' "${line:-$DEFAULT_NEXUS_PORT}"
 }
 
+# True when the URL answers 2xx. The body goes to the SHELL's /dev/null, never `curl -o /dev/null`:
+# ci-deploy.sh sets MSYS_NO_PATHCONV=1, and on a Windows server Git's curl (a native program) then
+# gets the literal path "/dev/null", cannot open it and exits 23 although the server answered 200.
+probe() {
+  curl -fsS --max-time 10 "$1" >/dev/null
+}
+
 # Poll a URL until it answers 2xx or the timeout passes.
 wait_for() {
   local url="$1" deadline=$((SECONDS + WAIT_SECONDS))
-  until curl -fsS -o /dev/null "$url"; do
+  until probe "$url"; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "timed out after ${WAIT_SECONDS}s waiting for ${url}"
       return 1
@@ -71,7 +78,7 @@ fi
 
 step "Health (through the edge on ${BASE_URL})"
 wait_for "${BASE_URL}/api/health/ready"
-curl -fsS -o /dev/null "${BASE_URL}/api/docs/" && echo "ok  ${BASE_URL}/api/docs/"
+probe "${BASE_URL}/api/docs/" && echo "ok  ${BASE_URL}/api/docs/"
 wait_for "${BASE_URL}/healthz"
 
 step 'Status'
