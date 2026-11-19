@@ -1,6 +1,7 @@
 # CI/CD: every push to main is checked, then deployed to the server by a self-hosted runner.
 #
 #   push to main → `ci` (GitHub-hosted: typecheck, tests, DB tests, generated-file checks)
+#                 + `images` (GitHub-hosted, in parallel: both Docker images build)
 #               → `deploy` (runner ON the server: scripts/ci-deploy.sh <sha>)
 #
 # Same shape as EBO_SALES (ADR 0005, ai-context/decisions/0005-ci-cd-self-hosted-runner.md). The server
@@ -78,9 +79,24 @@ jobs:
           npm run openapi:emit -- --check
           npm run docs:build
 
+  # The server builds these two images on every deploy. Building them here first turns the run red
+  # BEFORE the server is touched when a Dockerfile misses a file the build needs (2026-11-19: the
+  # docs build started reading packages/react/package.json, which the api image did not copy).
+  images:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the api image (also renders the guide)
+        run: docker build -f apps/api/Dockerfile -t nexus-traffic-api:ci .
+
+      - name: Build the web image
+        run: docker build -f apps/web/Dockerfile -t nexus-traffic-web:ci .
+
   deploy:
     name: Deploy to server
-    needs: ci
+    needs: [ci, images]
     # Only real pushes to main — never pull requests.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     # No OS label: the server may be Windows or Linux; the steps below pick the matching shell.

@@ -18,6 +18,44 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-19 — First automatic deploy: api image build fixed, CI now builds both images
+
+The runner was registered on the server and Phase A (`629a529`) was pushed: the first real run of
+the `deploy` job. `ci` passed; the deploy failed in `docker compose up --build` and the old
+containers kept serving (the build fails before any container is replaced).
+
+**Done**
+- **Cause:** Phase A made `scripts/build-docs.ts` read the SDK versions from
+  `packages/{react,node,express}/package.json` (`sdkVersionOf`), but `apps/api/Dockerfile` copies
+  only `packages/shared` and `packages/auth` into the build stage → `ENOENT
+  /app/packages/react/package.json` in `npm run docs:build`. CI did not see it: it runs
+  `docs:build` in a full checkout and never built the images.
+- **Fix:** `apps/api/Dockerfile` build stage copies the three SDK `package.json` files (manifests
+  only; the SDKs are not built or shipped in the image).
+- **Guard:** `.github/workflows/deploy.yml` has a new job `images` (parallel to `ci`) that builds
+  the api and web images; `deploy` needs both. DEPLOY.md §12 and 06-process.md say so.
+- **Verified locally** (Docker 29.9): both images build; the api image against a throwaway
+  `postgres:18-alpine` — `node dist/db/migrate.js` applies 0001–0012, the api boots,
+  `/api/health/ready` = ok / `schemaCurrent: true`, `/api/docs/` serves the guide.
+
+**Next**: push this fix (the next push deploys Phase A + migrations 0007–0012 to production);
+then check the Integration page for all connected apps.
+
+**Notes / known issues**
+- `ci-deploy.sh` printed "no earlier commit to roll back to": the server clone was already at the
+  pushed commit, so there was nothing older to rebuild. Harmless here (nothing had been replaced).
+- The repo `Shahil0511/NEXUS-TRAFFIC` is **public** while a self-hosted runner on the production
+  server serves it — a pull request from a fork can ask to run code on that runner. Make the repo
+  private (or restrict fork pull-request workflows in Settings → Actions) — owner decision.
+- **SDK tarball links 404 on production**: the guide links `files/sdk/nexus-*.tgz` (chapters 0
+  and 8), but the api image never runs `sdk:pack` (it has no SDK sources), so
+  `…/traffic/api/docs/files/sdk/nexus-react-1.0.0.tgz` answers 404 on the live site (checked
+  2026-11-19; snippets under `files/snippets/` are served fine). Not caused by Phase A. Until it
+  is fixed, teams get the tarballs from `npm run sdk:pack` in this repo. Fix = build and pack the
+  SDKs in the api image (needs their sources + dev deps in the build stage) — not done yet.
+
+---
+
 ## 2026-11-19 — Phase A: data quality (environment, linking, identity, remote config, PII, diagnostics)
 
 Built by a multi-agent workflow in three waves (contract + DB first; then React SDK, node SDK +

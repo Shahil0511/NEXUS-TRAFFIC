@@ -10,7 +10,8 @@
 #              or package-lock.json changes). Lists the CURRENT workspaces explicitly; when a new
 #              workspace the api depends on is added (packages/node, …), add its package.json here.
 #   build      all sources → build @nexus/shared + @nexus/auth → tsc the api (tsconfig.build.json)
-#              → render the public integration guide into docs/dist.
+#              → render the public integration guide into docs/dist (needs the SDK package.json
+#              files for their versions; when build-docs.ts reads a new file, COPY it here).
 #   prod-deps  production node_modules only (no tsx/vitest/typescript), same workspace layout.
 #   runtime    node:22-alpine + tini, non-root user `app`, only what the server needs at runtime.
 #
@@ -47,6 +48,11 @@ COPY packages/auth packages/auth
 COPY apps/api apps/api
 COPY scripts scripts
 COPY docs docs
+# scripts/build-docs.ts reads each SDK's version from its package.json (the tarball names in the
+# guide). Manifests only: the SDK sources are not built or shipped in this image.
+COPY packages/react/package.json packages/react/package.json
+COPY packages/node/package.json packages/node/package.json
+COPY packages/express/package.json packages/express/package.json
 RUN npm run build:shared \
  && npm run build -w @nexus/api \
  && npm run docs:build \

@@ -199,7 +199,8 @@ set up, nobody runs `deploy.sh` by hand: every push to `main` runs
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
 
 1. `ci` on GitHub's machines: typecheck, unit + contract + security tests, DB tests on PostgreSQL 18,
-   generated-file checks. Pull requests stop here; they never deploy.
+   generated-file checks; in parallel `images` builds both Docker images, so a broken Dockerfile
+   stops the run before the server is touched. Pull requests stop here; they never deploy.
 2. `deploy` on **this server**, through a GitHub Actions runner installed here (it connects out to
    github.com; no inbound port). It runs [`scripts/ci-deploy.sh`](scripts/ci-deploy.sh): fetch the
    commit → `git reset --hard <sha>` → `scripts/deploy.sh` (build while the old version keeps serving →

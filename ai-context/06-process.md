@@ -84,7 +84,7 @@ npx tsx scripts/mint-dev-token.ts you@libas.in   # prints a LOCAL access_token (
 | `scripts/deploy.sh` | preflight → `git pull --ff-only` (skipped without `.git`, i.e. from the handoff zip) → `docker compose up -d --build --remove-orphans` → health checks through the edge port |
 | `scripts/ci-deploy.sh` | run by the self-hosted runner ON the server (never by hand): fetch `<sha>` with the job token → `git reset --hard` → `SKIP_PULL=1 scripts/deploy.sh`; on failure resets to the previous commit and deploys it again ([ADR 0005](decisions/0005-ci-cd-self-hosted-runner.md)) |
 | `scripts/setup-runner.ps1` / `scripts/setup-runner.sh` | one-time server setup for automatic deploys: installs the GitHub Actions runner (label `nexus-traffic-prod`, own folder next to EBO_SALES' runner) as a service, records `DEPLOY_DIR` |
-| `.github/workflows/deploy.yml` | CI/CD: `ci` (typecheck, tests, DB tests on PG 18, generated-file checks) on every push/PR → `deploy` on the server runner for pushes to `main` |
+| `.github/workflows/deploy.yml` | CI/CD: `ci` (typecheck, tests, DB tests on PG 18, generated-file checks) and `images` (both Docker images build) on every push/PR → `deploy` on the server runner for pushes to `main` |
 | `scripts/handoff/make-handoff-zip.ps1` | the zip for the TL: tracked + untracked-not-ignored files + `.env.production` as `.env` (refuses `change-me` / localdb values) — TL steps in `HANDOFF.md` |
 
 Two ways to run the stack ([ADR 0002](decisions/0002-external-database.md)):
