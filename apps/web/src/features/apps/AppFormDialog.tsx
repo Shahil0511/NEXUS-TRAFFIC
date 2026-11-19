@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import { FormField } from '@/components/FormField';
 import { InlineError } from '@/components/InlineError';
+import { SwitchRow } from '@/components/SwitchRow';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -17,7 +18,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
 import {
@@ -38,32 +38,11 @@ export interface AppFormDialogProps {
   app?: AppDto;
 }
 
-/** A labelled on/off row. */
-function SwitchRow({
-  label,
-  hint,
-  checked,
-  onCheckedChange,
-}: {
-  label: string;
-  hint: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg p-3 ring-1 ring-border ring-inset">
-      <span className="space-y-0.5">
-        <span className="block text-xs font-medium">{label}</span>
-        <span className="block text-2xs leading-relaxed text-muted-foreground">{hint}</span>
-      </span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
-    </label>
-  );
-}
-
 /** The form body; mounted fresh on every open, so it always starts from the app's current values. */
 function AppForm({ app, onDone }: { app?: AppDto; onDone: () => void }) {
-  const [values, setValues] = useState<AppFormValues>(() => (app ? appFormOf(app) : emptyAppForm()));
+  const [values, setValues] = useState<AppFormValues>(() =>
+    app ? appFormOf(app) : emptyAppForm(),
+  );
   const [errors, setErrors] = useState<FieldErrors<AppFormField>>({});
   const create = useCreateApp();
   const update = useUpdateApp();
@@ -107,7 +86,9 @@ function AppForm({ app, onDone }: { app?: AppDto; onDone: () => void }) {
         <FormField
           label="Slug"
           error={errors.slug}
-          hint={app ? 'The public app id; it cannot change.' : 'Lower-case, e.g. ebo-sales. Permanent.'}
+          hint={
+            app ? 'The public app id; it cannot change.' : 'Lower-case, e.g. ebo-sales. Permanent.'
+          }
         >
           {(control) => (
             <Input
@@ -174,7 +155,7 @@ function AppForm({ app, onDone }: { app?: AppDto; onDone: () => void }) {
       <div className="space-y-2">
         <SwitchRow
           label="Browser ingest"
-          hint="Accept page views and tool clicks from the publishable key."
+          hint="Accept page views and tool clicks from the publishable key. Off = the kill switch: every browser SDK of this app stops."
           checked={values.browserIngestEnabled}
           onCheckedChange={(checked) => set('browserIngestEnabled', checked)}
         />

@@ -4,9 +4,11 @@ import {
   INGEST_CONTRACT_VERSION,
   INGEST_HEADERS,
   ROUTES,
+  sdkConfigRequestSchema,
   serverIngestEnvelopeSchema,
   type BrowserIngestEnvelope,
   type IngestResultDto,
+  type SdkRemoteConfig,
   type ServerIngestEnvelope,
   type VerifyResponseDto,
 } from '@nexus/shared';
@@ -73,8 +75,21 @@ describe('IngestController.server', () => {
     expect(res.headers[INGEST_HEADERS.contract.toLowerCase()]).toBe(String(INGEST_CONTRACT_VERSION));
     const [envelope, ctx, options] = ingestServerEvents.mock.calls[0]!;
     expect(envelope.events).toHaveLength(1);
-    expect(ctx).toMatchObject({ app: appRow(), key: apiKeyRow(), receivedAt: FIXED_NOW, sdk: null });
+    expect(ctx).toMatchObject({
+      app: appRow(),
+      key: apiKeyRow(),
+      receivedAt: FIXED_NOW,
+      sdk: null,
+      environmentClaim: null,
+    });
     expect(options).toEqual({ dryRun: false });
+  });
+
+  it('passes the envelope environment claim through (validated later, never 400)', async () => {
+    const { app, ingestServerEvents } = setup();
+    const res = await request(app).post(ROUTES.ingest.server.path).send(body({ environment: 'typo-env' }));
+    expect(res.status).toBe(202);
+    expect(ingestServerEvents.mock.calls[0]?.[1].environmentClaim).toBe('typo-env');
   });
 
   it('passes dryRun only for ?dryRun=1', async () => {
@@ -148,11 +163,14 @@ describe('IngestController.browser', () => {
       .set('X-Forwarded-For', '49.36.1.1')
       .set('User-Agent', 'UA/1.0')
       .set('Cookie', 'access_token=jwt')
+      .set('Origin', 'https://ebo.libas.in')
       .send({
         key: 'nx_pk_x',
         sentAt: '2026-10-01T09:59:59.000Z',
         sessionId: '33333333-3333-4333-8333-333333333333',
-        client: { sdk: '@nexus/react', version: '1.0.0' },
+        environment: 'staging',
+        release: '2026.11.18-a1b2c3d',
+        client: { sdk: '@nexus/react', version: '1.0.0', tz: 'Asia/Kolkata', lang: 'en-IN', replay: true },
         events: [browserEvent()],
       });
 
@@ -164,7 +182,60 @@ describe('IngestController.browser', () => {
     expect(ctx).toMatchObject({
       receivedAt: FIXED_NOW,
       sdk: '@nexus/react@1.0.0',
-      request: { ip: '49.36.1.1', userAgent: 'UA/1.0', cookieHeader: 'access_token=jwt' },
+      environmentClaim: 'staging',
+      request: {
+        ip: '49.36.1.1',
+        userAgent: 'UA/1.0',
+        cookieHeader: 'access_token=jwt',
+        origin: 'https://ebo.libas.in',
+      },
+      envelope: { release: '2026.11.18-a1b2c3d', tz: 'Asia/Kolkata', lang: 'en-IN', replay: true },
     });
+  });
+
+  it('the page origin falls back to the ORIGIN of the Referer (never its path); replay defaults false', async () => {
+    const { app, ingestBrowserEvents } = browserSetup();
+    await request(app)
+      .post(ROUTES.ingest.browser.path)
+      .set('Referer', 'http://localhost:3000/ebo-sales/customers/42?q=secret')
+      .send({
+        key: 'nx_pk_x',
+        sentAt: '2026-10-01T09:59:59.000Z',
+        sessionId: '33333333-3333-4333-8333-333333333333',
+        events: [browserEvent()],
+      });
+    const [, ctx] = ingestBrowserEvents.mock.calls[0]!;
+    expect(ctx.request.origin).toBe('http://localhost:3000');
+    expect(ctx.envelope).toEqual({ release: undefined, tz: undefined, lang: undefined, replay: false });
+    expect(ctx.environmentClaim).toBeNull();
+  });
+});
+
+describe('IngestController.config', () => {
+  const CONFIG: SdkRemoteConfig = {
+    contract: INGEST_CONTRACT_VERSION,
+    version: 3,
+    enabled: true,
+    disabledModules: ['auto_tools'],
+    maxAgeMs: 300_000,
+  };
+
+  it('200 with the remote config of the authenticated app, Cache-Control: no-store', async () => {
+    const config = vi.fn(() => CONFIG);
+    const controller = new IngestController(fake<IngestService>({ config }), new FixedClock(FIXED_NOW));
+    const app = express();
+    app.post(
+      ROUTES.ingest.config.path,
+      express.json(),
+      validateBody(sdkConfigRequestSchema, ERROR_CODES.INVALID_ENVELOPE),
+      authenticated,
+      controller.config,
+    );
+    app.use(errorHandlerMiddleware(silentLogger()));
+    const res = await request(app).post(ROUTES.ingest.config.path).send({ key: 'nx_pk_x' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(CONFIG);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(config).toHaveBeenCalledWith(appRow());
   });
 });

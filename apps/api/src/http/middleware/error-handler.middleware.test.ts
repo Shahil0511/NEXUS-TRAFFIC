@@ -150,4 +150,20 @@ describe('errorHandlerMiddleware', () => {
     expect(outcome.error?.message ?? '').not.toMatch(/timeout/i);
     expect(outcome.text).not.toContain('"error"');
   });
+
+  it('sets res.locals.errorCode BEFORE the response is sent (read by finish listeners)', async () => {
+    const { logger } = recordingLogger();
+    const seen: Array<string | undefined> = [];
+    const app = express();
+    app.use((_req, res, next) => {
+      res.on('finish', () => seen.push(res.locals.errorCode));
+      next();
+    });
+    app.get('/conflict', () => {
+      throw new ConflictError('taken');
+    });
+    app.use(errorHandlerMiddleware(logger));
+    await request(app).get('/conflict');
+    expect(seen).toEqual([ERROR_CODES.CONFLICT]);
+  });
 });

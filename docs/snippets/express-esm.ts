@@ -12,6 +12,19 @@
  *                             getUser: (req) => emailFrom(req) }));
  *   // in your existing shutdown handler:  await nexus.shutdown();
  *
+ * !!! getUser DEFAULTS TO ANONYMOUS. Without it EVERY event is stored with no user and the dashboard
+ * !!! shows no "who". Pass a function that returns your VERIFIED signed-in user's email, read when the
+ * !!! response ends (so values set later by auth middleware / guards are visible), e.g.
+ * !!!   getUser: (req) => (req as Request & { user?: { email?: string } }).user?.email
+ * !!! NEVER read it from a client-controlled header or cookie you have not verified.
+ *
+ * Environment variables (server ONLY):
+ *   NEXUS_URL          https://nexus.libas.in/traffic (unset → no-op client)
+ *   NEXUS_SECRET_KEY   nx_sk_…
+ *   NEXUS_ENVIRONMENT  prod | staging | dev (optional; unset → the server stores prod; anything else
+ *                      is NOT sent). Set it on staging/dev so their traffic stays off prod dashboards.
+ *   NEXUS_RELEASE      your build label, e.g. a git sha (optional)
+ *
  * Contract: https://nexus.libas.in/traffic/api/docs/
  */
 import { randomUUID } from 'node:crypto';
@@ -33,6 +46,7 @@ const LIMITS = {
 const MAX_DURATION_MS = 3_600_000;
 const ERROR_CODE_PATTERN = /^[A-Z0-9_]{1,64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ENVIRONMENT_VALUES = ['prod', 'staging', 'dev'];
 
 // ─── Batching / retry defaults ──────────────────────────────────────────────
 const FLUSH_EVERY_EVENTS = 100;
@@ -84,6 +98,8 @@ export interface NexusClientOptions {
   url?: string;
   /** NEXUS_SECRET_KEY (`nx_sk_…`). Server env ONLY. */
   key?: string;
+  /** prod | staging | dev. Default NEXUS_ENVIRONMENT; sent ONLY when valid (unset → server stores prod). */
+  environment?: string;
   sdkName?: string;
   sdkVersion?: string;
   logger?: Pick<Console, 'warn'>;
@@ -199,12 +215,18 @@ export function createNexusClient(options: NexusClientOptions): NexusClient {
   const {
     url,
     key,
+    environment = process.env['NEXUS_ENVIRONMENT'],
     sdkName = 'nexus-snippet-express-esm',
-    sdkVersion = '1.0.0',
+    sdkVersion = '1.1.0',
     logger = console,
   } = options;
   if (!url || !key) return noopClient;
   const endpoint = `${url.replace(/\/+$/, '')}${SERVER_INGEST_PATH}`;
+  // Sent ONLY when it is one of ENVIRONMENT_VALUES; an invalid value is left out (never sent).
+  const env = environment && ENVIRONMENT_VALUES.includes(environment) ? environment : undefined;
+  if (environment && !env) {
+    safely(() => logger.warn(`[nexus] environment must be one of ${ENVIRONMENT_VALUES.join(', ')} — not sent`));
+  }
   const queue: NexusServerEvent[] = [];
   let dropped = 0;
   let pausedUntil = 0;
@@ -229,6 +251,7 @@ export function createNexusClient(options: NexusClientOptions): NexusClient {
       body: JSON.stringify({
         sentAt: new Date().toISOString(),
         sdk: { name: sdkName, version: sdkVersion },
+        ...(env ? { environment: env } : {}),
         events,
       }),
       redirect: 'manual',

@@ -4,6 +4,7 @@
 import { z } from 'zod';
 
 import { KEY_KIND_VALUES } from '../constants/keys';
+import { SDK_CAPTURE_MODULE_VALUES } from '../constants/traffic';
 import { appSlugSchema } from './common';
 
 /** An origin like https://nexus.libas.in or http://localhost:3000 — scheme + host [+ port], no path. */
@@ -56,3 +57,16 @@ export const expireKeyBodySchema = z.object({
   expiresAt: z.iso.datetime({ offset: true }),
 });
 export type ExpireKeyBody = z.infer<typeof expireKeyBodySchema>;
+
+/**
+ * BODY of ROUTES.apps.updateSdkConfig: the FULL list of disabled browser-SDK modules (ADR 0009).
+ * `expectedVersion` is the version the admin saw; a mismatch is 409 CONFLICT (no lost update).
+ */
+export const updateSdkConfigBodySchema = z.object({
+  expectedVersion: z.int().min(1),
+  disabledModules: z
+    .array(z.enum(SDK_CAPTURE_MODULE_VALUES))
+    .max(SDK_CAPTURE_MODULE_VALUES.length)
+    .refine((modules) => new Set(modules).size === modules.length, 'duplicate module'),
+});
+export type UpdateSdkConfigBody = z.infer<typeof updateSdkConfigBodySchema>;

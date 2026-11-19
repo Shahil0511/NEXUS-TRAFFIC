@@ -1,6 +1,7 @@
 /**
  * Repositories round-trip AS nexus_app (the runtime role, runtime pool options): apps, api keys,
- * audit log, ingest counters, the unnest ingest insert (idempotency) and partition maintenance.
+ * audit log, ingest counters, the unnest ingest insert (idempotency), partition maintenance, and the
+ * hourly diagnostic counters (rejections, PII detections, SSO outcomes) with their retention.
  */
 import { randomUUID } from 'node:crypto';
 
@@ -12,8 +13,12 @@ import { AdminAuditRepository } from '../../src/repositories/admin-audit.reposit
 import { ApiKeyRepository } from '../../src/repositories/api-key.repository';
 import { ApiRequestIngestRepository } from '../../src/repositories/api-request-ingest.repository';
 import { AppRepository } from '../../src/repositories/app.repository';
+import { AggregateRetentionRepository } from '../../src/repositories/aggregate-retention.repository';
 import { IngestCounterRepository } from '../../src/repositories/ingest-counter.repository';
+import { IngestRejectionRepository } from '../../src/repositories/ingest-rejection.repository';
 import { PartitionRepository } from '../../src/repositories/partition.repository';
+import { PiiDetectionRepository } from '../../src/repositories/pii-detection.repository';
+import { SsoCookieOutcomeRepository } from '../../src/repositories/sso-cookie-outcome.repository';
 import {
   RUN_DB_TESTS,
   caught,
@@ -341,5 +346,111 @@ describe.skipIf(!RUN_DB_TESTS)('repositories as nexus_app (db)', () => {
       expect(await partitions.dropExpired('api_requests', 6)).toEqual([]);
       expect(await partitions.dropExpired('web_events', 6)).toEqual([]);
     });
+  });
+
+  // ─── Diagnostic counters (0010–0012) and their retention ──────────────────
+
+  describe('diagnostic counter repositories', () => {
+    const at = new Date('2026-10-01T05:15:00Z'); // 10:45 IST → bucket 10:00 IST
+    const bucket = new Date('2026-10-01T04:30:00Z');
+
+    it('IngestRejectionRepository: additive multi-row upsert, duplicate keys in one call are summed', async () => {
+      const rejections = new IngestRejectionRepository(db.appPool);
+      const row = { source: 'server' as const, sdk: '@nexus/express@1.1.0', code: 'INVALID_EVENT' as const };
+      await rejections.increment(
+        app.id,
+        [
+          { ...row, schemaPath: 'status', rejected: 2 },
+          { ...row, schemaPath: 'status', rejected: 1 },
+          { ...row, schemaPath: '', code: 'INVALID_ENVELOPE', rejected: 1 },
+        ],
+        at,
+      );
+      await rejections.increment(app.id, [{ ...row, schemaPath: 'status', rejected: 4 }], at);
+      await rejections.increment(app.id, [], at);
+      const { rows } = await db.appPool.query(
+        `SELECT source, sdk, code, schema_path, bucket_hour, rejected
+           FROM traffic.ingest_rejections WHERE app_id = $1 ORDER BY code`,
+        [app.id],
+      );
+      expect(rows).toEqual([
+        { ...row, sdk: row.sdk, code: 'INVALID_ENVELOPE', schema_path: '', bucket_hour: bucket, rejected: 1 },
+        { ...row, schema_path: 'status', bucket_hour: bucket, rejected: 7 },
+      ]);
+    });
+
+    it('PiiDetectionRepository: per (source, field, kind, hour)', async () => {
+      const pii = new PiiDetectionRepository(db.appPool);
+      await pii.increment(
+        app.id,
+        'browser',
+        [
+          { field: 'path', kind: 'phone', detections: 2 },
+          { field: 'label', kind: 'email', detections: 1 },
+        ],
+        at,
+      );
+      await pii.increment(app.id, 'browser', [{ field: 'path', kind: 'phone', detections: 3 }], at);
+      const { rows } = await db.appPool.query(
+        `SELECT source, field, kind, bucket_hour, detections FROM traffic.pii_detections
+          WHERE app_id = $1 ORDER BY field`,
+        [app.id],
+      );
+      expect(rows).toEqual([
+        { source: 'browser', field: 'label', kind: 'email', bucket_hour: bucket, detections: 1 },
+        { source: 'browser', field: 'path', kind: 'phone', bucket_hour: bucket, detections: 5 },
+      ]);
+    });
+
+    it('SsoCookieOutcomeRepository: +1 beacon per call', async () => {
+      const outcomes = new SsoCookieOutcomeRepository(db.appPool);
+      await outcomes.increment(app.id, 'no-cookie', 'cross_origin', at);
+      await outcomes.increment(app.id, 'no-cookie', 'cross_origin', at);
+      await outcomes.increment(app.id, 'ok', 'same_origin', at);
+      const { rows } = await db.appPool.query(
+        `SELECT outcome, beacon_origin, bucket_hour, beacons FROM traffic.sso_cookie_outcomes
+          WHERE app_id = $1 ORDER BY outcome`,
+        [app.id],
+      );
+      expect(rows).toEqual([
+        { outcome: 'no-cookie', beacon_origin: 'cross_origin', bucket_hour: bucket, beacons: 2 },
+        { outcome: 'ok', beacon_origin: 'same_origin', bucket_hour: bucket, beacons: 1 },
+      ]);
+    });
+
+    it('AggregateRetentionRepository deletes rows before the cutoff from all three tables', async () => {
+      const old = new Date('2026-06-01T05:15:00Z');
+      await new IngestRejectionRepository(db.appPool).increment(
+        app.id,
+        [{ source: 'browser', sdk: '', code: 'ORIGIN_NOT_ALLOWED', schemaPath: '', rejected: 1 }],
+        old,
+      );
+      await new PiiDetectionRepository(db.appPool).increment(
+        app.id,
+        'server',
+        [{ field: 'release', kind: 'pan', detections: 1 }],
+        old,
+      );
+      await new SsoCookieOutcomeRepository(db.appPool).increment(app.id, 'expired', 'none', old);
+      const deleted = await new AggregateRetentionRepository(db.appPool).deleteExpired(
+        new Date('2026-09-01T00:00:00Z'),
+      );
+      expect(deleted).toBe(3);
+      for (const table of ['ingest_rejections', 'pii_detections', 'sso_cookie_outcomes']) {
+        const { rows } = await db.appPool.query(
+          `SELECT count(*)::int AS n FROM traffic.${table} WHERE bucket_hour < '2026-09-01'`,
+        );
+        expect(rows[0]?.n).toBe(0);
+      }
+    });
+  });
+
+  it('ApiRequestIngestRepository stores the environment column (0007)', async () => {
+    const row = apiRequestRow(app.id, { environment: 'staging' });
+    expect(await ingest.insertBatch([row])).toEqual([row.eventId]);
+    const { rows } = await db.appPool.query(`SELECT environment FROM traffic.api_requests WHERE event_id = $1`, [
+      row.eventId,
+    ]);
+    expect(rows[0]).toEqual({ environment: 'staging' });
   });
 });

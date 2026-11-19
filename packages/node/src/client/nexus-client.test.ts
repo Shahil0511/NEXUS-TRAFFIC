@@ -1,8 +1,8 @@
-import { INGEST_HEADERS, SDK_DEFAULTS } from '@nexus/shared/constants';
+import { ENVIRONMENT_VALUES, INGEST_HEADERS, SDK_DEFAULTS, type Environment } from '@nexus/shared/constants';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createEventId } from '../event-id';
-import type { NexusClientOptions, NexusServerBatch, NexusServerEvent } from '../types';
+import type { NexusClientOptions, NexusEnvironment, NexusServerBatch, NexusServerEvent } from '../types';
 import { createNexusClient } from './nexus-client';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -74,10 +74,12 @@ function client(responder: Responder, options: Partial<NexusClientOptions> = {})
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-01T09:30:00.000Z'));
+  vi.stubEnv('NEXUS_ENVIRONMENT', ''); // hermetic: the developer's shell must not change envelopes
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ describe('createNexusClient configuration', () => {
     expect(createNexusClient({}).trustProxyHops).toBe(1);
     expect(createNexusClient({ trustProxyHops: 2 }).trustProxyHops).toBe(2);
     expect(createNexusClient({ trustProxyHops: 0 }).trustProxyHops).toBe(0);
-    expect(createNexusClient({}).sdk).toEqual({ name: '@nexus/node', version: '1.0.0' });
+    expect(createNexusClient({}).sdk).toEqual({ name: '@nexus/node', version: '1.1.0' });
   });
 });
 
@@ -149,20 +151,82 @@ describe('request shape', () => {
     const headers = call.init.headers as Record<string, string>;
     expect(headers['Content-Type']).toBe('application/json');
     expect(headers[INGEST_HEADERS.key]).toBe('nx_sk_test');
-    expect(headers[INGEST_HEADERS.sdk]).toBe('@nexus/node@1.0.0');
+    expect(headers[INGEST_HEADERS.sdk]).toBe('@nexus/node@1.1.0');
     expect(call.body).toEqual({
       sentAt: '2026-10-01T09:30:00.000Z',
-      sdk: { name: '@nexus/node', version: '1.0.0' },
+      sdk: { name: '@nexus/node', version: '1.1.0' },
       events: [event],
     });
   });
 
   it('reports an adapter sdk identity when given one', async () => {
-    const { nexus, fetch } = client(() => accepted(1), { sdk: { name: '@nexus/express', version: '1.0.0' } });
+    const { nexus, fetch } = client(() => accepted(1), { sdk: { name: '@nexus/express', version: '1.1.0' } });
     nexus.track(makeEvent());
     await nexus.flush();
-    expect((fetch.calls[0]!.init.headers as Record<string, string>)[INGEST_HEADERS.sdk]).toBe('@nexus/express@1.0.0');
-    expect(fetch.calls[0]!.body.sdk).toEqual({ name: '@nexus/express', version: '1.0.0' });
+    expect((fetch.calls[0]!.init.headers as Record<string, string>)[INGEST_HEADERS.sdk]).toBe('@nexus/express@1.1.0');
+    expect(fetch.calls[0]!.body.sdk).toEqual({ name: '@nexus/express', version: '1.1.0' });
+  });
+});
+
+// ─── Environment (ADR 0008) ─────────────────────────────────────────────────
+
+/** Two-way type equality: fails to compile if NexusEnvironment and the shared Environment drift. */
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+describe('environment', () => {
+  it('NexusEnvironment equals the shared Environment in both directions', () => {
+    const same: Equals<NexusEnvironment, Environment> = true;
+    expect(same).toBe(true);
+    const all: readonly NexusEnvironment[] = ENVIRONMENT_VALUES;
+    expect(all).toEqual(['prod', 'staging', 'dev']);
+  });
+
+  it('is NOT in the envelope when neither the option nor NEXUS_ENVIRONMENT is set', async () => {
+    const { nexus, fetch } = client(() => accepted(1));
+    nexus.track(makeEvent());
+    await nexus.flush();
+    expect(fetch.calls[0]!.body).not.toHaveProperty('environment');
+  });
+
+  it.each(ENVIRONMENT_VALUES)('sends the %s option in the envelope', async (environment) => {
+    const { nexus, fetch } = client(() => accepted(1), { environment });
+    nexus.track(makeEvent());
+    await nexus.flush();
+    expect(fetch.calls[0]!.body.environment).toBe(environment);
+  });
+
+  it('falls back to NEXUS_ENVIRONMENT; the option wins over it', async () => {
+    vi.stubEnv('NEXUS_ENVIRONMENT', 'staging');
+    const fromEnv = client(() => accepted(1));
+    fromEnv.nexus.track(makeEvent());
+    await fromEnv.nexus.flush();
+    expect(fromEnv.fetch.calls[0]!.body.environment).toBe('staging');
+
+    const fromOption = client(() => accepted(1), { environment: 'dev' });
+    fromOption.nexus.track(makeEvent());
+    await fromOption.nexus.flush();
+    expect(fromOption.fetch.calls[0]!.body.environment).toBe('dev');
+  });
+
+  it.each([
+    ['an invalid option', { environment: 'production' as NexusEnvironment }, undefined],
+    ['an invalid NEXUS_ENVIRONMENT', {}, 'Prod'],
+  ])('omits %s and warns once without logging the value', async (_label, options, envValue) => {
+    if (envValue !== undefined) vi.stubEnv('NEXUS_ENVIRONMENT', envValue);
+    const { nexus, fetch, logger } = client(() => accepted(1), options);
+    nexus.track(makeEvent());
+    await nexus.flush();
+    expect(fetch.calls[0]!.body).not.toHaveProperty('environment');
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const message = String(logger.warn.mock.calls[0]?.[0]);
+    expect(message).toContain('environment must be one of prod, staging, dev');
+    expect(message).not.toMatch(/production|Prod/); // the configured value itself is never logged
+  });
+
+  it('a no-op client ignores the environment silently', () => {
+    const logger = quietLogger();
+    createNexusClient({ environment: 'nope' as NexusEnvironment, logger });
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 
@@ -247,6 +311,61 @@ describe('response handling (guide chapter 4)', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fetch.calls).toHaveLength(1);
     expect(nexus.stats()).toMatchObject({ accepted: 1, rejected: 1, dropped: 0, queued: 0 });
+  });
+
+  it('202: counts rejected[] per code across batches and names the codes (never the message)', async () => {
+    const reply = (codes: unknown[]): Response =>
+      json(202, {
+        accepted: 0,
+        duplicates: 0,
+        rejected: codes.map((code, index) => ({ index, code, message: 'secret-ish detail' })),
+        warnings: [],
+      });
+    let call = 0;
+    const { nexus, logger } = client(() => {
+      call += 1;
+      return call === 1
+        ? reply(['EVENT_TIME_OUT_OF_RANGE', 'EVENT_TIME_OUT_OF_RANGE', 'INVALID_EVENT'])
+        : reply(['INVALID_EVENT', 'not a code', 42]);
+    });
+    nexus.track(makeEvent(1));
+    await nexus.flush();
+    nexus.track(makeEvent(2));
+    await nexus.flush();
+    const stats = nexus.stats();
+    expect(stats.rejected).toBe(6);
+    expect(stats.rejectedByCode).toEqual({ EVENT_TIME_OUT_OF_RANGE: 2, INVALID_EVENT: 2 });
+    stats.rejectedByCode['INVALID_EVENT'] = 99; // a copy: the client's counters are untouched
+    expect(nexus.stats().rejectedByCode['INVALID_EVENT']).toBe(2);
+    const message = String(logger.warn.mock.calls[0]?.[0]);
+    expect(message).toContain('EVENT_TIME_OUT_OF_RANGE ×2');
+    expect(message).toContain('INVALID_EVENT ×1');
+    expect(message).not.toContain('secret-ish');
+  });
+
+  it('202: rejectedByCode keeps at most 32 distinct codes and the warning names at most 5', async () => {
+    const codes = Array.from({ length: 40 }, (_, i) => `CODE_${i}`);
+    const { nexus, logger } = client(() =>
+      json(202, {
+        accepted: 0,
+        duplicates: 0,
+        rejected: codes.map((code, index) => ({ index, code })),
+        warnings: [],
+      }),
+    );
+    nexus.track(makeEvent());
+    await nexus.flush();
+    const stats = nexus.stats();
+    expect(stats.rejected).toBe(40);
+    expect(Object.keys(stats.rejectedByCode)).toHaveLength(32);
+    const message = String(logger.warn.mock.calls[0]?.[0]);
+    expect(message).toContain('CODE_4 ×1, …)');
+    expect(message).not.toContain('CODE_5 ');
+  });
+
+  it('stats().rejectedByCode starts empty (also on the no-op client)', () => {
+    expect(client(() => accepted(1)).nexus.stats().rejectedByCode).toEqual({});
+    expect(createNexusClient({}).stats().rejectedByCode).toEqual({});
   });
 
   it.each([

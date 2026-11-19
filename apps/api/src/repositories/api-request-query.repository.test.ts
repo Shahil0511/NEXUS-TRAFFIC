@@ -3,7 +3,7 @@
  * literal partial-index predicates, bounded windows, whitelisted ORDER BY.
  * Results are covered by test/db/analytics-queries.integration.test.ts.
  */
-import { STATUS_CLASS_VALUES } from '@nexus/shared';
+import { SERVER_BREAKDOWN_DIMENSION_VALUES, STATUS_CLASS_VALUES } from '@nexus/shared';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
@@ -11,24 +11,29 @@ import { likeContains, ParamList } from '../db/sql';
 import type { EndpointListOptions, FailureFilter, TrafficFilter } from '../domain/filters';
 import {
   ApiRequestQueryRepository,
+  environmentConditions,
   errorCodeCondition,
   FAILURE_PREDICATES,
   scopeConditions,
+  SERVER_BREAKDOWN_COLUMNS,
 } from './api-request-query.repository';
+import { IDENTIFIED_SQL, LINKABLE_SQL, LINKED_SQL } from './coverage-predicates';
 
 const FILTER: TrafficFilter = {
   from: new Date('2026-10-01T00:00:00Z'),
   to: new Date('2026-10-02T00:00:00Z'),
+  environments: null,
 };
 /** An app error code; must only ever reach SQL as a bound value. */
 const CODE = 'UPSTREAM_TIMEOUT';
 
-/** Records every statement; answers with no rows. */
+/** Records every statement; answers with `rows` (default: none). */
 class RecordingExecutor {
   readonly statements: Array<{ text: string; values: unknown[] }> = [];
+  rows: unknown[] = [];
   async query(text: string, values: unknown[] = []) {
     this.statements.push({ text, values });
-    return { rows: [] };
+    return { rows: this.rows };
   }
 }
 
@@ -191,5 +196,112 @@ describe('ApiRequestQueryRepository SQL', () => {
     const { exec, repo } = build();
     expect(await repo.getEndpointDetail('e', FILTER, 'hour')).toBeNull();
     expect(exec.statements).toHaveLength(1);
+  });
+});
+
+// ─── Environment filter (ADR 0008) ──────────────────────────────────────────
+
+describe('environmentConditions / scopeConditions', () => {
+  it('adds ONE bound text[] predicate when the filter keeps environments, nothing for null', () => {
+    const params = new ParamList();
+    expect(environmentConditions('w', { ...FILTER, environments: ['prod'] }, params)).toEqual([
+      'w.environment = ANY($1::text[])',
+    ]);
+    expect(params.values).toEqual([['prod']]);
+    expect(environmentConditions('w', FILTER, new ParamList())).toEqual([]);
+  });
+
+  it('scopeConditions ends with the environment predicate', () => {
+    const params = new ParamList();
+    const conditions = scopeConditions({ ...FILTER, environments: ['staging', 'dev'] }, params);
+    expect(conditions.at(-1)).toBe('r.environment = ANY($3::text[])');
+    expect(params.values.at(-1)).toEqual(['staging', 'dev']);
+  });
+});
+
+/** Each `FROM traffic.<table> <alias>` must carry `<alias>.environment = ANY($n::text[])`. */
+function expectEveryTableEnvFiltered(text: string): void {
+  const aliases = [...text.matchAll(/FROM traffic\.(?:web_events|api_requests) (\w+)/g)].map(
+    (match) => match[1],
+  );
+  expect(aliases.length).toBeGreaterThan(0);
+  for (const alias of aliases) {
+    expect(text, `alias ${alias}`).toMatch(
+      new RegExp(`${alias}\\.environment = ANY\\(\\$\\d+::text\\[\\]\\)`),
+    );
+  }
+}
+
+const STAGING: FailureFilter = { ...FILTER, environments: ['staging'], errorCode: CODE };
+const READS: Record<string, (repo: ApiRequestQueryRepository) => Promise<unknown>> = {
+  summarizeTraffic: (r) => r.summarizeTraffic(STAGING),
+  summarizeTrafficByApp: (r) => r.summarizeTrafficByApp(STAGING),
+  timeseries: (r) => r.timeseries(STAGING, 'hour'),
+  listEndpointStats: (r) => r.listEndpointStats(STAGING, LIST_OPTIONS),
+  getEndpointDetail: (r) => r.getEndpointDetail('e', STAGING, 'hour'),
+  summarizeErrors: (r) => r.summarizeErrors(STAGING, 'hour'),
+  listFailures: (r) => r.listFailures(STAGING, { statusClass: 'all', after: null, limit: 3 }),
+  listUserTopEndpoints: (r) => r.listUserTopEndpoints(Buffer.alloc(32), STAGING, 5),
+  listPageApiCalls: (r) => r.listPageApiCalls('/ebo-sales/stores', STAGING, 5),
+  countByDimension: (r) => r.countByDimension('os', STAGING, 5),
+};
+const PRIVATE_METHODS = [
+  'countUsers',
+  'listTopUsers',
+  'queryEndpointStats',
+  'countFailures',
+  'countByErrorCode',
+  'countByStatus',
+  'listSlowest',
+];
+
+describe('ApiRequestQueryRepository environment filter', () => {
+  it('the READS table covers every method (a new read must be added here)', () => {
+    const methods = Object.getOwnPropertyNames(ApiRequestQueryRepository.prototype).filter(
+      (name) => name !== 'constructor' && !PRIVATE_METHODS.includes(name),
+    );
+    expect(methods.sort()).toEqual(Object.keys(READS).sort());
+  });
+
+  it.each(Object.entries(READS))(
+    '%s filters EVERY table of EVERY statement by environment',
+    async (_name, read) => {
+      const exec = new RecordingExecutor();
+      exec.rows = [{}];
+      await read(new ApiRequestQueryRepository(exec as unknown as Pool));
+      expect(exec.statements.length).toBeGreaterThan(0);
+      for (const { text, values } of exec.statements) {
+        expectEveryTableEnvFiltered(text);
+        expect(values).toContainEqual(['staging']);
+      }
+    },
+  );
+});
+
+describe('ApiRequestQueryRepository coverage and breakdown', () => {
+  it('summarizeTrafficByApp counts identified / linkable / linked with the shared predicates', async () => {
+    const { exec, repo } = build();
+    await repo.summarizeTrafficByApp(FILTER);
+    const text = exec.statements[0]?.text ?? '';
+    expect(text).toContain(`FILTER (WHERE ${IDENTIFIED_SQL('r')}) AS identified`);
+    expect(text).toContain(`FILTER (WHERE ${LINKABLE_SQL('r')}) AS linkable`);
+    expect(text).toContain(`FILTER (WHERE ${LINKED_SQL('r')}) AS linked`);
+  });
+
+  it('SERVER_BREAKDOWN_COLUMNS whitelists exactly the server dimensions (frozen)', () => {
+    expect(Object.keys(SERVER_BREAKDOWN_COLUMNS).sort()).toEqual(
+      [...SERVER_BREAKDOWN_DIMENSION_VALUES].sort(),
+    );
+    expect(Object.isFrozen(SERVER_BREAKDOWN_COLUMNS)).toBe(true);
+  });
+
+  it('countByDimension groups by the whitelisted column over every call in scope', async () => {
+    const { exec, repo } = build();
+    await repo.countByDimension('device', FILTER, 4);
+    const [statement] = exec.statements;
+    expect(statement?.text).toContain('SELECT r.ua_device AS value');
+    expect(statement?.text).toContain('GROUP BY r.ua_device');
+    expect(statement?.text).toContain('sum(count(*)) OVER ()::int8 AS total');
+    expect(statement?.values).toEqual([FILTER.from, FILTER.to, 4]);
   });
 });

@@ -34,6 +34,9 @@ through the whitelisted functions.
 | `api_requests` | backend API call reported by an app's server | large | monthly |
 | `web_events` | browser event reported by an app's frontend | large | monthly |
 | `ingest_counters` | app × source × hour | small | no |
+| `ingest_rejections` | app × source × SDK × code × schema path × hour | small | no |
+| `pii_detections` | app × source × field × PII kind × hour | small | no |
+| `sso_cookie_outcomes` | app × cookie outcome × beacon origin × hour | small | no |
 | `schema_migrations` | applied migration file | tiny | no |
 
 There is **no sessions table**: a session is all `web_events` rows with the same
@@ -44,12 +47,15 @@ There is **no sessions table**: a session is all `web_events` rows with the same
 | Column | Meaning |
 |---|---|
 | `id` | internal uuid. Never shown in URLs. |
-| `slug` | the public id, e.g. `ebo-sales` (lower-case letters, digits, dashes; 2–63 chars). Unique. Staging uses its own slug (`ebo-sales-dev`) — there is no environment column. |
+| `slug` | the public id, e.g. `ebo-sales` (lower-case letters, digits, dashes; 2–63 chars). Unique. Staging and dev traffic is told apart by the events' `environment` column ([ADR 0008](decisions/0008-environment-dimension.md)); a separate `<slug>-dev` app is still allowed. |
 | `display_name` | name shown on the dashboard (1–100 chars). |
 | `base_path` | URL prefix of the app on `nexus.libas.in`, e.g. `/ebo-sales`. Browser events must have paths under it. Optional. |
 | `allowed_origins` | browser origins allowed to send events (e.g. `https://nexus.libas.in`), max 20. |
 | `is_active` | `false` = the app is disabled; all its keys stop working. |
-| `browser_ingest_enabled` | `false` = only server events are accepted. |
+| `browser_ingest_enabled` | `false` = only server events are accepted. This is the **kill switch** of the browser SDK: browser batches get `403 BROWSER_INGEST_DISABLED` (every SDK version), and SDK ≥ 1.1.0 stops capturing in the page ([ADR 0009](decisions/0009-sdk-remote-config-and-kill-switch.md)). |
+| `sdk_config_version` | remote SDK config version, ≥ 1, bumped on every change (optimistic concurrency: the admin sends `expectedVersion`). Migration 0009. |
+| `sdk_disabled_modules` | capture modules the SDK must switch OFF (`SDK_CAPTURE_MODULE_VALUES`; CHECK `apps_sdk_disabled_modules_check`). Remote config can only disable. Default `{}`. |
+| `sdk_config_updated_at` | when the remote config was last changed (null = never). |
 | `created_by` | email of the admin who registered it. |
 | `created_at`, `updated_at` | timestamps; `updated_at` is set by a trigger on every update. |
 
@@ -81,7 +87,7 @@ Append-only: the api can insert and read, never update or delete.
 | `id` | increasing number. |
 | `created_at` | when. |
 | `actor_email` | the admin. |
-| `action` | `APP_CREATE`, `APP_UPDATE`, `APP_DISABLE`, `KEY_CREATE`, `KEY_EXPIRE`, `KEY_REVOKE`. |
+| `action` | `APP_CREATE`, `APP_UPDATE`, `APP_DISABLE`, `KEY_CREATE`, `KEY_EXPIRE`, `KEY_REVOKE`, `APP_SDK_CONFIG_UPDATE` (added in 0009 by swapping the CHECK under the same name). |
 | `target_type`, `target_id` | `app` or `api_key`, and its id. |
 | `details` | small JSON object (≤ 4 KB) with what changed. Never contains a secret. |
 
@@ -105,9 +111,10 @@ Sent by an app's server middleware to `POST /v1/ingest/server`. One row per requ
 | `duration_ms` | response time, 0 – 3 600 000. |
 | `request_bytes`, `response_bytes` | body sizes when known. |
 | `error_code` | the app's error **code** (e.g. `VALIDATION_ERROR`, `^[A-Z0-9_]{1,64}$`). Error messages are never accepted. Grouped on the Errors page ("Error codes" panel, `?errorCode=` filter) — a reason for apps to send stable codes. |
-| `release` | the app's version/commit (≤ 64). |
-| `request_id` | the app's request id for cross-referencing its own logs (≤ 128). |
-| `session_id`, `page_view_id` | browser session / page view that triggered the call, when the frontend tracker propagates them (opt-in headers). |
+| `release` | the app's version/commit (≤ 64). Dropped when it contains personal data (ADR 0010). |
+| `request_id` | the app's request id for cross-referencing its own logs (≤ 128). Dropped when it contains personal data. |
+| `environment` | `prod`, `staging` or `dev` (`ENVIRONMENT_VALUES`, CHECK `api_requests_environment_check`), from the envelope claim; default `'prod'` (also every row written before 0007). Every dashboard read filters on it except Integration Health ([ADR 0008](decisions/0008-environment-dimension.md)). |
+| `session_id`, `page_view_id` | browser session / page view that triggered the call, copied from `X-Nexus-Session` / `X-Nexus-Page-View`, which the React tracker adds to same-origin calls by default ([ADR 0011](decisions/0011-header-propagation-and-early-entry.md)). `page_view_id` has the partial index `idx_api_requests_page_view_id` (0008). |
 | `user_email`, `user_key`, `claimed_email`, `identity_source` | who made the request — see **Identity levels** below. |
 | `ip`, `ip_hash`, `ip_class` | client IP — see **Personal data** below. `ip_class` is `public`, `private`, `loopback` or `unknown`. |
 | `geo_country`, `geo_region`, `geo_city`, `geo_lat`, `geo_lon` | approximate location from the IP (GeoLite2 data bundled with geoip-lite). Country is a 2-letter code; lat/lon are rounded to 1 decimal (city level). |
@@ -125,7 +132,7 @@ IP, geo and client columns as `api_requests`, plus:
 | `anonymous_id` | per-device id (localStorage), optional. |
 | `seq` | increasing number within the session; orders events that share a timestamp. |
 | `event_type` | `page_view`, `page_time`, `tool_use` or `custom`. |
-| `path`, `path_template` | the page path (no query string) and its pattern. |
+| `path`, `path_template` | the page path (no query string) and its pattern — the SDK's `routeTemplate` when it passes the plausibility guard, else the server's guess. `toPageId` derives from it ([ADR 0013](decisions/0013-integration-diagnostics-and-kpis.md), page-id cut-over). Both pass the PII scrubber; the stored `path` also gets the segment scrub. |
 | `referrer_path` | previous in-app path; `referrer_host` the external site's host only (never a full URL). |
 | `nav` | `load` (full page load) or `route` (client-side navigation). |
 | `page_view_id` | for `page_time`: the `event_id` of the page view it belongs to. **Required** for `page_time`. |
@@ -136,7 +143,10 @@ IP, geo and client columns as `api_requests`, plus:
 | `label` | a **static** UI label (≤ 120), never user-typed text. |
 | `value` | an optional number. |
 | `name` | for `custom`: the event name (same pattern as `tool`). Required for `custom`. |
-| `props` | optional flat JSON object of scalar values (≤ 2 KB). |
+| `props` | optional flat JSON object of scalar values (≤ 2 KB). String values are PII-scrubbed; a key with PII drops the prop. |
+| `environment` | `prod`, `staging` or `dev` (CHECK `web_events_environment_check`); `dev` whenever the page origin is loopback. Default `'prod'`. |
+| `client_tz`, `client_lang` | the browser's time zone (`Asia/Kolkata`, ≤ 64) and language (`en-IN`, ≤ 16) from the envelope `client`, when they match `CLIENT_TZ_PATTERN` / `CLIENT_LANG_PATTERN`; else null. Migration 0007. |
+| `release` | the frontend build (envelope `release`, ≤ 64); null when not sent. |
 
 ## `ingest_counters` — ingest health
 
@@ -144,6 +154,33 @@ One row per app, source (`server` / `browser`) and hour. `accepted`, `duplicates
 `rate_limited` are added to on every ingest call. `bucket_hour` is the start of the hour **in India
 time** (10:45 IST is counted in the 10:00 IST bucket), matching the dashboard's hourly charts.
 Read by the Integration Health page.
+
+## `ingest_rejections` — why events were refused (0010)
+
+One row per app, source, `sdk`, `code`, `schema_path` and hour; `rejected` is added to.
+`code` ∈ `INGEST_REJECTION_CODE_VALUES`: the per-event codes plus server `INVALID_ENVELOPE` and
+browser `ORIGIN_NOT_ALLOWED` (envelope-level, recorded only once the app is known). `sdk` is the
+strictly normalised `name@version` or `''` (always `''` for `ORIGIN_NOT_ALLOWED`); `schema_path` is
+the normalised zod path (`props.*`, `occurredAt`; ≤ 128, `^[A-Za-z0-9_.*]*$`) or `''`. **Never** a
+message or a value. ≤ 20 distinct keys per batch.
+
+## `pii_detections` — what the PII scrubber redacted (0011)
+
+One row per app, source, `field` (`PII_FIELD_VALUES`), `kind` (`PII_KIND_VALUES`: email, phone, pan,
+gstin, aadhaar) and hour; `detections` is added to (one per event, field and kind). Counts only — the
+matched value is never stored ([ADR 0010](decisions/0010-ingest-pii-detector.md)).
+
+## `sso_cookie_outcomes` — why browser events are anonymous (0012)
+
+One row per app, `outcome` (`SSO_COOKIE_OUTCOME_VALUES`: `ok`, `no-cookie`, `expired`,
+`bad-signature`, …, `no-email`), `beacon_origin` (`same_origin`, `cross_origin`, `none` — the
+request Origin against `PUBLIC_ORIGIN`) and hour; `beacons` is added to, once per browser batch.
+Retry-queue replays are not counted.
+
+The three tables share the `bucket_hour` alignment of `ingest_counters`, an index on `bucket_hour`
+(`idx_<table>_bucket_hour`, for the retention delete), explicit DML grants for `nexus_app` in
+`apps/api/src/db/migration-runner/grants.ts`, and a `''`-means-none convention (a NULL cannot be in
+the primary key; the API maps `''` to `null`).
 
 ## `schema_migrations` — the migration ledger
 
@@ -166,6 +203,20 @@ is pending or was edited after it was applied.
   It waits at most 2 s for locks; if busy it simply retries on the next night.
 - The three partition functions run with the owner's rights (`SECURITY DEFINER`) but accept only
   these two table names, so `nexus_app` gets exactly this power and nothing more.
+- **Aggregate retention**: in the same nightly run (inside the retention advisory lock, after the
+  partition drop) `AggregateRetentionService.deleteExpired` deletes rows of `ingest_rejections`,
+  `pii_detections` and `sso_cookie_outcomes` older than `AGGREGATE_RETENTION_DAYS` (90).
+  `ingest_counters` is kept as before.
+
+## Indexes worth knowing
+
+- `idx_api_requests_page_view_id` (0008, partial `WHERE page_view_id IS NOT NULL`, on the parent so
+  every monthly partition has it): serves a page's API calls (`listPageApiCalls`) and the page-view
+  linking KPI.
+- **No BRIN index** (decided in ADR 0013): monthly partitions plus the primary-key btree
+  `(occurred_at, event_id)` and `(app_id, occurred_at DESC)` already serve every window scan.
+- Coverage KPIs (identified, linkable, linked) are defined once, in
+  `apps/api/src/repositories/coverage-predicates.ts`.
 
 ## Identity levels
 
@@ -196,5 +247,8 @@ key, never the email, so emails do not end up in gateway logs.
 | user agent | parsed browser/OS/device class only | raw string not stored |
 | API keys | HMAC hash (secret keys), clear text only for publishable keys | full secret shown once; never logged |
 | URLs | path only | query strings, fragments, request/response bodies, headers, tokens and error messages are **never stored** |
+| phone, PAN, GSTIN, Aadhaar, emails in free text | replaced by `:phone`, `:pan`, … (paths, labels, prop values), `redacted` (tool / name), or the field dropped | the ingest PII scrubber, two passes ([ADR 0010](decisions/0010-ingest-pii-detector.md)); only counts are kept (`pii_detections`) |
+| rejected events | code + normalised field path only | zod messages and values are never stored (`ingest_rejections`) |
 
-All raw events disappear with their monthly partition after `RAW_RETENTION_MONTHS`.
+All raw events disappear with their monthly partition after `RAW_RETENTION_MONTHS`; the hourly
+diagnostic aggregates after `AGGREGATE_RETENTION_DAYS`.

@@ -11,6 +11,7 @@ import { DashboardNav, MobileNav } from '@/components/MobileNav';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ViewerBadge } from '@/components/ViewerBadge';
 import { AppSelect } from '@/features/filters/AppSelect';
+import { EnvironmentSelect } from '@/features/filters/EnvironmentSelect';
 import { RangePicker } from '@/features/filters/RangePicker';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { pageFiltersFor } from '@/lib/nav';
@@ -23,8 +24,8 @@ export const MAIN_CONTENT_ID = 'main-content';
 /**
  * WHY: the frame of every dashboard page — sidebar navigation (from NAV_SECTIONS, so no href is
  * typed here; below md a menu button opens it as a sheet, see MobileNav), a top bar with search
- * (Ctrl+K), the GLOBAL filters the current page uses (app + range, kept in the URL) and the
- * signed-in viewer. Navigation carries the current filters along,
+ * (Ctrl+K), the GLOBAL filters the current page uses (app + range + environment, kept in the URL)
+ * and the signed-in viewer. Navigation carries the current filters along,
  * so switching pages keeps the context.
  * A skip link and landmarks (nav/header/main) make it keyboard- and screen-reader-friendly.
  */
@@ -114,7 +115,7 @@ function FetchingBar() {
 function TopBar() {
   const pathname = usePathname();
   const pageFilters = pageFiltersFor(pathname);
-  const hasFilters = pageFilters.app || pageFilters.range;
+  const hasFilters = pageFilters.app || pageFilters.range || pageFilters.environment;
   return (
     <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-6 md:h-14 md:flex-nowrap md:gap-3 md:py-0">
       <MobileNav />
@@ -127,6 +128,9 @@ function TopBar() {
         >
           {pageFilters.app ? (
             <AppSelect className="min-w-0 flex-1 md:w-32 md:min-w-24 md:flex-initial lg:w-40 xl:w-52" />
+          ) : null}
+          {pageFilters.environment ? (
+            <EnvironmentSelect className="min-w-0 flex-1 md:w-32 md:min-w-24 md:flex-initial xl:w-40" />
           ) : null}
           {pageFilters.range ? <RangePicker maxRangeMs={pageFilters.maxRangeMs} /> : null}
         </div>

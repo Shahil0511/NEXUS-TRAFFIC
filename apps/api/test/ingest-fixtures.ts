@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import type { BrowserIngestBatchInput, ServerEventInput } from '@nexus/shared';
+import { isVerhoeffValid, type BrowserIngestBatchInput, type ServerEventInput } from '@nexus/shared';
 
 import type { SsoIdentityReader } from '../src/auth/sso-identity.reader';
 import type { ApiKeyRow, AppRow } from '../src/domain/rows';
@@ -14,6 +14,7 @@ import { GeoIpEnricher } from '../src/enrichment/geo-ip.enricher';
 import { IdentityResolver } from '../src/enrichment/identity.resolver';
 import { IpAnonymizer } from '../src/enrichment/ip.anonymizer';
 import { PathSanitizer } from '../src/enrichment/path.sanitizer';
+import { PiiScrubber } from '../src/enrichment/pii.scrubber';
 import { RouteNormalizer } from '../src/enrichment/route.normalizer';
 import { ServerEventEnricher } from '../src/enrichment/server-event.enricher';
 import { UserAgentParser } from '../src/enrichment/user-agent.parser';
@@ -34,6 +35,9 @@ export function appRow(overrides: Partial<AppRow> = {}): AppRow {
     created_by: 'admin@libas.in',
     created_at: FIXED_NOW,
     updated_at: FIXED_NOW,
+    sdk_config_version: 1,
+    sdk_disabled_modules: [],
+    sdk_config_updated_at: null,
     ...overrides,
   };
 }
@@ -60,7 +64,14 @@ export function apiKeyRow(overrides: Partial<ApiKeyRow> = {}): ApiKeyRow {
 }
 
 export function ingestContext(overrides: Partial<IngestContext> = {}): IngestContext {
-  return { app: appRow(), key: apiKeyRow(), receivedAt: FIXED_NOW, sdk: null, ...overrides };
+  return {
+    app: appRow(),
+    key: apiKeyRow(),
+    receivedAt: FIXED_NOW,
+    sdk: null,
+    environmentClaim: null,
+    ...overrides,
+  };
 }
 
 export function serverEvent(overrides: Partial<ServerEventInput> = {}): ServerEventInput {
@@ -82,7 +93,9 @@ export function browserIngestContext(overrides: Partial<BrowserIngestContext> = 
     key: apiKeyRow({ kind: 'publishable', key_prefix: 'nx_pk_00000000' }),
     receivedAt: FIXED_NOW,
     sdk: null,
-    request: { ip: null, userAgent: null, cookieHeader: undefined },
+    environmentClaim: null,
+    request: { ip: null, userAgent: null, cookieHeader: undefined, origin: 'https://ebo.libas.in' },
+    envelope: { replay: false },
     ...overrides,
   };
 }
@@ -123,8 +136,9 @@ export function testServerEventEnricher(): ServerEventEnricher {
     new IpAnonymizer('full', 'i'.repeat(64)),
     new GeoIpEnricher(() => ({ lookup: () => null })),
     new UserAgentParser(),
-    new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) })),
+    new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'no-cookie' }) })),
     new UserKeyHasher('u'.repeat(64)),
+    new PiiScrubber(),
   );
 }
 
@@ -136,7 +150,27 @@ export function testBrowserEventEnricher(): BrowserEventEnricher {
     new IpAnonymizer('full', 'i'.repeat(64)),
     new GeoIpEnricher(() => ({ lookup: () => null })),
     new UserAgentParser(),
-    new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) })),
+    new IdentityResolver(fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'no-cookie' }) })),
     new UserKeyHasher('u'.repeat(64)),
+    new PiiScrubber(),
   );
+}
+
+/**
+ * A Verhoeff-valid 12-digit number (an Aadhaar-shaped test value — not a real number): `prefix`
+ * (11 digits, first one 2–9) completed with its check digit.
+ */
+export function verhoeffAadhaar(prefix = '23456789012'): string {
+  for (let digit = 0; digit < 10; digit += 1) {
+    if (isVerhoeffValid(`${prefix}${digit}`)) return `${prefix}${digit}`;
+  }
+  throw new Error('no Verhoeff check digit found');
+}
+
+/** The same prefix with a WRONG check digit (must NOT be detected). */
+export function invalidAadhaar(prefix = '23456789012'): string {
+  for (let digit = 0; digit < 10; digit += 1) {
+    if (!isVerhoeffValid(`${prefix}${digit}`)) return `${prefix}${digit}`;
+  }
+  throw new Error('unreachable');
 }

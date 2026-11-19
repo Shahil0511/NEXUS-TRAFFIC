@@ -13,6 +13,7 @@ import {
 
 import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 
+import { environmentsOf } from '../domain/filters';
 import { mapToolTrendPoint, mapToolUsage, mapUserUsage } from '../domain/mappers';
 import type { ToolTrendRow } from '../domain/rows';
 import { fillToolTrendGaps } from '../domain/timeseries-gaps';
@@ -54,7 +55,11 @@ export class ToolService {
    */
   async usage(query: ToolUsageQuery): Promise<WindowedListDto<ToolUsageDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.webEvents.listToolUsage(filter, window.grain, query.limit);
     const trendByTool = groupTrend(rows.trend);
@@ -77,7 +82,11 @@ export class ToolService {
    */
   async detail(app: string, toolId: string, query: ToolDetailQuery): Promise<ToolDetailDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(app),
+      environmentsOf(query.env),
+    );
 
     const tools = await this.webEvents.listToolNames(filter);
     const tool = tools.find((candidate) => toToolId(app, candidate) === toolId);

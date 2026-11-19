@@ -1,9 +1,17 @@
 'use client';
 
-import type { CreateAppBody, CreateKeyBody, ExpireKeyBody, UpdateAppBody } from '@nexus/shared';
+import {
+  ERROR_CODES,
+  type CreateAppBody,
+  type CreateKeyBody,
+  type ExpireKeyBody,
+  type UpdateAppBody,
+  type UpdateSdkConfigBody,
+} from '@nexus/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
+import { ApiError } from '@/lib/apiError';
 import { qk } from '@/lib/query/keys';
 
 /**
@@ -69,5 +77,22 @@ export function useRevokeKey() {
     mutationFn: ({ slug, keyId }: { slug: string; keyId: string }) =>
       api.apps.revokeKey(slug, keyId),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Remote SDK config (ADR 0009). On success the list refetches (the card shows the new version);
+ * a 409 CONFLICT (someone else saved first) also refetches, so reopening the dialog starts from
+ * the current version instead of failing again.
+ */
+export function useUpdateSdkConfig() {
+  const invalidate = useInvalidateApps();
+  return useMutation({
+    mutationFn: ({ slug, body }: { slug: string; body: UpdateSdkConfigBody }) =>
+      api.apps.updateSdkConfig(slug, body),
+    onSuccess: invalidate,
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === ERROR_CODES.CONFLICT) void invalidate();
+    },
   });
 }

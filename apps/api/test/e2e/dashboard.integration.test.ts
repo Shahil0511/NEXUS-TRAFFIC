@@ -14,12 +14,16 @@ import {
   ERROR_CODES,
   INGEST_HEADERS,
   ROUTES,
+  type AppDto,
+  type BreakdownDto,
   type CursorPage,
+  type DeviceReturnDto,
   type EndpointDetailDto,
   type EndpointStatsDto,
   type ErrorSummaryDto,
   type FailedRequestDto,
   type GeoCountryDto,
+  type IntegrationHealthDto,
   type OverviewSummaryDto,
   type OverviewTimeseriesDto,
   type PageStatsDto,
@@ -327,5 +331,106 @@ describe.skipIf(!RUN_DB_TESTS)('S2 e2e: dashboard analytics over HTTP (db)', () 
     expect(items.reduce((sum, c) => sum + c.requests, 0)).toBe(EXPECTED.requests);
     expect(items.reduce((sum, c) => sum + c.pageViews, 0)).toBe(EXPECTED.pageViews);
     expect((await get(ROUTES.geo.cities, VIEWER_EMAIL, { limit: '1000' })).status).toBe(400);
+  });
+
+  // ─── Phase A: env filter, breakdowns, devices, SDK config, Integration Health ─
+
+  /** A signed admin-or-viewer PATCH with a JSON body (cookie + X-Nexus-Dashboard: 1). */
+  function patch(path: string, email: string, body: unknown) {
+    return request(app)
+      .patch(url(path))
+      .set('Cookie', cookieFor(email, seed.now))
+      .set(INGEST_HEADERS.dashboard, '1')
+      .send(body as object);
+  }
+
+  it('overview.summary: env narrows every KPI (default prod); an unknown env → 400', async () => {
+    const staging = await get(ROUTES.overview.summary, VIEWER_EMAIL, { env: 'staging' });
+    expect(staging.status).toBe(200);
+    expect((staging.body as OverviewSummaryDto).requests.value).toBe(EXPECTED.stagingRequests);
+    const all = await get(ROUTES.overview.summary, VIEWER_EMAIL, { env: 'all' });
+    expect((all.body as OverviewSummaryDto).requests.value).toBe(
+      EXPECTED.requests + EXPECTED.stagingRequests,
+    );
+    const bad = await get(ROUTES.overview.summary, VIEWER_EMAIL, { env: 'qa' });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
+  });
+
+  it('overview.breakdown: top values with shares (private cache); server-only dimensions enforced', async () => {
+    const res = await get(ROUTES.overview.breakdown, VIEWER_EMAIL, { dimension: 'client_tz' });
+    expect(res.status).toBe(200);
+    expect(res.headers[CACHE_CONTROL_HEADER.toLowerCase()]).toBe(DASHBOARD_ANALYTICS_CACHE);
+    const body = res.body as BreakdownDto;
+    expect(body).toMatchObject({ source: 'browser', dimension: 'client_tz', total: 3 });
+    expect(body.items[0]).toEqual({ value: 'Asia/Kolkata', events: 2, share: 0.6667 });
+
+    const server = await get(ROUTES.overview.breakdown, VIEWER_EMAIL, {
+      source: 'server',
+      dimension: 'environment',
+      env: 'all',
+    });
+    expect((server.body as BreakdownDto).total).toBe(EXPECTED.requests + EXPECTED.stagingRequests);
+
+    const refused = await get(ROUTES.overview.breakdown, VIEWER_EMAIL, {
+      source: 'server',
+      dimension: 'nav',
+    });
+    expect(refused.status).toBe(400);
+    expect((await get(ROUTES.overview.breakdown, VIEWER_EMAIL)).status).toBe(400);
+  });
+
+  it('overview.devices: new vs returning devices over the bounded lookback', async () => {
+    const res = await get(ROUTES.overview.devices, VIEWER_EMAIL);
+    expect(res.status).toBe(200);
+    expect(res.body as DeviceReturnDto).toMatchObject({
+      devices: EXPECTED.devices.devices,
+      newDevices: EXPECTED.devices.new,
+      returningDevices: EXPECTED.devices.returning,
+    });
+  });
+
+  it('apps.updateSdkConfig: admin only, optimistic version (409 when stale), listed afterwards', async () => {
+    const path = buildPath(ROUTES.apps.updateSdkConfig, { slug: SALES_SLUG });
+    const body = { expectedVersion: 1, disabledModules: ['retry_queue'] };
+
+    const asViewer = await patch(path, VIEWER_EMAIL, body);
+    expect(asViewer.status).toBe(403);
+
+    const invalid = await patch(path, ADMIN_EMAIL, { expectedVersion: 1, disabledModules: ['x'] });
+    expect(invalid.status).toBe(400);
+
+    const ok = await patch(path, ADMIN_EMAIL, body);
+    expect(ok.status).toBe(200);
+    expect((ok.body as AppDto).sdkConfig).toMatchObject({
+      version: 2,
+      disabledModules: ['retry_queue'],
+    });
+
+    const stale = await patch(path, ADMIN_EMAIL, body);
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe(ERROR_CODES.CONFLICT);
+
+    const listed = await get(ROUTES.apps.list, VIEWER_EMAIL);
+    const sales = (listed.body as AppDto[]).find((item) => item.slug === SALES_SLUG);
+    expect(sales?.sdkConfig.version).toBe(2);
+  });
+
+  it('integration.health: coverage, environment mix (NOT env-filtered) and a level per app', async () => {
+    const res = await get(ROUTES.integration.health, VIEWER_EMAIL);
+    expect(res.status).toBe(200);
+    const sales = (res.body as IntegrationHealthDto).apps.find((item) => item.app === SALES_SLUG);
+    expect(sales?.environments).toEqual(
+      expect.arrayContaining([
+        { source: 'server', environment: 'staging', events: EXPECTED.stagingRequests },
+        { source: 'browser', environment: 'dev', events: EXPECTED.devPageViews },
+      ]),
+    );
+    expect(sales?.identityCoverage.map((coverage) => coverage.source)).toEqual([
+      'server',
+      'browser',
+    ]);
+    expect(sales?.level).toBeDefined();
+    expect(JSON.stringify(res.body)).not.toContain(SEEDED_IP);
   });
 });

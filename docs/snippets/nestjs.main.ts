@@ -6,8 +6,14 @@
  *
  * Steps:
  *   1. Save express-esm.ts from the guide as `src/nexus.ts` (tsc compiles it to CommonJS for Nest).
- *   2. Add NEXUS_URL and NEXUS_SECRET_KEY to the backend environment (server ONLY).
+ *   2. Add NEXUS_URL and NEXUS_SECRET_KEY to the backend environment (server ONLY). Optional:
+ *      NEXUS_ENVIRONMENT = prod | staging | dev (unset → prod; set it on staging/dev so their traffic
+ *      stays off prod dashboards) and NEXUS_RELEASE = your build label (e.g. a git sha).
  *   3. Merge the lines marked `// Nexus` into your existing src/main.ts.
+ *
+ * !!! getUser DEFAULTS TO ANONYMOUS. Without it EVERY event is stored with no user. Return your
+ * !!! VERIFIED user's email from whatever your guard/interceptor attaches to the request (below). It
+ * !!! is read when the response ends, so values set later by guards are visible.
  *
  * Contract: https://nexus.libas.in/traffic/api/docs/
  */
@@ -30,6 +36,7 @@ async function bootstrap(): Promise<void> {
   const nexus = createNexusClient({
     url: process.env.NEXUS_URL,
     key: process.env.NEXUS_SECRET_KEY,
+    environment: process.env.NEXUS_ENVIRONMENT, // prod | staging | dev — sent ONLY when valid
   });
   app.use(
     nexusMiddleware({

@@ -2,6 +2,7 @@ import type { AppTrafficDto, MetricDto } from '@nexus/shared';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
+import { CoverageValue } from '@/components/CoverageValue';
 import type { DataTableColumn } from '@/components/DataTable';
 import { DeltaPill, type DeltaPolarity } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +13,7 @@ import {
   formatInteger,
   formatPercent,
 } from '@/lib/format';
-import { COVERAGE_WARN_PCT, metricInfo } from '@/lib/metricCopy';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 type LinkQuery = Readonly<Record<string, string | undefined>>;
@@ -33,23 +34,6 @@ function MetricCell({
       {metric.deltaPct !== null ? (
         <DeltaPill deltaPct={metric.deltaPct} polarity={polarity} />
       ) : null}
-    </span>
-  );
-}
-
-/**
- * A data-quality share: "96 %" (normal), amber below COVERAGE_WARN_PCT, "—" without data.
- * The meaning is in `title` + the accessible name, never colour alone.
- */
-function CoverageCell({ pct, meaning }: { pct: number | null; meaning: string }) {
-  const low = pct !== null && pct < COVERAGE_WARN_PCT;
-  return (
-    <span
-      className={low ? 'font-semibold text-warning tabular' : 'tabular'}
-      title={meaning}
-      aria-label={`${formatPercent(pct, 0)} ${meaning}${low ? ' (low)' : ''}`}
-    >
-      {formatPercent(pct, 0)}
     </span>
   );
 }
@@ -80,7 +64,7 @@ export function isSilent(row: AppTrafficDto): boolean {
  * traffic, failures, speed, adoption). Each app opens its own page (PAGES.applicationDetail; the
  * registered slug, never ingested text) and every number has its previous-window change. Every
  * metric header carries an (i) with its plain-language definition (lib/metricCopy) — that is
- * where "Identified" / "Linked" and their COVERAGE_WARN_PCT threshold are explained.
+ * where "Identified" / "Linked" and their COVERAGE_WARN_PCT threshold are explained (CoverageValue).
  * "Online now" ignores the range: `onlineOf(app)` comes from useOnlineNow (features/live), merged
  * by app slug in the view.
  */
@@ -182,7 +166,10 @@ export function appTrafficColumns(
       hint: metricInfo('identifiedPct'),
       align: 'right',
       cell: (row) => (
-        <CoverageCell pct={row.identifiedPct} meaning="of events carry a verified user" />
+        <CoverageValue
+          pct={row.identifiedPct}
+          meaning="of events (both sources combined) carry a verified user"
+        />
       ),
     },
     {
@@ -191,7 +178,10 @@ export function appTrafficColumns(
       hint: metricInfo('linkedPct'),
       align: 'right',
       cell: (row) => (
-        <CoverageCell pct={row.linkedPct} meaning="of API calls are linked to a browser session" />
+        <CoverageValue
+          pct={row.linkedPct}
+          meaning="of linkable API calls are linked to a browser session"
+        />
       ),
     },
     {

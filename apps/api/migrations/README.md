@@ -22,6 +22,10 @@ Plain SQL, applied in version order by the `migrate` service
 8. No seed data. Roles and the schema are created by the **bootstrap**, not by a migration, and the
    runtime role's privileges live in [`../src/db/migration-runner/grants.ts`](../src/db/migration-runner/grants.ts)
    — a migration must NEVER mention `nexus_app` (it does not exist in `DB_APP_ROLE_MODE=owner`).
+   **A new table MUST be added to the explicit DML list in `grants.ts`** in the same change: the
+   default privileges do NOT cover a fresh database, because there the migrations create every table
+   BEFORE `grants.ts` first runs `ALTER DEFAULT PRIVILEGES` (they only cover tables created on a
+   later run). `test/db/privileges.integration.test.ts` writes to each table as nexus_app.
 9. Additive changes only between deploys, so `git checkout <old> && docker compose up` stays safe
    (the runner treats "applied but unknown to this code" as a warning, exit 0).
 
@@ -59,6 +63,17 @@ Flags: `--status` (report only), `--dry` (show what would be applied). Exit code
 | `traffic.api_requests` | [0004](0004_api_requests.sql) | monthly on `occurred_at` | nexus_app (server ingest) | one row per backend API call |
 | `traffic.web_events` | [0005](0005_web_events.sql) | monthly on `occurred_at` | nexus_app (browser ingest) | page views, visible time, tool use, custom events |
 | `traffic.ingest_counters` | [0006](0006_ingest_counters.sql) | no | nexus_app (ingest) | hourly accepted/duplicate/rejected/rate-limited counts |
+| `traffic.ingest_rejections` | [0010](0010_ingest_rejections.sql) | no | nexus_app (ingest) | hourly refused events per source, SDK, code and normalised schema path (codes only, never messages) |
+| `traffic.pii_detections` | [0011](0011_pii_detections.sql) | no | nexus_app (ingest) | hourly PII redactions per source, field and kind (counts only, never values) |
+| `traffic.sso_cookie_outcomes` | [0012](0012_sso_cookie_outcomes.sql) | no | nexus_app (browser ingest) | hourly SSO cookie verification outcomes per beacon origin |
+
+Column additions: [0007](0007_event_environment_and_client_context.sql) adds `environment`
+(both event tables, default `'prod'`) and `client_tz`, `client_lang`, `release` (`web_events`);
+[0008](0008_api_requests_page_view_index.sql) adds `idx_api_requests_page_view_id`;
+[0009](0009_app_sdk_config.sql) adds `sdk_config_version`, `sdk_disabled_modules`,
+`sdk_config_updated_at` to `apps` and swaps `admin_audit_log_action_check` (same name) to allow
+`APP_SDK_CONFIG_UPDATE`. The three aggregate tables of 0010–0012 are pruned after
+`AGGREGATE_RETENTION_DAYS` (90) by the retention job.
 
 ## Functions ([0001](0001_helpers_and_partitions.sql))
 
@@ -77,9 +92,11 @@ revoked from `PUBLIC`; `EXECUTE` for nexus_app is granted by
 ## Privileges ([`grants.ts`](../src/db/migration-runner/grants.ts), `DB_APP_ROLE_MODE=separate` only)
 
 `nexus_app`: `USAGE` on schema `traffic`; `SELECT, INSERT, UPDATE, DELETE` on `apps`, `api_keys`,
-`api_requests`, `web_events`, `ingest_counters`; `SELECT, INSERT` on `admin_audit_log`; `SELECT` on
+`api_requests`, `web_events`, `ingest_counters`, `ingest_rejections`, `pii_detections`,
+`sso_cookie_outcomes`; `SELECT, INSERT` on `admin_audit_log`; `SELECT` on
 `schema_migrations`; sequences `USAGE, SELECT`; `EXECUTE` on the three partition functions; default
-privileges for tables/sequences the owner creates later (monthly partitions included). **No DDL,
+privileges for tables/sequences the owner creates later (monthly partitions included) — these do
+NOT cover tables created by the migrations of a fresh database, hence the explicit table list (rule 8). **No DDL,
 no TRUNCATE** — verified by `test/db/privileges.integration.test.ts`. In `owner` mode there is no
 `nexus_app`; the api runs as the owner (see ADR 0002, "Consequences").
 
@@ -95,5 +112,5 @@ drift (rule 3).
 1. Change `packages/shared` first if the contract changes (enum, limit).
 2. Add `NNNN_what_it_does.sql` with a `-- intent:` line; qualify everything with `traffic.`.
 3. Update `src/domain/rows.ts` / `inserts.ts`, the repositories, this catalogue and
-   `ai-context/07-data-model.md`.
+   `ai-context/07-data-model.md`. A new table also goes into the DML list of `grants.ts` (rule 8).
 4. Run `RUN_DB_TESTS=1 npm run test:db -w @nexus/api`.

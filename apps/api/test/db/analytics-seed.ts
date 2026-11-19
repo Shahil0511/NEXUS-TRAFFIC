@@ -25,10 +25,22 @@
  * - µs keyset block: 5 × 503 on leaves around now − 72 h, same millisecond, distinct microseconds
  * - web_events page views: now − 180 min (sales, anon W), now − 3 min (hr, session S),
  *   now − 1 min (sales, user a); previous window: now − 30 h (sales, anon W)
+ *
+ * PHASE A additions (ADR 0008 / 0013) — none of them moves a number above under the default
+ * prod filter:
+ * - linking: the last two storeLookup calls carry NO session id, so sales has 14 linkable calls
+ *   (http from a desktop UA; the stream is never linkable) and 12 linked → linkedPct 85.71.
+ * - client context on the prod page views: −180 min Chrome / Asia/Kolkata / en-IN / release R1,
+ *   −3 min Firefox / Asia/Kolkata / hi-IN / no release, −1 min Chrome / no tz / no lang / R1.
+ * - devices (anonymous_id): DEVICE_RETURNING on −180 min AND on the previous-window view (−30 h,
+ *   inside the 30-day lookback), DEVICE_NEW_HR on −3 min, DEVICE_NEW_SALES on −1 min →
+ *   3 devices, 1 returning, 2 new.
+ * - non-prod rows (current window): 3 × storeLookup 200 in STAGING (−10 min, user c) and one
+ *   DEV page view of DEVICE_RETURNING (−10 min, sales, Safari / Europe/London / en-GB).
  */
 import { randomUUID } from 'node:crypto';
 
-import type { BrowserEventType } from '@nexus/shared';
+import type { BrowserEventType, Environment } from '@nexus/shared';
 import { toEndpointId } from '@nexus/shared/endpoint-id';
 
 import type { ApiRequestInsert } from '../../src/domain/inserts';
@@ -75,6 +87,14 @@ export const ENDPOINT_IDS: Record<RouteName, string> = {
 /** When the six leaves calls happen (minutes before now): four early, two inside "active now". */
 const LEAVE_MINUTES_AGO = [30, 29, 28, 27, 2, 1];
 
+/** Browser devices (anonymous_id) of the page views — see the header. */
+export const DEVICE_RETURNING = 'd0000000-0000-4000-8000-000000000001';
+export const DEVICE_NEW_HR = 'd0000000-0000-4000-8000-000000000002';
+export const DEVICE_NEW_SALES = 'd0000000-0000-4000-8000-000000000003';
+export const RELEASE_R1 = '2026.11.18-a1b2c3d';
+/** The release every seeded API call carries (test/db/fixtures.ts apiRequestRow). */
+export const API_RELEASE = '1.4.2';
+
 /** 06:30 UTC (12:00 IST) on day 11 of the current UTC month — see the header. */
 export function seedNow(): Date {
   return new Date(utcMonthStart(new Date()).getTime() + 10 * DAY + 6 * HOUR + 30 * MINUTE);
@@ -114,6 +134,13 @@ export const EXPECTED = {
   previousIdentifiedUsers: 1,
   pageViews: 3,
   previousPageViews: 1,
+  /** Non-prod rows of the current window (invisible under the default prod filter). */
+  stagingRequests: 3,
+  devPageViews: 1,
+  /** ebo-sales: http calls from desktop UAs, and those with a session id. */
+  salesLinkable: 14,
+  salesLinked: 12,
+  devices: { devices: 3, returning: 1, new: 2 },
   /** Last 5 minutes: anonymous session S (api + web, counted once) and user a (web). */
   activeUsersNow: 2,
   calls: { storeLookup: 10, reportExport: 5, leaveList: 6 },
@@ -135,8 +162,10 @@ interface RowSpec {
   durationMs: number;
   kind?: 'http' | 'stream';
   user?: string | null;
-  sessionId?: string;
+  /** undefined = a fresh session id; null = a call without the tracker header. */
+  sessionId?: string | null;
   ip?: string;
+  environment?: Environment;
 }
 
 /** A full ApiRequestInsert for one spec (identified when `user` is set, else anonymous). */
@@ -153,28 +182,42 @@ function toInsert(spec: RowSpec, appIds: AnalyticsSeed['appIds']): ApiRequestIns
     path: route.template.replace(':id', '42'),
     statusCode: spec.status,
     durationMs: spec.durationMs,
-    sessionId: spec.sessionId ?? randomUUID(),
+    sessionId: spec.sessionId === undefined ? randomUUID() : spec.sessionId,
     userEmail: user,
     userKey: user ? sha256(user) : null,
     identitySource: user ? 'app_attested' : 'anonymous',
     ip: spec.ip ?? '10.1.2.3',
     ipClass: spec.ip ? 'public' : 'private',
+    environment: spec.environment ?? 'prod',
   });
 }
 
-/** Inserts one browser page view (S3 has no web ingest repository yet, so plain SQL as owner). */
+/** The Phase A columns of a seeded page view (all optional; the column defaults otherwise). */
+interface PageViewContext {
+  anonymousId?: string;
+  environment?: Environment;
+  uaBrowser?: string;
+  clientTz?: string;
+  clientLang?: string;
+  release?: string;
+}
+
+/** Inserts one browser page view (plain SQL as owner, independent of the ingest code). */
 async function insertPageView(
   db: TestDatabase,
   appId: string,
   at: Date,
   sessionId: string,
   user: string | null,
+  context: PageViewContext = {},
 ): Promise<void> {
   await db.ownerPool.query(
     `INSERT INTO traffic.web_events
        (occurred_at, event_id, app_id, session_id, seq, event_type, path, path_template,
-        user_email, user_key, identity_source, ip_class)
-     VALUES ($1, $2, $3, $4, 0, 'page_view', '/home', '/home', $5, $6, $7, 'unknown')`,
+        user_email, user_key, identity_source, ip_class,
+        anonymous_id, environment, ua_browser, client_tz, client_lang, release)
+     VALUES ($1, $2, $3, $4, 0, 'page_view', '/home', '/home', $5, $6, $7, 'unknown',
+             $8, $9, $10, $11, $12, $13)`,
     [
       at,
       randomUUID(),
@@ -183,6 +226,12 @@ async function insertPageView(
       user,
       user ? sha256(user) : null,
       user ? 'sso_cookie' : 'anonymous',
+      context.anonymousId ?? null,
+      context.environment ?? 'prod',
+      context.uaBrowser ?? null,
+      context.clientTz ?? null,
+      context.clientLang ?? null,
+      context.release ?? null,
     ],
   );
 }
@@ -223,6 +272,8 @@ export async function seedAnalytics(
       status: 200,
       durationMs,
       user: USER_A,
+      // the last two calls were made without the tracker header (not linked)
+      sessionId: i >= 8 ? null : undefined,
     })),
     ...[500, 500, 404, 200].map((status, i) => ({
       route: 'reportExport' as const,
@@ -246,6 +297,15 @@ export async function seedAnalytics(
       status,
       durationMs: 5,
       sessionId: anonSession,
+    })),
+    // non-prod (staging) — invisible under the default prod filter
+    ...Array.from({ length: EXPECTED.stagingRequests }, (_, i) => ({
+      route: 'storeLookup' as const,
+      at: ago(10 * MINUTE - i * MINUTE),
+      status: 200,
+      durationMs: 10,
+      user: USER_C,
+      environment: 'staging' as const,
     })),
     // previous window
     ...Array.from({ length: 5 }, (_, i) => ({
@@ -275,10 +335,35 @@ export async function seedAnalytics(
 
   const microsecondIds = await seedMicrosecondBlock(db, ingest, appIds, microsecondBlockAt(now));
 
-  await insertPageView(db, appIds.sales, ago(180 * MINUTE), webSession, null);
-  await insertPageView(db, appIds.hr, ago(3 * MINUTE), anonSession, null);
-  await insertPageView(db, appIds.sales, ago(MINUTE), randomUUID(), USER_A);
-  await insertPageView(db, appIds.sales, ago(30 * HOUR), webSession, null);
+  await insertPageView(db, appIds.sales, ago(180 * MINUTE), webSession, null, {
+    anonymousId: DEVICE_RETURNING,
+    uaBrowser: 'Chrome',
+    clientTz: 'Asia/Kolkata',
+    clientLang: 'en-IN',
+    release: RELEASE_R1,
+  });
+  await insertPageView(db, appIds.hr, ago(3 * MINUTE), anonSession, null, {
+    anonymousId: DEVICE_NEW_HR,
+    uaBrowser: 'Firefox',
+    clientTz: 'Asia/Kolkata',
+    clientLang: 'hi-IN',
+  });
+  await insertPageView(db, appIds.sales, ago(MINUTE), randomUUID(), USER_A, {
+    anonymousId: DEVICE_NEW_SALES,
+    uaBrowser: 'Chrome',
+    release: RELEASE_R1,
+  });
+  await insertPageView(db, appIds.sales, ago(30 * HOUR), webSession, null, {
+    anonymousId: DEVICE_RETURNING,
+  });
+  // non-prod (dev) — invisible under the default prod filter
+  await insertPageView(db, appIds.sales, ago(10 * MINUTE), randomUUID(), null, {
+    anonymousId: DEVICE_RETURNING,
+    environment: 'dev',
+    uaBrowser: 'Safari',
+    clientTz: 'Europe/London',
+    clientLang: 'en-GB',
+  });
 
   return { now, appIds, failureIds, microsecondIds };
 }

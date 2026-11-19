@@ -20,7 +20,7 @@
 | `accepted` | events stored now |
 | `duplicates` | events we already had (same `eventId` + `occurredAt`) — a retry that worked before |
 | `rejected[]` | events refused: `index` in your `events` array, a `code`, a human `message` |
-| `warnings[]` | events stored, but one `field` was dropped or truncated |
+| `warnings[]` | events stored, but one `field` was dropped, truncated or redacted |
 | `dryRun` | `true` when you called with `?dryRun=1` (nothing stored) |
 
 **Never retry a 202**, even when `rejected[]` is not empty: those events will fail the same way.
@@ -34,8 +34,12 @@ Log the codes and fix the sender.
 | `EVENT_TIME_OUT_OF_RANGE` | `rejected` | `occurredAt` older than {{MAX_BACKDATE_DAYS}} days or > {{MAX_FUTURE_MINUTES}} min in the future | fix the server clock (NTP); do not resend week-old queues |
 | `PATH_OUTSIDE_APP` | `rejected` | browser event path is not under your base path | include the base path; check the registered base path |
 | `DB_CONSTRAINT` | `rejected` | a value passed validation but the database refused it | tell us — this is our bug |
-| `FIELD_DROPPED` | `warnings` | a field was invalid and removed (e.g. an unparseable `ip`, an implausible `userEmail`) | fix that field |
+| `FIELD_DROPPED` | `warnings` | a field was invalid and removed (e.g. an unparseable `ip`, an implausible `userEmail`, an unknown `environment`, a browser `routeTemplate` that does not fit its path, a `client.tz` / `client.lang` that is not a zone / language tag) | fix that field |
 | `FIELD_TRUNCATED` | `warnings` | a field was too long and shortened (e.g. `path` > 512 chars) | usually fine; check you strip query strings |
+| `FIELD_REDACTED` | `warnings` | personal data (an email, phone number, PAN, GSTIN or Aadhaar) was found in `field` and replaced or removed; the event is stored without it | stop sending it — [chapter 5](05-pii.md). The Integration page lists the field and the kind |
+
+Envelope-level warnings (`environment`, `client.tz`, `client.lang`, a browser `release`) are reported
+once, on the first stored event of the batch.
 
 ## Errors: everything that is not 202
 
@@ -61,6 +65,11 @@ Branch on `code` (stable), not on `message` (may change). Quote `requestId` when
 
 The difference between 401 and 403 matters when debugging: **401 = we do not know this key**,
 **403 = we know it, but it may not do this** (wrong kind, wrong origin, app disabled).
+
+**Browser senders:** a `401`/`403` with {{SDK_KILL_CODES}} means "this key will not be accepted as it
+is" — the reference tracker stops capturing for that key (the kill switch, [chapter 3](03-browser-contract.md)).
+Error responses of the browser endpoints are readable cross-origin for every registered origin, so
+a tracker on another origin sees the code instead of a network error.
 
 ## The retry algorithm
 
@@ -96,4 +105,4 @@ send(batch):
 | Body size | {{SERVER_MAX_BODY_KB}} KiB | {{BROWSER_MAX_BODY_KB}} KiB |
 | Rate | {{RATE_SERVER_PER_MIN}} requests / minute / key | {{RATE_BROWSER_PER_MIN}} requests / minute / session ({{RATE_BROWSER_APP_PER_MIN}} / minute / app) |
 | Event time window | {{MAX_BACKDATE_DAYS}} days back, {{MAX_FUTURE_MINUTES}} minutes ahead | same |
-| Failed key checks | {{RATE_IP_FAILURES_PER_MIN}} / minute / IP, then `429` | same |
+| Failed key checks | {{RATE_IP_FAILURES_PER_MIN}} / minute / IP, then `429` — only {{IP_FAILURE_CODES}} count (a disabled or killed app never blocks an IP) | same |

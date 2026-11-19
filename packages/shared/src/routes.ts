@@ -45,6 +45,11 @@ export const ROUTES = {
     server: { method: 'POST', path: '/v1/ingest/server' },
     browser: { method: 'POST', path: '/v1/ingest/browser' },
     verify: { method: 'GET', path: '/v1/ingest/verify' },
+    /**
+     * Browser SDK remote config (ADR 0009). POST with a `text/plain` body `{key, client?}`: a CORS
+     * simple request (no preflight), and the key never appears in a URL or an access log.
+     */
+    config: { method: 'POST', path: '/v1/ingest/config' },
   },
 
   // ─── Dashboard (SSO) ──────────────────────────────────────────────────────
@@ -58,12 +63,18 @@ export const ROUTES = {
     createKey: { method: 'POST', path: '/v1/apps/:slug/keys' },
     expireKey: { method: 'PATCH', path: '/v1/apps/:slug/keys/:keyId' },
     revokeKey: { method: 'DELETE', path: '/v1/apps/:slug/keys/:keyId' },
+    /** Module switches of the browser SDK (remote config can only DISABLE). Optimistic version. */
+    updateSdkConfig: { method: 'PATCH', path: '/v1/apps/:slug/sdk-config' },
   },
   overview: {
     summary: { method: 'GET', path: '/v1/overview/summary' },
     timeseries: { method: 'GET', path: '/v1/overview/timeseries' },
     /** One row per registered app (traffic, errors, users) — the Applications page. */
     apps: { method: 'GET', path: '/v1/overview/apps' },
+    /** Top values of one dimension (browser, os, device, tz, lang, release, environment …). */
+    breakdown: { method: 'GET', path: '/v1/overview/breakdown' },
+    /** New vs returning devices (anonymous_id) over the window. */
+    devices: { method: 'GET', path: '/v1/overview/devices' },
   },
   endpoints: {
     list: { method: 'GET', path: '/v1/endpoints' },

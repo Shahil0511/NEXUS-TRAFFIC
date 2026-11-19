@@ -6,16 +6,22 @@ import { z } from 'zod';
 
 import { APP_SLUG_PATTERN } from '../constants/ingest';
 import { DEFAULT_RANGE, RANGE_VALUES } from '../constants/time';
+import { ENVIRONMENT_FILTER_VALUES } from '../constants/traffic';
 
 export const appSlugSchema = z.string().regex(APP_SLUG_PATTERN, 'invalid app slug');
 
-/** Every analytics query: optional app filter + a range preset or a custom from/to. */
+/**
+ * Every analytics query: optional app filter + a range preset or a custom from/to + the
+ * environment filter. `env` is `.optional()` (NOT `.default()`): absent means DEFAULT_ENVIRONMENT,
+ * applied in the API, so the inferred TimeWindowQuery literals across the repo keep compiling.
+ */
 export const timeWindowQuerySchema = z
   .object({
     app: appSlugSchema.optional(),
     range: z.enum(RANGE_VALUES).default(DEFAULT_RANGE),
     from: z.iso.datetime({ offset: true }).optional(),
     to: z.iso.datetime({ offset: true }).optional(),
+    env: z.enum(ENVIRONMENT_FILTER_VALUES).optional(),
   })
   .refine((q) => q.range !== 'custom' || (q.from !== undefined && q.to !== undefined), {
     message: 'range=custom requires from and to',

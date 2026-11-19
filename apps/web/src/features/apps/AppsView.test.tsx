@@ -1,4 +1,4 @@
-import { INGEST_HEADERS, ROUTES, type MeDto } from '@nexus/shared';
+import { ERROR_CODES, INGEST_HEADERS, ROUTES, type MeDto } from '@nexus/shared';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -173,6 +173,182 @@ describe('AppsView — admin', () => {
     const grace = Date.parse(body!.expiresAt!) - before;
     expect(grace).toBeGreaterThan(6.9 * 86_400_000);
     expect(grace).toBeLessThanOrEqual(7 * 86_400_000 + 5_000);
+  });
+
+  it('shows the remote config on the card', async () => {
+    serve(ADMIN);
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    const card = await screen.findByRole('region', { name: 'EBO Sales' });
+    expect(within(card).getByText('Remote config')).toBeInTheDocument();
+    expect(within(card).getByText('1 off: Automatic tool clicks')).toBeInTheDocument();
+    expect(within(card).getByText('version 3')).toBeInTheDocument();
+  });
+
+  it('saves the module switches with the expected version', async () => {
+    const user = userEvent.setup();
+    const calls = serve(ADMIN);
+    let seen: { body: unknown; csrf: string | null; slug: unknown } | undefined;
+    let appUpdates = 0;
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), async ({ request, params }) => {
+        seen = {
+          body: await request.json(),
+          csrf: request.headers.get(INGEST_HEADERS.dashboard),
+          slug: params.slug,
+        };
+        return HttpResponse.json(ADMIN_APPS[0]);
+      }),
+      http.patch(routeUrl(ROUTES.apps.update), () => {
+        appUpdates += 1;
+        return HttpResponse.json(ADMIN_APPS[0]);
+      }),
+    );
+
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Edit remote config of EBO Sales' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Remote config · EBO Sales' });
+    expect(within(dialog).getByText(/Version 3/)).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('checkbox', { name: /Automatic tool clicks/ }),
+    ).not.toBeChecked();
+
+    await user.click(within(dialog).getByRole('checkbox', { name: /Automatic tool clicks/ }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Retry queue/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() =>
+      expect(seen).toEqual({
+        body: { expectedVersion: 3, disabledModules: ['retry_queue'] },
+        csrf: '1',
+        slug: 'ebo-sales',
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(calls.list).toBeGreaterThanOrEqual(2));
+    expect(appUpdates).toBe(0);
+  });
+
+  it('engages the kill switch through the app update (browserIngestEnabled: false)', async () => {
+    const user = userEvent.setup();
+    serve(ADMIN);
+    let body: unknown;
+    let configCalls = 0;
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.update), async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ ...ADMIN_APPS[0], browserIngestEnabled: false });
+      }),
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), () => {
+        configCalls += 1;
+        return HttpResponse.json(ADMIN_APPS[0]);
+      }),
+    );
+
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Edit remote config of EBO Sales' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Remote config · EBO Sales' });
+    await user.click(within(dialog).getByRole('switch', { name: 'Kill switch (browser capture)' }));
+    // Everything stops anyway: the module checklist is disabled while the kill switch is on.
+    expect(within(dialog).getByRole('checkbox', { name: /Page views/ })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+
+    await waitFor(() => expect(body).toEqual({ browserIngestEnabled: false }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(configCalls).toBe(0);
+  });
+
+  it('shows a version CONFLICT in place and keeps the dialog open', async () => {
+    const user = userEvent.setup();
+    const calls = serve(ADMIN);
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: ERROR_CODES.CONFLICT,
+              message: 'sdk config was changed by someone else',
+              requestId: 'req-409',
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Edit remote config of EBO Sales' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Remote config · EBO Sales' });
+    await user.click(within(dialog).getByRole('checkbox', { name: /Custom events/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+
+    const alert = await within(dialog).findByRole('alert');
+    expect(alert).toHaveTextContent('sdk config was changed by someone else');
+    expect(alert).toHaveTextContent('CONFLICT');
+    expect(alert).toHaveTextContent('Request ID req-409');
+    expect(screen.getByRole('dialog', { name: 'Remote config · EBO Sales' })).toBeInTheDocument();
+    // The list refetches so a second try starts from the current version.
+    await waitFor(() => expect(calls.list).toBeGreaterThanOrEqual(2));
+  });
+
+  it('keeps an engaged kill switch when the module save fails, and does not resend it', async () => {
+    const user = userEvent.setup();
+    serve(ADMIN);
+    const appBodies: unknown[] = [];
+    let configCalls = 0;
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.update), async ({ request }) => {
+        appBodies.push(await request.json());
+        return HttpResponse.json({ ...ADMIN_APPS[0], browserIngestEnabled: false });
+      }),
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), () => {
+        configCalls += 1;
+        return HttpResponse.json(
+          { error: { code: ERROR_CODES.CONFLICT, message: 'changed meanwhile', requestId: 'r' } },
+          { status: 409 },
+        );
+      }),
+    );
+
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Edit remote config of EBO Sales' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Remote config · EBO Sales' });
+    await user.click(within(dialog).getByRole('checkbox', { name: /Custom events/ }));
+    await user.click(within(dialog).getByRole('switch', { name: 'Kill switch (browser capture)' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('changed meanwhile');
+
+    // Retry: only the module list goes out again; the kill switch already landed.
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+    await waitFor(() => expect(configCalls).toBe(2));
+    expect(appBodies).toEqual([{ browserIngestEnabled: false }]);
+  });
+
+  it('closes without a request when nothing changed', async () => {
+    const user = userEvent.setup();
+    serve(ADMIN);
+    let requests = 0;
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), () => {
+        requests += 1;
+        return HttpResponse.json(ADMIN_APPS[0]);
+      }),
+    );
+    renderWithProviders(<AppsView nexusUrl={NEXUS_URL} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Edit remote config of EBO Sales' }),
+    );
+    const dialog = await screen.findByRole('dialog', { name: 'Remote config · EBO Sales' });
+    await user.click(within(dialog).getByRole('button', { name: 'Save config' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(requests).toBe(0);
   });
 
   it('registers an app, validating with the shared schema first', async () => {

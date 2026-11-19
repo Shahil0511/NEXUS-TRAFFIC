@@ -4,10 +4,14 @@
  */
 import type {
   ApiRequestRow,
+  AppTrafficRow,
+  BreakdownRow,
   EndpointStatsRow,
   GeoCityRow,
   OnlineUserRow,
   PageStatsRow,
+  RejectionReasonRow,
+  SdkHealthRow,
   SessionEventRow,
   SessionSummaryRow,
   TimelineEventRow,
@@ -228,6 +232,63 @@ export function onlineUserRow(overrides: Partial<OnlineUserRow> = {}): OnlineUse
     last_seen_at: OCCURRED_AT,
     events: 3,
     current_page: '/stores/:id',
+    ...overrides,
+  };
+}
+
+// ─── Phase A rows (breakdowns, coverage, diagnostics) ───────────────────────
+
+export function appTrafficRow(overrides: Partial<AppTrafficRow> = {}): AppTrafficRow {
+  return {
+    app_id: '11111111-1111-4111-8111-111111111111',
+    requests: 100,
+    errors: 4,
+    p95_ms: 120,
+    last_event_at: OCCURRED_AT,
+    identified: 40,
+    linkable: 80,
+    linked: 60,
+    ...overrides,
+  };
+}
+
+export function breakdownRow(overrides: Partial<BreakdownRow> = {}): BreakdownRow {
+  return { value: 'Chrome', events: 30, total: 120, ...overrides };
+}
+
+/** One (app, source, sdk) of the health window — server, 100 events, nothing covered. */
+export function sdkHealthRow(overrides: Partial<SdkHealthRow> = {}): SdkHealthRow {
+  return {
+    app_id: '11111111-1111-4111-8111-111111111111',
+    source: 'server',
+    sdk: '@nexus/express@1.1.0',
+    events: 100,
+    last_seen_at: OCCURRED_AT,
+    median_skew_ms: 12.4,
+    max_abs_skew_ms: 90,
+    private_ip_events: 0,
+    classified_ip_events: 100,
+    identified: 0,
+    linkable: 0,
+    linked: 0,
+    page_view_linked: 0,
+    with_release: 0,
+    latest_release: null,
+    latest_release_at: null,
+    ...overrides,
+  };
+}
+
+export function rejectionReasonRow(
+  overrides: Partial<RejectionReasonRow> = {},
+): RejectionReasonRow {
+  return {
+    app_id: '11111111-1111-4111-8111-111111111111',
+    source: 'server',
+    sdk: '@nexus/express@1.1.0',
+    code: 'INVALID_EVENT',
+    schema_path: 'events.*.path',
+    rejected: 3,
     ...overrides,
   };
 }

@@ -10,6 +10,7 @@
  *   openapi.json                    scripts/emit-openapi.ts
  *   files/snippets/*                docs/snippets/* (downloadable reference code)
  *   files/examples/*.json           SERVER_BATCH_EXAMPLE / BROWSER_BATCH_EXAMPLE
+ *   files/sdk/*.tgz                 NOT written here: `npm run sdk:pack` adds them afterwards
  *
  * Markdown conventions understood here:
  *   {{TOKEN}}                       replaced from TOKENS below (an unknown token FAILS the build)
@@ -28,13 +29,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  AGGREGATE_RETENTION_DAYS,
   BROWSER_BATCH_EXAMPLE,
+  COVERAGE_MIN_EVENTS,
+  COVERAGE_TARGET_RATIO,
+  DEFAULT_ENVIRONMENT,
+  ENVIRONMENT_VALUES,
   EVENT_CLOCK_POLICY,
   INGEST_CONTRACT_VERSION,
   INGEST_LIMITS,
+  IP_FAILURE_ERROR_CODES,
+  PII_KIND_VALUES,
   PUBLIC_BASE_PATH,
+  RELEASE_COVERAGE_TARGET,
   ROUTES,
+  SDK_CAPTURE_MODULE_VALUES,
   SDK_DEFAULTS,
+  SDK_KILL_ERROR_CODES,
+  SDK_MODULE_SWITCH_MIN_VERSION,
   SERVER_BATCH_EXAMPLE,
 } from '@nexus/shared';
 import { Marked, type Tokens } from 'marked';
@@ -71,6 +83,27 @@ const API_URL = `${PUBLIC_URL}/api`;
 export const DOCS_URL = `${API_URL}${ROUTES.docs.home.path}`;
 
 const KIB = 1024;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+/** `a`, `b`, `c` — a markdown list of code values (use in prose and tables, never inside a code span). */
+function codeList(values: readonly string[]): string {
+  return values.map((value) => `\`${value}\``).join(', ');
+}
+
+/** A 0–1 ratio as a whole percent (`0.8` → `80`). */
+function percentOf(ratio: number): string {
+  return String(Math.round(ratio * 100));
+}
+
+/**
+ * WHY from package.json: the tarball names (`nexus-react-1.1.0.tgz`) are what `npm run sdk:pack`
+ * writes to docs/dist/files/sdk/, and the version lives only in each SDK's package.json.
+ */
+function sdkVersionOf(packageDir: string): string {
+  const manifest = path.join(REPO_ROOT, 'packages', packageDir, 'package.json');
+  return (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { version: string }).version;
+}
 
 /** Every `{{TOKEN}}` the chapters may use. */
 export const TOKENS: Readonly<Record<string, string>> = {
@@ -96,6 +129,31 @@ export const TOKENS: Readonly<Record<string, string>> = {
   RATE_IP_FAILURES_PER_MIN: String(apiEnvSchema.shape.INGEST_IP_FAILURE_PER_MIN.parse(undefined)),
   FLUSH_EVENTS: String(SDK_DEFAULTS.server.flushEvents),
   FLUSH_SECONDS: String(SDK_DEFAULTS.server.flushIntervalMs / 1000),
+  // ─── Phase A: environment, remote config, retry queue, PII, Integration Health ───
+  CONFIG_URL: `${API_URL}${ROUTES.ingest.config.path}`,
+  ENVIRONMENT_VALUES: codeList(ENVIRONMENT_VALUES),
+  DEFAULT_ENVIRONMENT,
+  SDK_CONFIG_MAX_AGE: String(SDK_DEFAULTS.browser.configMaxAgeMs / MINUTE_MS),
+  SDK_CONFIG_MAX_STALE: String(SDK_DEFAULTS.browser.configMaxStaleMs / HOUR_MS),
+  SDK_CONFIG_RECHECK: String(SDK_DEFAULTS.browser.disabledRecheckMs / MINUTE_MS),
+  SDK_KILL_CODES: codeList(SDK_KILL_ERROR_CODES),
+  IP_FAILURE_CODES: codeList(IP_FAILURE_ERROR_CODES),
+  SDK_MODULES: codeList(SDK_CAPTURE_MODULE_VALUES),
+  SDK_MODULE_SWITCH_MIN_VERSION,
+  SDK_RETRY_QUEUE_TTL: String(SDK_DEFAULTS.browser.retryQueueTtlMs / HOUR_MS),
+  SDK_RETRY_MAX_REPLAYS: String(SDK_DEFAULTS.browser.retryQueueMaxReplays),
+  SDK_RETRY_MAX_BATCHES: String(SDK_DEFAULTS.browser.retryQueueMaxBatches),
+  SDK_RETRY_MAX_KB: String(SDK_DEFAULTS.browser.retryQueueMaxBytes / KIB),
+  SDK_INGEST_TIMEOUT: String(SDK_DEFAULTS.browser.ingestTimeoutMs / 1000),
+  SDK_MAX_PENDING_BATCHES: String(SDK_DEFAULTS.browser.maxPendingBatches),
+  PII_KINDS: codeList(PII_KIND_VALUES),
+  COVERAGE_TARGET: percentOf(COVERAGE_TARGET_RATIO),
+  RELEASE_TARGET: percentOf(RELEASE_COVERAGE_TARGET),
+  COVERAGE_MIN_EVENTS: String(COVERAGE_MIN_EVENTS),
+  AGGREGATE_RETENTION_DAYS: String(AGGREGATE_RETENTION_DAYS),
+  REACT_SDK_VERSION: sdkVersionOf('react'),
+  NODE_SDK_VERSION: sdkVersionOf('node'),
+  EXPRESS_SDK_VERSION: sdkVersionOf('express'),
 };
 
 const SNIPPET_LANGUAGES: Readonly<Record<string, string>> = {

@@ -28,6 +28,15 @@ event's `userEmail` matters: it is the identity we trust from you.
 - **Omit** it for anonymous requests, health checks and machine-to-machine calls. Do not send
   placeholders like `unknown` or `system`.
 
+### `getUser` defaults to anonymous — check it
+
+Every recipe and SDK takes a `getUser(req)` (Python: `get_user`). **If it returns nothing, every
+event is anonymous** — no error, no warning, just empty user columns. The SDK default
+(`req.user?.email` in `@nexus/express`) only fits apps whose auth sets exactly that property. After
+deploying, open the Integration page: **Identified (server)** should be close to the share of your
+API calls that are made by signed-in users. If it is near 0 %, `getUser` reads the wrong property
+or reads it before your auth ran — log `typeof` of its result once (never the email) to check.
+
 ## What NOT to send
 
 - A JWT payload you **decoded without verifying** the signature — anyone can forge one.
@@ -38,9 +47,9 @@ event's `userEmail` matters: it is the identity we trust from you.
 ## The `X-Nexus-User` header — only behind a gateway that owns it
 
 Some setups resolve identity at the gateway and forward it in a header. The reference SDK package
-(`@nexus/express`, coming) reads `X-Nexus-User` **only when you opt in with
-`trustIdentityHeader: true`**; with the snippets you would write `getUser: (req) => req.get('x-nexus-user')`
-yourself. Either way, do it only when:
+`@nexus/express` reads `X-Nexus-User` **only when you opt in with `trustIdentityHeader: true`**; with
+the snippets you would write `getUser: (req) => req.get('x-nexus-user')` yourself. Either way, do it
+only when:
 
 1. every request reaches your app **through** that gateway (the app port is not reachable directly —
    a published Docker port such as `0.0.0.0:3001` breaks this), **and**
@@ -53,4 +62,20 @@ If either is not true, leave it off: a forged header would put any email into yo
 
 The browser tracker may send `user.email` as a **hint**. It is stored as `client_claimed` and never
 counted as identified. For apps on `nexus.libas.in` you rarely need it: the SSO cookie travels with
-the beacon and we verify it ourselves (`sso_cookie`).
+the beacon and we verify it ourselves (`sso_cookie`) — provided the cookie can reach the collector
+(`Path=/`, a `Domain` that covers it, `SameSite=None; Secure` for a different site; details in
+[chapter 3](03-browser-contract.md)).
+
+The Integration page shows, per beacon, what happened to the cookie ("SSO cookie (browser
+identity)"): `ok`, `no-cookie` (it did not travel — check Path / Domain / SameSite, or the page is
+on another origin), `expired`, `bad-signature`, `no-email` (a valid cookie without a usable email)
+and so on. Batches replayed on a later page load (`client.replay`) never use the cookie and are
+not counted there.
+
+## How identity coverage is measured
+
+**Identified** = events whose user was verified (`sso_cookie` or `app_attested`) ÷ all events, shown
+per source on the Integration page (needs at least {{COVERAGE_MIN_EVENTS}} events). The Applications
+page shows the same definition with both sources **combined**. An app counts as *fully integrated*
+when, among other things, at least {{COVERAGE_TARGET}} % of its browser events are identified
+([chapter 10](10-verify.md)).

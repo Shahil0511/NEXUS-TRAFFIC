@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   ACTIVE_USER_WINDOW_MS,
+  breakdownOverviewQuerySchema,
   ERROR_CODES,
   type EndpointStatsDto,
   type FailedRequestDto,
@@ -39,6 +40,7 @@ import { PageService } from '../../src/services/page.service';
 import { ToolService } from '../../src/services/tool.service';
 import { UserService } from '../../src/services/user.service';
 import {
+  API_RELEASE,
   BENGALURU,
   CLAIMED_EMAIL,
   ENDPOINT_IDS,
@@ -49,6 +51,7 @@ import {
   microsecondBlockAt,
   MUMBAI,
   percentileCont,
+  RELEASE_R1,
   ROUTE,
   SALES_SLUG,
   seedAnalytics,
@@ -65,6 +68,8 @@ import { createTestDatabase, quietLogger, RUN_DB_TESTS, type TestDatabase } from
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
+/** Hand-built repository filters see prod only, like every dashboard read by default. */
+const PROD = ['prod'] as const;
 const ADMIN: Viewer = { email: 'boss@libas.in', isAdmin: true };
 const VIEWER: Viewer = { email: 'viewer@libas.in', isAdmin: false };
 
@@ -206,12 +211,145 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
 
     it('day buckets start at IST midnight (18:30 UTC the day before)', async () => {
       const rows = await requests.timeseries(
-        { from: new Date(seed.now.getTime() - 24 * HOUR), to: seed.now },
+        { from: new Date(seed.now.getTime() - 24 * HOUR), to: seed.now, environments: PROD },
         'day',
       );
       const istMidnight = new Date(seed.now.getTime() - 12 * HOUR); // now is 12:00 IST
       expect(rows.map((r) => r.bucket.toISOString())).toEqual([istMidnight.toISOString()]);
       expect(rows[0]?.requests).toBe(EXPECTED.requests);
+    });
+  });
+
+  // ─── Phase A: environment, linking, breakdowns, devices ─────────────────
+
+  describe('environment filter (ADR 0008)', () => {
+    it('defaults to prod: the staging calls and the dev page view never reach the KPIs', async () => {
+      const prod = await overview.summary({ range: '24h' });
+      expect(prod.requests.value).toBe(EXPECTED.requests);
+      expect(prod.pageViews.value).toBe(EXPECTED.pageViews);
+      expect(await overview.summary({ range: '24h', env: 'prod' })).toEqual(prod);
+    });
+
+    it('env=staging / dev narrow to that environment; env=all adds everything up', async () => {
+      const staging = await overview.summary({ range: '24h', env: 'staging' });
+      expect(staging.requests.value).toBe(EXPECTED.stagingRequests);
+      expect(staging.pageViews.value).toBe(0);
+      const dev = await overview.summary({ range: '24h', env: 'dev' });
+      expect(dev).toMatchObject({ requests: { value: 0 }, pageViews: { value: 1 } });
+      const all = await overview.summary({ range: '24h', env: 'all' });
+      expect(all.requests.value).toBe(EXPECTED.requests + EXPECTED.stagingRequests);
+      expect(all.pageViews.value).toBe(EXPECTED.pageViews + EXPECTED.devPageViews);
+      // the per-route tables follow the same filter
+      const routes = await endpoints.list({
+        range: '24h',
+        env: 'all',
+        sort: 'calls',
+        dir: 'desc',
+        limit: 50,
+      });
+      const store = routes.items.find((item) => item.endpointId === ENDPOINT_IDS.storeLookup);
+      expect(store?.calls).toBe(EXPECTED.calls.storeLookup + EXPECTED.stagingRequests);
+    });
+  });
+
+  describe('OverviewService.apps linking KPI (ADR 0013)', () => {
+    it('linkedPct = linked / LINKABLE calls (the stream and header-less calls are handled apart)', async () => {
+      const dto = await overview.apps({ range: '24h' });
+      const bySlug = new Map(dto.items.map((item) => [item.app, item]));
+      expect(bySlug.get(SALES_SLUG)?.linkedPct).toBeCloseTo(
+        (EXPECTED.salesLinked / EXPECTED.salesLinkable) * 100,
+        2,
+      );
+      expect(bySlug.get(HR_SLUG)?.linkedPct).toBe(100);
+    });
+  });
+
+  describe('OverviewService.breakdown', () => {
+    const breakdown = (query: Record<string, unknown>) =>
+      overview.breakdown(breakdownOverviewQuerySchema.parse(query));
+
+    it('browser: page views per value, NULL last, shares of the whole window', async () => {
+      const tz = await breakdown({ dimension: 'client_tz' });
+      expect(tz).toMatchObject({ source: 'browser', dimension: 'client_tz', total: 3 });
+      expect(tz.items).toEqual([
+        { value: 'Asia/Kolkata', events: 2, share: 0.6667 },
+        { value: null, events: 1, share: 0.3333 },
+      ]);
+      const release = await breakdown({ dimension: 'release' });
+      expect(release.items).toEqual([
+        { value: RELEASE_R1, events: 2, share: 0.6667 },
+        { value: null, events: 1, share: 0.3333 },
+      ]);
+      const browsers = await breakdown({ dimension: 'browser', app: SALES_SLUG });
+      expect(browsers).toMatchObject({
+        total: 2,
+        items: [{ value: 'Chrome', events: 2, share: 1 }],
+      });
+    });
+
+    it('honours env (the dev page view appears only with env=dev / all) and limit', async () => {
+      const all = await breakdown({ dimension: 'client_tz', env: 'all' });
+      expect(all.total).toBe(4);
+      expect(all.items.map((item) => [item.value, item.events])).toEqual([
+        ['Asia/Kolkata', 2],
+        ['Europe/London', 1],
+        [null, 1],
+      ]);
+      const top1 = await breakdown({ dimension: 'client_tz', env: 'all', limit: 1 });
+      expect(top1).toMatchObject({ total: 4, items: [{ value: 'Asia/Kolkata', share: 0.5 }] });
+      const dev = await breakdown({ dimension: 'client_lang', env: 'dev' });
+      expect(dev.items).toEqual([{ value: 'en-GB', events: 1, share: 1 }]);
+    });
+
+    it('server: every API call of the window by an api_requests column', async () => {
+      const release = await breakdown({ source: 'server', dimension: 'release' });
+      expect(release).toMatchObject({ source: 'server', total: EXPECTED.requests });
+      expect(release.items).toEqual([{ value: API_RELEASE, events: EXPECTED.requests, share: 1 }]);
+      const environments = await breakdown({
+        source: 'server',
+        dimension: 'environment',
+        env: 'all',
+      });
+      expect(environments.items).toEqual([
+        { value: 'prod', events: EXPECTED.requests, share: 0.875 },
+        { value: 'staging', events: EXPECTED.stagingRequests, share: 0.125 },
+      ]);
+    });
+
+    it('time_reason is read from page_time rows (none in this dataset → empty)', async () => {
+      expect(await breakdown({ dimension: 'time_reason' })).toMatchObject({ total: 0, items: [] });
+    });
+  });
+
+  describe('OverviewService.devices', () => {
+    it('new vs returning devices with the bounded lookback', async () => {
+      const dto = await overview.devices({ range: '24h' });
+      expect(dto).toMatchObject({
+        devices: EXPECTED.devices.devices,
+        returningDevices: EXPECTED.devices.returning,
+        newDevices: EXPECTED.devices.new,
+      });
+      expect(new Date(dto.lookbackFrom).getTime()).toBe(
+        new Date(dto.window.from).getTime() - 30 * 24 * HOUR,
+      );
+    });
+
+    it('scopes BOTH windows by app and environment', async () => {
+      expect(await overview.devices({ range: '24h', app: SALES_SLUG })).toMatchObject({
+        devices: 2,
+        returningDevices: 1,
+        newDevices: 1,
+      });
+      // the dev view's device was seen before only in PROD → new in dev
+      expect(await overview.devices({ range: '24h', env: 'dev' })).toMatchObject({
+        devices: 1,
+        returningDevices: 0,
+        newDevices: 1,
+      });
+      expect(await overview.devices({ range: '24h', env: 'all' })).toMatchObject({
+        devices: 3,
+        returningDevices: 1,
+      });
     });
   });
 
@@ -804,7 +942,11 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
   // ─── Live backfill (S4 SQL: LiveService.snapshot → these two queries) ────────
 
   describe('WebEventQueryRepository live backfill', () => {
-    const hourBefore = () => ({ from: new Date(seed.now.getTime() - HOUR), to: seed.now });
+    const hourBefore = () => ({
+      from: new Date(seed.now.getTime() - HOUR),
+      to: seed.now,
+      environments: PROD,
+    });
 
     async function ownerCount(sql: string): Promise<number> {
       const { rows } = await db.ownerPool.query<{ n: string }>(sql, [
@@ -943,7 +1085,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     it('page_time: a flush-only person is still listed (counted => listed), never the last event otherwise', async () => {
       const repo = new WebEventQueryRepository(queryPool);
       // [−56.5, −54.5) min: J1 has ONLY its two page_time deltas (−56, −55).
-      const flushOnly = { from: minutesAgo(56.5), to: minutesAgo(54.5) };
+      const flushOnly = { from: minutesAgo(56.5), to: minutesAgo(54.5), environments: PROD };
       expect(await repo.countOnlineByApp(flushOnly)).toEqual([
         { app_slug: SALES_SLUG, users: 1, anonymous: 0 },
       ]);
@@ -1036,7 +1178,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
           client,
         );
         const repo = new WebEventQueryRepository(db.appPool);
-        const filter = { from: minutesAgo(20), to: minutesAgo(15) };
+        const filter = { from: minutesAgo(20), to: minutesAgo(15), environments: PROD };
 
         // Busiest app first.
         expect(await repo.countOnlineByApp(filter, client)).toEqual([

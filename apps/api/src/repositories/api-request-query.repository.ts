@@ -5,7 +5,8 @@
  *
  * INVARIANTS
  * - Every query is bounded by `occurred_at >= from AND occurred_at < to` (partition pruning on the
- *   monthly partitions) plus the optional app / endpoint / user scope — see `scopeConditions`.
+ *   monthly partitions) plus the optional app / endpoint / user scope and the environment filter
+ *   (ADR 0008, `environmentConditions`) — see `scopeConditions`.
  * - The optional app error code (FailureFilter.errorCode) narrows FAILURE rows only — see
  *   `errorCodeCondition`. Statements mixing all calls with failures (endpoint stats, timeseries)
  *   apply it inside the failure FILTERs, never to the whole WHERE.
@@ -14,11 +15,14 @@
  *   parameter: the planner can use `idx_api_requests_occurred_at_failed` only when it can prove at
  *   plan time that the WHERE clause implies `status_code >= 400`.
  * - ORDER BY comes only from the `ENDPOINT_ORDER_SQL` whitelist (via `orderByClause`).
+ * - Coverage KPIs (identified / linkable / linked) come ONLY from ./coverage-predicates.ts.
+ * - Breakdown GROUP BY columns come only from the `SERVER_BREAKDOWN_COLUMNS` whitelist.
  * - Signatures stay stable when v1.1 adds rollups: only the SQL in here changes.
  * @see ../../migrations/0004_api_requests.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql (environment)
  * @see ../../migrations/0002_apps_and_api_keys.sql (traffic.apps, joined for the public slug)
  */
-import type { Grain, ServerEventKind, StatusClass } from '@nexus/shared';
+import type { Grain, ServerBreakdownDimension, ServerEventKind, StatusClass } from '@nexus/shared';
 import type { Pool } from 'pg';
 
 import type { Executor } from '../db/executor';
@@ -33,6 +37,7 @@ import type {
 import type {
   ApiRequestRow,
   AppTrafficRow,
+  BreakdownRow,
   EndpointDetailRows,
   PageApiCallRow,
   EndpointStatsRow,
@@ -45,6 +50,7 @@ import type {
   UserEndpointRow,
   UserUsageRow,
 } from '../domain/rows';
+import { IDENTIFIED_SQL, LINKABLE_SQL, LINKED_SQL } from './coverage-predicates';
 
 // ─── SQL fragments (trusted, frozen) ────────────────────────────────────────
 
@@ -71,6 +77,18 @@ export const FAILURE_PREDICATES = Object.freeze({
   '4xx': 'r.status_code >= 400 AND r.status_code < 500',
   '5xx': 'r.status_code >= 400 AND r.status_code >= 500',
 } as const satisfies Record<StatusClass, string>);
+
+/**
+ * Breakdown dimension → api_requests column (GROUP BY). The ONLY breakdown sources (whitelist):
+ * the dimension never reaches SQL as text.
+ */
+export const SERVER_BREAKDOWN_COLUMNS = Object.freeze({
+  browser: 'r.ua_browser',
+  os: 'r.ua_os',
+  device: 'r.ua_device',
+  release: 'r.release',
+  environment: 'r.environment',
+} as const satisfies Record<ServerBreakdownDimension, string>);
 
 /** Endpoint-stats sort key → SQL over the `stats` CTE. The ONLY ORDER BY sources (whitelist). */
 const ENDPOINT_ORDER_SQL = Object.freeze({
@@ -99,8 +117,22 @@ const SAMPLE_COLUMNS = `r.occurred_at, ${keysetTimeExpr('r.occurred_at')} AS occ
   r.geo_city`;
 
 /**
- * The time window (partition pruning) + optional app / endpoint / user scope, as AND-able
- * conditions. Every value is a bound parameter (never interpolated). Takes a TrafficFilter on
+ * `alias.environment = ANY($n::text[])` when the filter keeps some environments (ADR 0008), else
+ * nothing (`env=all`). Shared by both query repositories and every hand-built window, so no read
+ * can forget it. `alias` MUST be a trusted identifier; the values are always one bound array.
+ */
+export function environmentConditions(
+  alias: string,
+  filter: TrafficFilter,
+  params: ParamList,
+): string[] {
+  if (filter.environments === null) return [];
+  return [`${alias}.environment = ANY(${params.add([...filter.environments])}::text[])`];
+}
+
+/**
+ * The time window (partition pruning) + optional app / endpoint / user scope + the environment
+ * filter, as AND-able conditions. Every value is a bound parameter (never interpolated). Takes a TrafficFilter on
  * purpose: the error code is NOT a scope of all calls — see `errorCodeCondition`.
  */
 export function scopeConditions(filter: TrafficFilter, params: ParamList): string[] {
@@ -112,6 +144,7 @@ export function scopeConditions(filter: TrafficFilter, params: ParamList): strin
   if (filter.endpointId !== undefined)
     conditions.push(`r.endpoint_id = ${params.add(filter.endpointId)}`);
   if (filter.userKey !== undefined) conditions.push(`r.user_key = ${params.add(filter.userKey)}`);
+  conditions.push(...environmentConditions('r', filter, params));
   return conditions;
 }
 
@@ -203,7 +236,10 @@ export class ApiRequestQueryRepository {
     return rows[0] ?? { requests: 0, errors: 0, p95_ms: null };
   }
 
-  /** The same totals per app (apps without calls are absent), plus the newest call. */
+  /**
+   * The same totals per app (apps without calls are absent), plus the newest call and the
+   * identified / linkable / linked counts (./coverage-predicates.ts — the Applications page).
+   */
   async summarizeTrafficByApp(
     filter: TrafficFilter,
     exec: Executor = this.db,
@@ -215,8 +251,9 @@ export class ApiRequestQueryRepository {
               count(*) FILTER (WHERE ${FAILURE_PREDICATES.all}) AS errors,
               ${latencyPercentile(0.95)} AS p95_ms,
               max(r.occurred_at) AS last_event_at,
-              count(*) FILTER (WHERE r.user_key IS NOT NULL) AS identified,
-              count(*) FILTER (WHERE r.session_id IS NOT NULL) AS linked
+              count(*) FILTER (WHERE ${IDENTIFIED_SQL('r')}) AS identified,
+              count(*) FILTER (WHERE ${LINKABLE_SQL('r')}) AS linkable,
+              count(*) FILTER (WHERE ${LINKED_SQL('r')}) AS linked
          FROM traffic.api_requests r
         WHERE ${scopeConditions(filter, params).join(' AND ')}
         GROUP BY r.app_id`,
@@ -411,6 +448,7 @@ export class ApiRequestQueryRepository {
       `w.path_template = ${params.add(pathTemplate)}`,
     ];
     if (filter.appId !== undefined) views.push(`w.app_id = ${params.add(filter.appId)}`);
+    views.push(...environmentConditions('w', filter, params));
     where.push(
       `r.page_view_id IN (SELECT w.event_id FROM traffic.web_events w WHERE ${views.join(' AND ')})`,
     );
@@ -423,6 +461,31 @@ export class ApiRequestQueryRepository {
         WHERE ${where.join(' AND ')}
         GROUP BY r.endpoint_id, r.method, r.route_template
         ORDER BY calls DESC, r.route_template ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * Top values of one whitelisted dimension (SERVER_BREAKDOWN_COLUMNS) over every API call in
+   * scope, busiest first (NULL = not sent / not parsed, sorted last on ties). `total` = all calls
+   * in scope via a window function over the groups, so it ignores the LIMIT.
+   */
+  async countByDimension(
+    dimension: ServerBreakdownDimension,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<BreakdownRow[]> {
+    const column = SERVER_BREAKDOWN_COLUMNS[dimension];
+    const params = new ParamList();
+    const { rows } = await exec.query<BreakdownRow>(
+      `SELECT ${column} AS value, count(*) AS events, sum(count(*)) OVER ()::int8 AS total
+         FROM traffic.api_requests r
+        WHERE ${scopeConditions(filter, params).join(' AND ')}
+        GROUP BY ${column}
+        ORDER BY events DESC, ${column} ASC NULLS LAST
         LIMIT ${params.add(limit)}`,
       params.values,
     );

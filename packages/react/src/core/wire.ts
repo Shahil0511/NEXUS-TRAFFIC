@@ -7,7 +7,12 @@
  * SDK). These hand-written mirrors are checked against `browserIngestBatchSchema` in the tests, so
  * drift fails the build.
  */
-import type { NavType, PageTimeReason, ToolAction } from '@nexus/shared/constants';
+import type {
+  NavType,
+  PageTimeReason,
+  SdkCaptureModule,
+  ToolAction,
+} from '@nexus/shared/constants';
 
 export type PropValue = string | number | boolean;
 export type Props = Record<string, PropValue>;
@@ -71,6 +76,26 @@ export interface BrowserWireBatch {
   sessionId: string;
   anonymousId?: string;
   user?: { email?: string };
-  client?: { sdk: string; version: string; tz?: string; lang?: string };
+  /** `prod` | `staging` | `dev` (ADR 0008); omitted → the server default. */
+  environment?: string;
+  /** The frontend build (≤ 64 chars). */
+  release?: string;
+  /** `replay: true` ONLY on a cross-load replay of the retry queue (ADR 0012). */
+  client?: { sdk: string; version: string; tz?: string; lang?: string; replay?: boolean };
   events: BrowserWireEvent[];
+}
+
+/** Body of POST ROUTES.ingest.config (mirrors `sdkConfigRequestSchema`). */
+export interface SdkConfigWireRequest {
+  key: string;
+  client?: { sdk: string; version: string };
+}
+
+/** 200 body of POST ROUTES.ingest.config (mirrors `sdkRemoteConfigSchema`). */
+export interface SdkRemoteConfigWire {
+  contract: 1;
+  version: number;
+  enabled: boolean;
+  disabledModules: SdkCaptureModule[];
+  maxAgeMs: number;
 }

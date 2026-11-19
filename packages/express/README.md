@@ -9,14 +9,14 @@ Node >= 18. Full guide: <https://nexus.libas.in/traffic/api/docs/>
 
 ## Install (vendored tarball)
 
-Download `nexus-express-1.0.0.tgz` from
-`https://nexus.libas.in/traffic/api/docs/files/sdk/nexus-express-1.0.0.tgz`, commit it under
+Download `nexus-express-1.1.0.tgz` from
+`https://nexus.libas.in/traffic/api/docs/files/sdk/nexus-express-1.1.0.tgz`, commit it under
 `vendor/`, and reference it:
 
 ```json
 {
   "dependencies": {
-    "@nexus/express": "file:vendor/nexus-express-1.0.0.tgz"
+    "@nexus/express": "file:vendor/nexus-express-1.1.0.tgz"
   }
 }
 ```
@@ -32,6 +32,7 @@ import { createNexusClient, nexusMiddleware, registerShutdownFlush } from '@nexu
 const nexus = createNexusClient({
   url: process.env.NEXUS_URL, // https://nexus.libas.in/traffic (NO /api). Unset → no-op.
   key: process.env.NEXUS_SECRET_KEY, // nx_sk_… — server env ONLY. Unset → no-op.
+  // environment: 'staging',        // default NEXUS_ENVIRONMENT (prod | staging | dev); unset → prod
 });
 
 const app = express();
@@ -55,20 +56,26 @@ NestJS: in `main.ts`, `app.use(nexusMiddleware({ client: nexus, basePath: '/my-a
 
 Mount it **early** (before your routers), so the duration covers the whole request.
 
+## Environment
+
+`createNexusClient({ environment })` — `prod` | `staging` | `dev`, default `process.env.NEXUS_ENVIRONMENT`.
+It is sent only when set; unset, the server stores `prod`. Any other value is not sent (one throttled
+warning). Set `NEXUS_ENVIRONMENT=staging` on staging so its traffic stays off the prod dashboards.
+
 ## Options
 
 | Option | Default | What it does |
 |---|---|---|
 | `client` | — | The client from `createNexusClient()`. |
 | `basePath` | `''` | Public path prefix. Prefixed to `path` / `routeTemplate` unless the URL already starts with it. |
-| `getUser` | `req.user?.email` | Your **verified** signed-in user's email. |
+| `getUser` | `req.user?.email` | Your **verified** signed-in user's email. **If your auth does not set `req.user.email`, every event is anonymous** — pass your own function. |
 | `trustProxyHops` | `1` | Proxies you run in front of the app. The IP is read from the right of `X-Forwarded-For`. |
 | `skip` | OPTIONS, `/health`, `/healthz`, `/ready`, `/live`, `/metrics`, `/favicon.ico`, static files, `/_next/`, `/assets/` | Replaces the default skip rule. |
 | `extraSkip` | — | An extra rule on top of the default. |
 | `classify` | `text/event-stream` or `Content-Disposition: attachment` → `stream` | Marks long-lived responses so they do not skew latency. |
 | `trustIdentityHeader` | `false` | Read `X-Nexus-User` when `getUser` returns nothing. **Only** when your gateway overwrites that header — otherwise anyone can forge it. |
 | `getErrorCode` | `res.locals.errorCode` | Your app's error **code** (e.g. `VALIDATION_ERROR`), never a message. |
-| `release` | — | Your version label (e.g. a git sha). |
+| `release` | `NEXUS_RELEASE` | Your version label (e.g. a git sha). Over 64 characters → not sent. |
 
 ## What is recorded
 
@@ -82,6 +89,7 @@ Never recorded: bodies, cookies, tokens, query strings, error messages.
 
 ## Health and debugging
 
-`nexus.stats()` → `{ queued, accepted, duplicates, rejected, dropped, attempts, paused, enabled }`.
+`nexus.stats()` → `{ queued, accepted, duplicates, rejected, rejectedByCode, dropped, attempts, paused, enabled }`
+(`rejectedByCode` counts per-event rejections by code, e.g. `{ EVENT_TIME_OUT_OF_RANGE: 3 }`).
 Logs are prefixed `[nexus]` and throttled. `ingest URL is intercepted by a proxy` means an SSO page
 or proxy answered instead of Nexus — check `NEXUS_URL` (guide chapter 11).

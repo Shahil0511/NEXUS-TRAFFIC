@@ -9,3 +9,8 @@ export const CACHE_CONTROL_HEADER = 'Cache-Control';
 export const DASHBOARD_ANALYTICS_CACHE = 'private, max-age=15';
 /** The Live backfill must never be reused: the page applies socket ticks on top of it. */
 export const DASHBOARD_LIVE_CACHE = 'private, no-store';
+/**
+ * The SDK remote config (POST ROUTES.ingest.config): never stored by any cache — the SDK keeps its
+ * own copy (maxAgeMs), and a kill switch must take effect on the next fetch.
+ */
+export const NO_STORE_CACHE = 'no-store';

@@ -1,7 +1,7 @@
 # 03 — code navigation
 
 Where to start reading code, which folder is which layer, and the chains that exist: server ingest
-and app/key admin (S1, admin UI + Integration Health in S5 §4/§4b), the dashboard read side UI → SQL for Overview / API Routes / Errors (S2) and the following pages (S3–S5), and the background jobs (S6, §5d). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
+and app/key admin (S1, admin UI + Integration Health in S5 §4/§4b), the dashboard read side UI → SQL for Overview / API Routes / Errors (S2) and the following pages (S3–S5), the background jobs (S6, §5d), and the Phase A additions (SDK remote config §3c, environment filter, breakdowns, diagnostics, aggregate retention). See [README.md](README.md) for the reading order and [PROGRESS.md](PROGRESS.md)
 for status.
 
 ## 1. Entry files
@@ -29,8 +29,8 @@ for status.
 | `http/controllers/` | HTTP adapters | arrow-property methods named like the `ROUTES` leaf; no logic |
 | `services/` | use cases | orchestrate; method name = leaf name; `@see` to repositories |
 | `enrichment/` | pure-ish transforms | one transformation per class; `ServerEventEnricher` / `BrowserEventEnricher` orchestrate |
-| `auth/` | key + SSO auth | parse / hash / generate / cache keys; read the SSO cookie |
-| `domain/` | types + pure rules | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO, IP admin-only), `to-api-request-insert.ts` / `to-web-event-insert.ts` (wire → row), `base-path.ts` (browser base-path rule), `browser-sdk.ts`; read side: `filters.ts` (repository inputs), `compute-deltas.ts` (KPI deltas), `timeseries-gaps.ts` (zero-filled IST buckets), `session-replay.ts` (API calls interleaved into a replay), `pagination.ts` (limit + 1, cursors), `numbers.ts` (rounding) |
+| `auth/` | key + SSO auth | parse / hash / generate / cache keys; read the SSO cookie (typed `CookieFailureReason`); `allowed-origin.cache.ts` (`AllowedOriginCache`, one instance per rule: preflight / early CORS) |
+| `domain/` | types + pure rules | `rows.ts`, `inserts.ts`, `viewer.ts`, `mappers.ts` (row → DTO, IP admin-only), `to-api-request-insert.ts` / `to-web-event-insert.ts` (wire → row), `base-path.ts` (browser base-path rule), `browser-sdk.ts`; Phase A ingest rules: `environment.ts` (`resolveEnvironment`), `route-template.ts` (`isPlausibleRouteTemplate`), `sdk-label.ts` (`normalizeSdkLabel`), `schema-path.ts` (`normalizeSchemaPath`), `ingest-diagnostics.ts` (rejection / PII increments, `beaconOriginOf`), `sdk-config.ts` (`toSdkRemoteConfig`), `integration-health.ts` (status, warnings, `integrationLevelOf`); read side: `filters.ts` (repository inputs), `compute-deltas.ts` (KPI deltas), `timeseries-gaps.ts` (zero-filled IST buckets), `session-replay.ts` (API calls interleaved into a replay), `pagination.ts` (limit + 1, cursors), `numbers.ts` (rounding) |
 | `repositories/` | SQL | one class per table concern; `@see ../../migrations/NNNN_x.sql` |
 | `db/` | DB plumbing | pools, transactions, pg error classifiers, migration runner, schema guard |
 | `jobs/` | timers | partition maintenance, retention (listed in `jobs/scheduler.ts`) |
@@ -63,24 +63,33 @@ apps/api/src/http/routes/index.ts                   r.post(ROUTES.ingest.server.
     apps/api/src/auth/app-key.authenticator.ts             AppKeyAuthenticator.authenticate
       → api-key.parser.ts (parseApiKey) → app-key.cache.ts → api-key.hasher.ts
       → repositories/api-key.repository.ts (findByPrefix, touchUsage) + app.repository.ts (findById)
+  apps/api/src/http/middleware/rejection-recorder.middleware.ts  rejectionRecorderMiddleware (serverRejectionRecorder:
+                                                    on 'finish', a 400 INVALID_ENVELOPE → IngestRejectionRepository.increment)
   apps/api/src/http/middleware/rate-limit.middleware.ts    keyRateLimitMiddleware     (per key id)
   apps/api/src/http/middleware/validate.middleware.ts      validateBody(serverIngestEnvelopeSchema)
 apps/api/src/http/controllers/ingest.controller.ts  IngestController.server  (?dryRun=1, X-Nexus-Contract header)
 apps/api/src/services/ingest.service.ts             IngestService.ingestServerEvents
+  once:      ServerEventEnricher.enrichEnvelope → domain/environment.ts resolveEnvironment (claim only, ADR 0008)
   per event: serverEventSchema → enrichment/event-time.guard.ts → ServerEventEnricher.enrich
-apps/api/src/enrichment/server-event.enricher.ts    path.sanitizer → route.normalizer → ip.anonymizer → geo-ip.enricher
-                                                    → user-agent.parser → identity.resolver → user-key.hasher
-                                                    → toEndpointId (@nexus/shared/endpoint-id)
+apps/api/src/enrichment/server-event.enricher.ts    path.sanitizer → pii.scrubber pass 1 (path, routeTemplate, errorCode,
+                                                    requestId, release) → route.normalizer → toEndpointId
+                                                    (@nexus/shared/endpoint-id) → pii.scrubber pass 2 (stored path segments)
+                                                    → ip.anonymizer → geo-ip.enricher → user-agent.parser
+                                                    → identity.resolver → user-key.hasher   (PiiFindings: pii-findings.ts)
 apps/api/src/domain/to-api-request-insert.ts        toApiRequestInsert(event, enrichment) → ApiRequestInsert
 apps/api/src/repositories/api-request-ingest.repository.ts  ApiRequestIngestRepository.insertBatch
                                                     (unnest INSERT … ON CONFLICT DO NOTHING RETURNING event_id)
-apps/api/migrations/0004_api_requests.sql           traffic.api_requests (monthly partitions, CHECKs = shared limits)
-  then: repositories/ingest-counter.repository.ts (0006) and live/live-feed.ts
+apps/api/migrations/0004_api_requests.sql           traffic.api_requests (monthly partitions, CHECKs = shared limits; +0007 environment)
+  then (after commit, each in its own try/catch): repositories/ingest-counter.repository.ts (0006),
+        ingest-rejection.repository.ts (0010, per-event codes via domain/ingest-diagnostics.ts toRejectionIncrements),
+        pii-detection.repository.ts (0011, inserted rows only, toPiiIncrements) and live/live-feed.ts (prod rows only)
 ```
 
 Failure paths: a missing partition triggers `PartitionRepository.ensure` and ONE retry; a CHECK
 violation bisects the batch so only the bad rows come back as `DB_CONSTRAINT`; DB unavailable → 503
-`INGEST_UNAVAILABLE` with Retry-After. `GET /api/v1/ingest/verify` runs `anyKeyAuthMiddleware` →
+`INGEST_UNAVAILABLE` with Retry-After. `errorHandlerMiddleware` sets `res.locals.errorCode`, which the
+rejection recorder and `ipFailureLimitMiddleware` read (only `IP_FAILURE_ERROR_CODES` count — the
+key guesses plus `ORIGIN_NOT_ALLOWED`; `isCountedIpFailure`, ADR 0009). `GET /api/v1/ingest/verify` runs `anyKeyAuthMiddleware` →
 `IngestController.verify` → `IngestService.verify` (no DB write besides the usage touch).
 
 ### 3b. The browser ingest chain (`POST /api/v1/ingest/browser`, S3)
@@ -91,15 +100,21 @@ so auth runs after parsing; the actor (identity, IP, geo, UA) is resolved ONCE p
 ```
 packages/shared/src/routes.ts                       ROUTES.ingest.browser = { method: 'POST', path: '/v1/ingest/browser' }
 apps/api/src/http/routes/index.ts                   r.use(path, browserIngestPreflight)  (OPTIONS only: 204, reflects a
-                                                    registered origin — AppRepository.anyAllowsOrigin)
+                                                    registered origin — auth/allowed-origin.cache.ts AllowedOriginCache.allows
+                                                    → AppRepository.anyAllowsOrigin, 30 s LRU, one in-flight lookup per origin)
                                                     r.post(ROUTES.ingest.browser.path, …chain…, ctl.ingest.browser)
+  apps/api/src/http/middleware/browser-ingest-cors.middleware.ts  browserIngestEarlyCorsMiddleware (FIRST: Vary + ACAO/ACAC
+                                                    for an origin ANY app lists — killed / disabled apps included —
+                                                    AllowedOriginCache rule 'registered' → AppRepository.anyListsOrigin,
+                                                    so pre-auth errors and kill codes are readable — ADR 0009)
   apps/api/src/http/middleware/rate-limit.middleware.ts      ipFailureLimitMiddleware (own instance: browserIpFailureLimit)
   apps/api/src/http/middleware/beacon-body.middleware.ts     beaconBodyMiddleware     (text/plain | application/json, 60 KiB)
   apps/api/src/http/middleware/parse-beacon-json.middleware.ts  parseBeaconJsonMiddleware (malformed → INVALID_ENVELOPE)
   apps/api/src/http/middleware/validate.middleware.ts        validateBody(browserIngestEnvelopeSchema)
   apps/api/src/http/middleware/ingest-auth.middleware.ts     publishableKeyAuthMiddleware (body `key`; AppKeyAuthenticator
                                                     with 'publishable': secret → markExposed + 403 SECRET_KEY_EXPOSED,
-                                                    APP_DISABLED; then 403 BROWSER_INGEST_DISABLED)
+                                                    APP_DISABLED; then 403 BROWSER_INGEST_DISABLED = the kill switch)
+  apps/api/src/http/middleware/rejection-recorder.middleware.ts  browserRejectionRecorder (403 ORIGIN_NOT_ALLOWED, sdk always '')
   apps/api/src/http/middleware/browser-ingest-cors.middleware.ts  browserIngestCorsMiddleware (reflects Origin only if in
                                                     app.allowed_origins, with credentials; never *)
   apps/api/src/http/middleware/origin-guard.middleware.ts    originGuardMiddleware   (Origin decides; 'null' rejected; Referer
@@ -109,16 +124,45 @@ apps/api/src/http/routes/index.ts                   r.use(path, browserIngestPre
 apps/api/src/http/controllers/ingest.controller.ts  IngestController.browser  (req.ip, User-Agent, Cookie → BrowserRequestInfo;
                                                     sdk = domain/browser-sdk.ts browserSdkOf(envelope.client))
 apps/api/src/services/ingest.service.ts             IngestService.ingestBrowserEvents
-  once:      BrowserEventEnricher.enrichActor → identity.resolver forBrowser (SSO cookie → sso_cookie; else user.email hint →
-             client_claimed = claimed_email ONLY; user_key only for sso_cookie) → ip.anonymizer / geo-ip / user-agent
+  once:      BrowserEventEnricher.enrichActor → identity.resolver forBrowser (SSO cookie → sso_cookie, a replay skips it;
+             else user.email hint → client_claimed = claimed_email ONLY; user_key only for sso_cookie) → ip.anonymizer /
+             geo-ip / user-agent; envelope columns: resolveEnvironment (loopback origin → dev), client tz/lang
+             (CLIENT_*_PATTERN), release (PII-scrubbed)
   per event: browserEventSchema → event-time.guard → domain/base-path.ts isWithinBasePath (PATH_OUTSIDE_APP)
-             → BrowserEventEnricher.enrich (path.sanitizer for path + referrerPath → route.normalizer)
+             → BrowserEventEnricher.enrich (path.sanitizer for path + referrerPath → domain/route-template.ts
+             isPlausibleRouteTemplate → pii.scrubber pass 1 → route.normalizer → pii.scrubber pass 2)
 apps/api/src/enrichment/browser-event.enricher.ts   (actor columns shared with the server path: enrichment/actor-columns.ts)
 apps/api/src/domain/to-web-event-insert.ts          toWebEventInsert(event, enrichment) → WebEventInsert
 apps/api/src/repositories/web-event-ingest.repository.ts  WebEventIngestRepository.insertBatch (same unnest + ON CONFLICT)
 apps/api/migrations/0005_web_events.sql             traffic.web_events
-  then: ingest-counter.repository.ts (source 'browser') and LiveFeed.recordWebEvents
+  then: ingest-counter.repository.ts (source 'browser'), ingest-rejection / pii-detection repositories,
+        sso-cookie-outcome.repository.ts (0012; not for replays; beaconOriginOf vs PUBLIC_ORIGIN) and
+        LiveFeed.recordWebEvents (prod rows only)
 ```
+
+### 3c. The SDK remote config chain (`POST /api/v1/ingest/config`, Phase A, ADR 0009)
+
+```
+packages/react/src/core/remote-config.ts            RemoteConfigClient (captured native fetch, credentials 'omit', polling floor)
+  packages/react/src/core/ingest-urls.ts            resolveConfigUrl (buildIngestUrl + ROUTES.ingest.config)
+  packages/react/src/core/config-cache.ts           per key scope cache (also read by the early entry); kill → core/kill.ts
+packages/shared/src/routes.ts                       ROUTES.ingest.config = { method: 'POST', path: '/v1/ingest/config' }
+apps/api/src/http/routes/index.ts                   r.use(path, browserIngestPreflight) + r.post(…chain…, ctl.ingest.config)
+  browserIngestEarlyCors → browserIpFailureLimit → beaconBody → parseBeaconJson
+  → validateBody(sdkConfigRequestSchema) → publishableKeyAuth (401/403 = the kill codes) → browserIngestCors
+  → originGuard → browserConfigRateLimit (own keyRateLimit instance, no-op onLimited: no ingest_counters)
+  (no session limiter, NO rejection recorder)
+apps/api/src/http/controllers/ingest.controller.ts  IngestController.config  (200, Cache-Control: NO_STORE_CACHE, X-Nexus-Contract)
+apps/api/src/services/ingest.service.ts             IngestService.config(app) — no I/O, the app rides AppKeyCache
+apps/api/src/domain/sdk-config.ts                   toSdkRemoteConfig(AppRow) → SdkRemoteConfig
+apps/api/migrations/0009_app_sdk_config.sql         apps.sdk_config_version / sdk_disabled_modules / sdk_config_updated_at
+```
+
+The admin side is `ROUTES.apps.updateSdkConfig` (§4). The SDK's other Phase A pieces:
+`packages/react/src/early.ts` (`installNexusEarly`, ADR 0011), `core/header-source.ts` +
+`core/fetch-patch.ts` + `core/xhr-patch.ts` (header propagation), `core/batch-sender.ts` +
+`core/transport.ts` (`classifyDelivery`) + `core/retry-queue.ts` + `core/retry-storage.ts` (ADR 0012),
+`core/route-template.ts` (`nextRouteTemplate`), `core/environment.ts`, `core/stats.ts` (`getNexusStats`).
 
 Dedupe, partition retry, poison-row bisect and 503 are the SAME code as §3 (`IngestService.storeBatch`,
 generic over the row type). `GET verify` accepts the publishable key too (`anyKeyAuthMiddleware`).
@@ -126,7 +170,7 @@ generic over the row type). `GET verify` accepts the publishable key too (`anyKe
 ## 4. The app/key admin chain (`/api/v1/apps…`)
 
 ```
-packages/shared/src/routes.ts                       ROUTES.apps.{list, create, update, createKey, expireKey, revokeKey}
+packages/shared/src/routes.ts                       ROUTES.apps.{list, create, update, createKey, expireKey, revokeKey, updateSdkConfig}
 apps/api/src/http/routes/index.ts                   dashboard = [ssoAuth, dashboardCsrf]; admin = [...dashboard, requireAdmin]
   apps/api/src/http/middleware/sso-auth.middleware.ts      access_token cookie → Viewer (auth/sso-identity.reader.ts,
                                                            auth/dashboard-access.policy.ts)
@@ -134,9 +178,11 @@ apps/api/src/http/routes/index.ts                   dashboard = [ssoAuth, dashbo
   dashboardJsonBody → validateParams / validateBody (packages/shared/src/schemas/apps.ts)
 apps/api/src/http/controllers/app.controller.ts     AppController.<leaf>
 apps/api/src/services/app-query.service.ts          AppQueryService.list   → AppRepository.list + ApiKeyRepository.listByAppIds
-apps/api/src/services/app-admin.service.ts          AppAdminService.create / update / createKey / expireKey / revokeKey
+apps/api/src/services/app-admin.service.ts          AppAdminService.create / update / createKey / expireKey / revokeKey / updateSdkConfig
   one transaction each (db/transaction.ts): AppRepository / ApiKeyRepository + AdminAuditRepository.record,
-  then AppKeyCache.invalidateApp after COMMIT; createKey uses auth/api-key.generator.ts (plaintext shown once)
+  then AppKeyCache.invalidateApp after COMMIT; createKey uses auth/api-key.generator.ts (plaintext shown once);
+  updateSdkConfig: requireApp → AppRepository.updateSdkConfig (conditional on expectedVersion; null → 409
+  CONFLICT) → listByAppIds → audit APP_SDK_CONFIG_UPDATE → invalidateApp (ADR 0009)
 apps/api/src/domain/mappers.ts                      mapApp / mapApiKey → AppDto / ApiKeyDto (never key_hash)
 apps/api/migrations/0002_apps_and_api_keys.sql      traffic.apps, traffic.api_keys
 apps/api/migrations/0003_admin_audit_log.sql        traffic.admin_audit_log (append-only for nexus_app)
@@ -147,8 +193,10 @@ Web half (S5, admins only; non-admins get `components/AdminOnly.tsx` from the `u
 `AppCard.tsx` (settings, integration values, key table `keyColumns.tsx`) + dialogs `AppFormDialog.tsx`
 (create/update, validated with the shared schemas in `appForm.ts`), `CreateKeyDialog.tsx` (one-time reveal +
 copy; the plaintext lives only in component state, mutation `gcTime: 0` + `reset()`), `KeyActionDialog.tsx`
-(expire with a grace period / revoke, in-page confirm) → `useAppMutations.ts` (invalidates `qk.apps.all` +
-`qk.integration.all`) → `api.apps.<leaf>` (`lib/api.ts`, sends `X-Nexus-Dashboard: 1`).
+(expire with a grace period / revoke, in-page confirm), `RemoteConfigDialog.tsx` (kill switch via `useUpdateApp`
+first, then module switches via `useUpdateSdkConfig`; form helpers and `SDK_MODULE_COPY` in `appForm.ts`) →
+`useAppMutations.ts` (invalidates `qk.apps.all` + `qk.integration.all`) → `api.apps.<leaf>` (`lib/api.ts`, sends
+`X-Nexus-Dashboard: 1`).
 
 ### 4b. The Integration Health chain (S5, `GET /api/v1/integration/health`)
 
@@ -160,12 +208,24 @@ packages/shared/src/routes.ts                           ROUTES.integration.healt
 apps/api/src/http/controllers/integration.controller.ts IntegrationController.health (private, max-age=15)
 apps/api/src/services/integration.service.ts            IntegrationService.health: window = INTEGRATION_HEALTH_WINDOW_MS, rows per app
 apps/api/src/domain/integration-health.ts               integrationStatusOf / privateIpRatioOf / countersBySource / integrationWarningsOf
+                                                        / integrationLevelOf + coverage and release folds
                                                         (thresholds: packages/shared/src/constants/integration.ts)
-apps/api/src/repositories/ingest-health.repository.ts   IngestHealthRepository.perApp (QUERY pool, 5 reads in parallel): apps + newest
+apps/api/src/repositories/ingest-health.repository.ts   IngestHealthRepository.perApp (QUERY pool, reads in parallel): apps + newest
                                                         event per source (DESC LIMIT 1), Σ ingest_counters, SDK stats per table
-                                                        (percentile_cont skew; private-IP counts on api_requests only), exposed live keys
-apps/api/src/domain/mappers.ts                          mapIngestCounter / mapSdkHealth / mapExposedKey → shared dto/integration.ts
+                                                        (sdkHealthSql: skew, private IPs, identified / linkable / linked / page-view
+                                                        linked, release + latest release), ENVIRONMENT_MIX_SQL, REJECTION_REASONS_SQL
+                                                        (≤ MAX_REJECTION_ROWS_PER_APP per app), PII_DETECTIONS_SQL,
+                                                        SSO_COOKIE_OUTCOMES_SQL, exposed live keys
+  apps/api/src/repositories/coverage-predicates.ts      IDENTIFIED_SQL / LINKABLE_SQL / LINKED_SQL / PAGE_VIEW_LINKED_SQL — the ONE KPI
+                                                        definition (also used by the Applications page queries)
+apps/api/src/domain/mappers.ts                          mapIngestCounter / mapSdkHealth / mapExposedKey (+ Phase A row mappers;
+                                                        '' → null) → shared dto/integration.ts
 ```
+
+Web: `AppHealthCard.tsx` composes `IntegrationLevelBadge.tsx`, `CoverageStats.tsx`, `EnvironmentMix.tsx`,
+`ReleaseStatus.tsx`, `PiiDetectionsTable.tsx`, `RejectionsTable.tsx`, `SsoOutcomes.tsx` (all in
+`apps/web/src/features/integration/`), with `components/CoverageValue.tsx`; copy in `integrationCopy.ts`
+(`LEVEL_COPY`, `pii_detected`). Not filtered by environment (ADR 0008).
 
 Proven by `ingest-health.repository.test.ts` (SQL shape) and `apps/api/test/db/ingest-health.integration.test.ts`.
 
@@ -203,6 +263,8 @@ apps/api/src/domain/mappers.ts                         mapEndpointStats → Endp
 |---|---|---|---|
 | `overview.summary` | `OverviewController.summary` / `OverviewService.summary` | `ApiRequestQueryRepository.summarizeTraffic`, `WebEventQueryRepository.summarizePageViews` / `countIdentifiedUsers` / `countActiveUsers` | current + previous window → `domain/compute-deltas.ts`; identified users over BOTH tables; active users = last `ACTIVE_USER_WINDOW_MS` |
 | `overview.apps` | `OverviewController.apps` / `OverviewService.apps` | `ApiRequestQueryRepository.summarizeTrafficByApp`, `WebEventQueryRepository.summarizeActivityByApp`, `AppRepository.list` | one row per registered app (silent apps = zeros), deltas via `mapAppTraffic`; [ADR 0006](decisions/0006-navigation-search-and-applications.md) |
+| `overview.breakdown` | `OverviewController.breakdown` / `OverviewService.breakdown` | `WebEventQueryRepository.countByDimension` (source=browser) / `ApiRequestQueryRepository.countByDimension` (source=server) | `BREAKDOWN_DIMENSION_VALUES` → frozen column whitelist; `share` = value ÷ all events in the window (`sum(count(*)) OVER ()`); page views (page_time for `time_reason`) |
+| `overview.devices` | `OverviewController.devices` / `OverviewService.devices` | `WebEventQueryRepository.countDeviceReturn` | distinct `anonymous_id` on page views; returning = also seen in `[from − RETURNING_DEVICE_LOOKBACK_MS, from)` (30 d, bounded) |
 | `overview.timeseries` | `OverviewController.timeseries` / `OverviewService.timeseries` | `ApiRequestQueryRepository.timeseries`, `WebEventQueryRepository.pageViewTimeseries` | `bucketExpr` (IST) in `apps/api/src/db/sql.ts`; gaps → `domain/timeseries-gaps.ts` |
 | `endpoints.list` | `EndpointController.list` / `EndpointService.list` | `listEndpointStats` | offset cursor (`encodeOffsetCursor`) |
 | `endpoints.detail` | `EndpointController.detail` / `EndpointService.detail` | `getEndpointDetail` | by stored `endpoint_id`; 404 when no rows; slowest samples role-masked; unique users + top callers (`listTopUsers`) |
@@ -210,7 +272,9 @@ apps/api/src/domain/mappers.ts                         mapEndpointStats → Endp
 | `errors.list` | `ErrorController.list` / `ErrorService.list` | `listFailures` | keyset `(occurred_at, event_id)` DESC; counts cap `MAX_COUNT_RANGE_MS`; optional `endpointId` / `userKey` / `errorCode` scope (`FailureFilter`) |
 
 Read-side rules (all in `apps/api/src/repositories/api-request-query.repository.ts`): every query is
-bounded by `occurred_at >= from AND < to` (partition pruning); failure filters emit the partial-index
+bounded by `occurred_at >= from AND < to` (partition pruning) and carries the environment predicate
+(`environmentConditions`; `TrafficFilter.environments` is required, absent `env` = `['prod']`, `all` = no
+predicate; Live is fixed to prod; ADR 0008); failure filters emit the partial-index
 predicate `status_code >= 400` LITERALLY (`FAILURE_PREDICATES`, never a parameter); the keyset cursor
 carries `occurred_at` as microsecond text (`keysetTimeExpr` in `apps/api/src/db/sql.ts`), because a JS
 `Date` keeps only milliseconds and would repeat rows at page boundaries. Both query repositories run on
@@ -273,7 +337,7 @@ Web half (page → View → hook → `api.*`; every View reads the global filter
 | `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution; `?metric=` (nuqs); "no location" notice when every row is unlocated (private network / proxy) |
 
 | `applications/` | `applications/ApplicationsView.tsx` | `useAppTraffic` → `overview.apps` | per-app table (`appTrafficColumns.tsx`); the app filter is hidden here |
-| `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file |
+| `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file; audience section `ApplicationAudienceSection.tsx` → `features/breakdowns/` (`BreakdownPanel` + `useBreakdown` → `overview.breakdown`, `DeviceReturnPanel` + `useDeviceReturn` → `overview.devices`) |
 
 Drill-down helpers: `components/TopUsersList.tsx` (any `UserUsageDto[]`), `components/charts/CountChart.tsx`
 (one count over time), `features/users/useUserListParams.ts` (`?sort=&dir=`), `?userKey=` and `?errorCode=`
@@ -285,6 +349,10 @@ Wave 3 UI helpers: `components/Breadcrumbs.tsx` (detail-page trails; `applicatio
 `DataTable` column `hint`), `components/CopyButton.tsx` (`CopyButton`, `CopyableText`), `components/MobileNav.tsx`
 (nav sheet below md), `components/LoadedRowsFilter.tsx`; tokens in `app/globals.css` (checked by
 `app/designTokens.test.ts`).
+
+Environment filter (ADR 0008): `features/filters/EnvironmentSelect.tsx` in the `AppShell` top bar →
+`useGlobalFilters` (`?env=`, absent = production) → every windowed `api.*` query; labels in
+`features/filters/environmentLabels.ts`; `NavItem.filters.environment` turns it off on Live, Integration and Apps.
 
 Navigation helpers: `components/CommandPalette.tsx` (Ctrl/⌘+K, mounted in `AppShell` TopBar),
 `components/AppChip.tsx` (app → its page), `UserLink` in `components/ActorCell.tsx` (verified user → profile),
@@ -337,6 +405,9 @@ both: apps/api/src/db/transaction.ts withAdvisoryXactLock(pool, ADVISORY_LOCKS.x
 apps/api/src/services/partition.service.ts   ensureAhead(client) / dropExpired(client)  — the work runs on the LOCKED client
 apps/api/src/repositories/partition.repository.ts   ensure / dropExpired → SELECT traffic.ensure_partitions(1, 2) /
                                       traffic.drop_expired_partitions(table, RAW_RETENTION_MONTHS)
+retention, then (same lock): apps/api/src/services/aggregate-retention.service.ts  AggregateRetentionService.deleteExpired(exec)
+  → apps/api/src/repositories/aggregate-retention.repository.ts  AggregateRetentionRepository.deleteExpired(cutoff, exec)
+    (DELETE … WHERE bucket_hour < now − AGGREGATE_RETENTION_DAYS on AGGREGATE_TABLES; logged as deletedAggregates)
 apps/api/migrations/0001_helpers_and_partitions.sql   the SECURITY DEFINER functions (nexus_app has no DDL of its own)
 apps/api/src/lifecycle/shutdown.ts    realtime.close → server.close → jobs.stop() → pools.end (10 s failsafe)
 ```

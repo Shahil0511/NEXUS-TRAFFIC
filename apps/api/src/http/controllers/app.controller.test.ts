@@ -7,6 +7,7 @@ import {
   expireKeyBodySchema,
   ROUTES,
   updateAppBodySchema,
+  updateSdkConfigBodySchema,
   type ApiKeyDto,
   type AppDto,
   type CreateAppBody,
@@ -14,6 +15,7 @@ import {
   type ExpireKeyBody,
   type KeyCreatedDto,
   type UpdateAppBody,
+  type UpdateSdkConfigBody,
 } from '@nexus/shared';
 import express, { type Express } from 'express';
 import request from 'supertest';
@@ -23,7 +25,7 @@ import { apiKeyRow, appRow, KEY_ID } from '../../../test/fixtures/app-rows';
 import { recordingLogger } from '../../../test/fixtures/recording-logger';
 import { mapApiKey, mapApp } from '../../domain/mappers';
 import type { Viewer } from '../../domain/viewer';
-import { NotFoundError } from '../../errors/app-error';
+import { ConflictError, NotFoundError } from '../../errors/app-error';
 import type { AppAdminService } from '../../services/app-admin.service';
 import type { AppQueryService } from '../../services/app-query.service';
 import { errorHandlerMiddleware } from '../middleware/error-handler.middleware';
@@ -43,7 +45,7 @@ class FakeQuery implements Pick<AppQueryService, 'list'> {
 
 class FakeAdmin implements Pick<
   AppAdminService,
-  'create' | 'update' | 'createKey' | 'expireKey' | 'revokeKey'
+  'create' | 'update' | 'createKey' | 'expireKey' | 'revokeKey' | 'updateSdkConfig'
 > {
   readonly calls: unknown[][] = [];
 
@@ -76,6 +78,15 @@ class FakeAdmin implements Pick<
   async revokeKey(slug: string, keyId: string, actor: Viewer): Promise<ApiKeyDto> {
     this.calls.push(['revokeKey', slug, keyId, actor]);
     return { ...KEY_DTO, revokedAt: '2026-10-01T10:00:00.000Z' };
+  }
+
+  async updateSdkConfig(slug: string, body: UpdateSdkConfigBody, actor: Viewer): Promise<AppDto> {
+    this.calls.push(['updateSdkConfig', slug, body, actor]);
+    if (body.expectedVersion !== 1) throw new ConflictError('SDK config changed');
+    return {
+      ...APP_DTO,
+      sdkConfig: { version: 2, disabledModules: body.disabledModules, updatedAt: null },
+    };
   }
 }
 
@@ -112,12 +123,19 @@ function buildApp(admin: FakeAdmin): Express {
     ctl.expireKey,
   );
   app.delete(ROUTES.apps.revokeKey.path, validateParams(appKeyParamsSchema), ctl.revokeKey);
+  app.patch(
+    ROUTES.apps.updateSdkConfig.path,
+    validateParams(appSlugParamsSchema),
+    validateBody(updateSdkConfigBodySchema),
+    ctl.updateSdkConfig,
+  );
   app.use(errorHandlerMiddleware(recordingLogger().logger));
   return app;
 }
 
 const appPath = (slug: string) => ROUTES.apps.update.path.replace(':slug', slug);
 const keysPath = (slug: string) => ROUTES.apps.createKey.path.replace(':slug', slug);
+const sdkConfigPath = (slug: string) => ROUTES.apps.updateSdkConfig.path.replace(':slug', slug);
 const keyPath = (slug: string, keyId: string) =>
   ROUTES.apps.expireKey.path.replace(':slug', slug).replace(':keyId', keyId);
 
@@ -198,5 +216,36 @@ describe('AppController', () => {
     const bad = await request(app).delete(keyPath(SLUG, 'not-a-uuid'));
     expect(bad.status).toBe(400);
     expect(bad.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
+  });
+
+  it('updateSdkConfig → 200 with the app; passes slug, validated body and the viewer', async () => {
+    const body = { expectedVersion: 1, disabledModules: ['retry_queue'] };
+    const res = await request(app).patch(sdkConfigPath(SLUG)).send(body);
+    expect(res.status).toBe(200);
+    expect(res.body.sdkConfig).toEqual({
+      version: 2,
+      disabledModules: ['retry_queue'],
+      updatedAt: null,
+    });
+    expect(admin.calls[0]).toEqual(['updateSdkConfig', SLUG, body, ADMIN]);
+  });
+
+  it('updateSdkConfig → 400 on an unknown or duplicated module (service not called)', async () => {
+    for (const disabledModules of [['everything'], ['custom', 'custom']]) {
+      const res = await request(app)
+        .patch(sdkConfigPath(SLUG))
+        .send({ expectedVersion: 1, disabledModules });
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
+    }
+    expect(admin.calls).toEqual([]);
+  });
+
+  it('updateSdkConfig → a stale version renders 409 CONFLICT', async () => {
+    const res = await request(app)
+      .patch(sdkConfigPath(SLUG))
+      .send({ expectedVersion: 7, disabledModules: [] });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe(ERROR_CODES.CONFLICT);
   });
 });

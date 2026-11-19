@@ -5,6 +5,7 @@
 import type {
   ApiKeyDto,
   AppDto,
+  SdkConfigDto,
   AppIntegrationHealthDto,
   IntegrationHealthDto,
   KeyCreatedDto,
@@ -12,7 +13,9 @@ import type {
 
 export const HEALTH_TO = '2026-10-01T10:00:00.000Z';
 
-export function appHealth(overrides: Partial<AppIntegrationHealthDto> = {}): AppIntegrationHealthDto {
+export function appHealth(
+  overrides: Partial<AppIntegrationHealthDto> = {},
+): AppIntegrationHealthDto {
   return {
     app: 'ebo-sales',
     displayName: 'EBO Sales',
@@ -24,6 +27,8 @@ export function appHealth(overrides: Partial<AppIntegrationHealthDto> = {}): App
       {
         source: 'server',
         sdk: '@nexus/express@1.0.0',
+        name: '@nexus/express',
+        version: '1.0.0',
         events: 4_200,
         lastSeenAt: '2026-10-01T09:58:00.000Z',
         medianClockSkewMs: 120,
@@ -32,6 +37,8 @@ export function appHealth(overrides: Partial<AppIntegrationHealthDto> = {}): App
       {
         source: 'browser',
         sdk: '@nexus/react@1.0.0',
+        name: '@nexus/react',
+        version: '1.0.0',
         events: 310,
         lastSeenAt: '2026-10-01T09:30:00.000Z',
         medianClockSkewMs: -1_500,
@@ -52,6 +59,41 @@ export function appHealth(overrides: Partial<AppIntegrationHealthDto> = {}): App
     ],
     privateIpRatio: 0.97,
     warnings: ['exposed_key', 'private_ips', 'rejected_events'],
+    identityCoverage: [
+      { source: 'server', events: 4_200, covered: 3_990, ratio: 0.95 },
+      { source: 'browser', events: 310, covered: 155, ratio: 0.5 },
+    ],
+    linkingCoverage: { linkable: 1_000, linked: 712, pageViewLinked: 640, ratio: 0.712 },
+    environments: [
+      { source: 'server', environment: 'prod', events: 4_150 },
+      { source: 'server', environment: 'staging', events: 50 },
+      { source: 'browser', environment: 'prod', events: 310 },
+    ],
+    releases: [
+      {
+        source: 'server',
+        events: 4_200,
+        withRelease: 4_200,
+        ratio: 1,
+        latestRelease: '2026.10.01-a1b2c3d',
+      },
+      { source: 'browser', events: 310, withRelease: 0, ratio: 0, latestRelease: null },
+    ],
+    piiDetections: [],
+    rejections: [
+      {
+        source: 'server',
+        sdk: '@nexus/express@1.0.0',
+        code: 'INVALID_EVENT',
+        schemaPath: 'events.*.durationMs',
+        rejected: 3,
+      },
+    ],
+    ssoCookieOutcomes: [
+      { outcome: 'ok', beaconOrigin: 'same_origin', beacons: 120 },
+      { outcome: 'no-cookie', beaconOrigin: 'cross_origin', beacons: 40 },
+    ],
+    level: 'connected',
     ...overrides,
   };
 }
@@ -75,6 +117,19 @@ export const INTEGRATION_HEALTH: IntegrationHealthDto = {
       exposedKeys: [],
       privateIpRatio: null,
       warnings: ['never_received'],
+      identityCoverage: [
+        { source: 'server', events: 0, covered: 0, ratio: null },
+        { source: 'browser', events: 0, covered: 0, ratio: null },
+      ],
+      linkingCoverage: { linkable: 0, linked: 0, pageViewLinked: 0, ratio: null },
+      environments: [],
+      releases: [
+        { source: 'server', events: 0, withRelease: 0, ratio: null, latestRelease: null },
+        { source: 'browser', events: 0, withRelease: 0, ratio: null, latestRelease: null },
+      ],
+      rejections: [],
+      ssoCookieOutcomes: [],
+      level: 'not_connected',
     }),
   ],
 };
@@ -99,6 +154,11 @@ export function apiKey(overrides: Partial<ApiKeyDto> = {}): ApiKeyDto {
 
 export const PUBLISHABLE_KEY = `nx_pk_${'P'.repeat(32)}`;
 
+/** Remote SDK config of an app (ADR 0009); version 1 = never changed. */
+export function sdkConfig(overrides: Partial<SdkConfigDto> = {}): SdkConfigDto {
+  return { version: 1, disabledModules: [], updatedAt: null, ...overrides };
+}
+
 export const ADMIN_APPS: AppDto[] = [
   {
     slug: 'ebo-sales',
@@ -107,6 +167,11 @@ export const ADMIN_APPS: AppDto[] = [
     allowedOrigins: ['https://nexus.libas.in'],
     isActive: true,
     browserIngestEnabled: true,
+    sdkConfig: sdkConfig({
+      version: 3,
+      disabledModules: ['auto_tools'],
+      updatedAt: '2026-09-20T00:00:00.000Z',
+    }),
     createdAt: '2026-09-01T00:00:00.000Z',
     keys: [
       apiKey(),

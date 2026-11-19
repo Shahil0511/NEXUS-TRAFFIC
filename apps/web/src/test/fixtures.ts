@@ -4,6 +4,8 @@
  */
 import type {
   AppTrafficDto,
+  BreakdownDto,
+  DeviceReturnDto,
   UserActivityDto,
   AppDto,
   CursorPage,
@@ -47,10 +49,33 @@ export const APPS: AppDto[] = [
     allowedOrigins: ['https://nexus.libas.in'],
     isActive: true,
     browserIngestEnabled: true,
+    sdkConfig: { version: 1, disabledModules: [], updatedAt: null },
     createdAt: '2026-09-01T00:00:00.000Z',
     keys: [],
   },
 ];
+
+/** ROUTES.overview.breakdown — browsers; one null value (not sent) and a free-text value. */
+export const BREAKDOWN: BreakdownDto = {
+  window: WINDOW,
+  source: 'browser',
+  dimension: 'browser',
+  total: 1_000,
+  items: [
+    { value: 'Chrome', events: 640, share: 0.64 },
+    { value: 'Safari', events: 250, share: 0.25 },
+    { value: null, events: 10, share: 0.01 },
+  ],
+};
+
+/** ROUTES.overview.devices */
+export const DEVICE_RETURN: DeviceReturnDto = {
+  window: WINDOW,
+  lookbackFrom: '2026-08-31T08:00:00.000Z',
+  devices: 200,
+  newDevices: 50,
+  returningDevices: 150,
+};
 
 export const OVERVIEW_SUMMARY: OverviewSummaryDto = {
   window: WINDOW,

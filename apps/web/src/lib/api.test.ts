@@ -77,6 +77,51 @@ describe('request()', () => {
     expect(received).toEqual({ kind: 'secret', label: 'prod' });
   });
 
+  it('PATCHes the remote SDK config of one app with the expected version', async () => {
+    let seen: { body: unknown; slug: unknown; method: string } | undefined;
+    server.use(
+      http.patch(routeUrl(ROUTES.apps.updateSdkConfig), async ({ request: req, params }) => {
+        seen = { body: await req.json(), slug: params.slug, method: req.method };
+        return HttpResponse.json({});
+      }),
+    );
+    await api.apps.updateSdkConfig('ebo-sales', {
+      expectedVersion: 3,
+      disabledModules: ['auto_tools'],
+    });
+    expect(seen).toEqual({
+      body: { expectedVersion: 3, disabledModules: ['auto_tools'] },
+      slug: 'ebo-sales',
+      method: 'PATCH',
+    });
+  });
+
+  it('sends the breakdown dimension, source and environment filter as query values', async () => {
+    let search: URLSearchParams | undefined;
+    server.use(
+      http.get(routeUrl(ROUTES.overview.breakdown), ({ request: req }) => {
+        search = new URL(req.url).searchParams;
+        return HttpResponse.json({});
+      }),
+    );
+    await api.overview.breakdown({
+      range: '7d',
+      app: 'ebo-sales',
+      env: 'staging',
+      source: 'browser',
+      dimension: 'client_tz',
+      limit: 8,
+    });
+    expect(Object.fromEntries(search!)).toEqual({
+      range: '7d',
+      app: 'ebo-sales',
+      env: 'staging',
+      source: 'browser',
+      dimension: 'client_tz',
+      limit: '8',
+    });
+  });
+
   it('throws a typed ApiError from the error envelope (code, message, requestId)', async () => {
     server.use(
       http.get(routeUrl(ROUTES.overview.summary), () =>

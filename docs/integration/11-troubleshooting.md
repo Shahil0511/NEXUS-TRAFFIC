@@ -22,7 +22,8 @@ Start with the HTTP status and the `error.code`; quote the `requestId` when you 
 | `403` | `SECRET_KEY_EXPOSED` | a secret key was sent to the browser endpoint | treat the key as leaked: get a new one, rotate, use the `nx_pk_` key in the browser |
 | `403` | `ORIGIN_NOT_ALLOWED` | the page's `Origin` is not registered for your app | ask us to add the origin (scheme + host + port) |
 | `403` | `APP_DISABLED` | the app is switched off on our side | contact us |
-| `403` | `BROWSER_INGEST_DISABLED` | browser tracking is off for this app | contact us |
+| `403` | `BROWSER_INGEST_DISABLED` | browser tracking is off for this app — the **kill switch** on the Apps page | contact us; the reference tracker stops itself until it is switched back on |
+| `429` | `RATE_LIMITED` on every key from one IP | more than {{RATE_IP_FAILURES_PER_MIN}} failed key checks per minute from that IP — only {{IP_FAILURE_CODES}} count | fix the key or register the page origin; a disabled or killed app never triggers this |
 
 **401 vs 403:** 401 = we do not recognise the key; 403 = we recognise it, but it is not allowed to do
 this.
@@ -40,6 +41,10 @@ this.
 | `rejected: PATH_OUTSIDE_APP` | browser path without your base path | include the base path (`usePathname()` omits it in Next.js) |
 | `warnings: FIELD_DROPPED` on `ip` | not an IP address (e.g. a hostname or `unknown`) | send only resolved addresses (chapter 6) |
 | `warnings: FIELD_DROPPED` on `userEmail` | not an email (user id, name, `null` as a string) | send the verified email or omit the field |
+| `warnings: FIELD_DROPPED` on `environment` | not one of {{ENVIRONMENT_VALUES}} (e.g. `production`, `Prod`) — stored as `{{DEFAULT_ENVIRONMENT}}` | use the exact values ([chapter 9](09-environments.md)) |
+| `warnings: FIELD_DROPPED` on `routeTemplate` (browser) | the template does not fit the path (other segment count, other fixed segments, outside the base path) | send the template of the page that is actually shown; omit it when unsure ([chapter 3](03-browser-contract.md)) |
+| `warnings: FIELD_DROPPED` on `client.tz` / `client.lang` | not an IANA zone (`Asia/Kolkata`) / language tag (`en-IN`) | send `Intl.DateTimeFormat().resolvedOptions().timeZone` and `navigator.language` |
+| `warnings: FIELD_REDACTED` | personal data in that field (email, phone, PAN, GSTIN, Aadhaar) was replaced or removed | stop putting it there ([chapter 5](05-pii.md)) |
 | every resend counts as new (`duplicates` always 0) | `eventId`/`occurredAt` regenerated per attempt | build the event once, resend the same object |
 
 ## The data looks wrong
@@ -54,6 +59,13 @@ this.
 | p95 latency very high | downloads/SSE counted as normal requests | mark them `kind: "stream"` (the snippets detect common cases) |
 | health checks dominate | not skipped | skip `/health`, `/ready`, static files |
 | nothing arrives, no errors in logs | `NEXUS_URL` empty in that environment (the client is a no-op) | set it; check the process environment, not just `.env` |
+| my data is on Integration but missing from the dashboard | it is stored under another environment (`staging` / `dev`, e.g. everything from `localhost`) and the dashboard shows production by default | pick the environment in the filter (`?env=all`); set `NEXUS_ENVIRONMENT` correctly ([chapter 9](09-environments.md)) |
+| page groups changed after updating the tracker | the tracker now sends `routeTemplate`, so pages are grouped by route (`/stores/:id`) instead of by guessed path | expected — older data keeps its old grouping |
+| browser events all anonymous | the SSO cookie does not reach the collector | look at "SSO cookie (browser identity)" on the Integration page: `no-cookie` → check the cookie's `Path=/`, `Domain` and `SameSite` ([chapter 3](03-browser-contract.md)); `expired` / `bad-signature` → the portal session or our secret |
+| API calls never linked to pages | the session headers are missing on your API calls | mount the early install; for another origin set `propagateHeadersTo` and allow the headers in that API's CORS ([chapter 8](08-recipes.md)) |
+| the browser blocks your own API calls after adding the tracker | `propagateHeadersTo` lists an origin whose CORS does not allow `X-Nexus-Session` / `X-Nexus-Page-View` | allow both headers there, or remove the origin from the list |
+| file downloads (or other calls that **redirect** to another host, e.g. a presigned S3 / Azure Blob URL) fail after upgrading the tracker | the same-origin call keeps the two headers across the redirect, so the browser sends a CORS preflight the storage host refuses | allow `X-Nexus-Session` / `X-Nexus-Page-View` in the storage CORS rules, or set `propagateHeaders: false` ([chapter 3](03-browser-contract.md)) |
+| a page shows `:phone` where an order number was | a 10-digit path segment starting 6–9 looks like a mobile number to the PII detector | expected for raw paths ([chapter 5](05-pii.md)); route grouping is unaffected |
 
 ## Integration page warnings
 
@@ -62,9 +74,10 @@ The dashboard's Integration page ([chapter 10](10-verify.md)) flags these per ap
 | Warning | Cause | Fix |
 |---|---|---|
 | **exposed secret key** | an `nx_sk_` key reached the browser endpoint (`403 SECRET_KEY_EXPOSED`) | treat it as leaked: new key → deploy → revoke the old one ([chapter 1](01-getting-keys.md)); use the `nx_pk_` key in the browser |
+| **personal data detected** | the PII detector redacted personal data in your events (the *Personal data* panel names source, field and kind) | remove it at the source ([chapter 5](05-pii.md)) |
 | **private IPs** (more than 90 % of server events) | `trustProxyHops` too low — you record your own gateway | count your proxies ([chapter 6](06-client-ip.md)) |
 | **clock skew** | the sending host's clock is off (skew = our receive time − your `sentAt`) | enable NTP; compare with `serverTime` from `/v1/ingest/verify` |
-| **rejected events** | events break the contract | the `rejected[].code` of our 202 responses names the field ([chapter 4](04-responses-retries.md)) |
+| **rejected events** | events break the contract | the *Rejection reasons* panel lists code, SDK and failing field; the `rejected[].code` of our 202 responses says the same ([chapter 4](04-responses-retries.md)) |
 | **rate limited** | more than the per-key request limit | batch events instead of one request per event |
 | **stale** | events used to arrive but stopped | a deploy dropped the middleware, `NEXUS_URL` or the key; check the `[nexus]` warnings in your logs |
 | **never** | no event has ever arrived | run the checks of [chapter 10](10-verify.md) from the host that sends |

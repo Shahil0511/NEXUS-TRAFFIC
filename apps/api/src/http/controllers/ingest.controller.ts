@@ -1,23 +1,29 @@
 /**
  * ROUTES.ingest.* — the public contract other teams call.
  * server: 202 IngestResultDto (`?dryRun=1` validates without writing). verify: 200 VerifyResponseDto.
- * browser: 202 IngestResultDto; the request's IP (TRUST_PROXY_HOPS), User-Agent and Cookie header
- * (SSO verification only — never stored or logged) go to the service as BrowserRequestInfo.
- * Both responses carry the X-Nexus-Contract header so SDKs can detect a contract mismatch.
+ * browser: 202 IngestResultDto; the request's IP (TRUST_PROXY_HOPS), User-Agent, Cookie header
+ * (SSO verification only — never stored or logged) and page ORIGIN (Origin, else the origin of the
+ * Referer — never its path) go to the service as BrowserRequestInfo; the envelope's batch-level
+ * fields (environment, release, client tz/lang/replay) as the context's claim / envelope info.
+ * config: 200 SdkRemoteConfig with Cache-Control: no-store (ADR 0009).
+ * The ingest responses carry the X-Nexus-Contract header so SDKs can detect a contract mismatch.
  */
 import {
   browserIngestEnvelopeSchema,
   INGEST_CONTRACT_VERSION,
   INGEST_HEADERS,
   serverIngestEnvelopeSchema,
+  type BrowserIngestEnvelope,
   type ServerIngestEnvelope,
 } from '@nexus/shared';
 import type { Request, RequestHandler, Response } from 'express';
 
 import { browserSdkOf } from '../../domain/browser-sdk';
-import type { BrowserIngestContext, BrowserRequestInfo, IngestContext } from '../../domain/viewer';
+import type { BrowserEnvelopeInfo, BrowserIngestContext, BrowserRequestInfo, IngestContext } from '../../domain/viewer';
 import type { Clock } from '../../lib/clock';
 import type { IngestService } from '../../services/ingest.service';
+import { CACHE_CONTROL_HEADER, NO_STORE_CACHE } from '../cache-control';
+import { requestOrigin } from '../middleware/origin-guard.middleware';
 import { requireIngest, validBody } from '../request-accessors';
 
 const DRY_RUN_FLAG = '1';
@@ -30,7 +36,21 @@ function sdkOf(req: Request, envelope?: ServerIngestEnvelope): string | null {
 }
 
 function browserRequestOf(req: Request): BrowserRequestInfo {
-  return { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null, cookieHeader: req.headers.cookie };
+  return {
+    ip: req.ip ?? null,
+    userAgent: req.get('user-agent') ?? null,
+    cookieHeader: req.headers.cookie,
+    origin: requestOrigin(req.get('origin'), req.get('referer')),
+  };
+}
+
+function browserEnvelopeOf(envelope: BrowserIngestEnvelope): BrowserEnvelopeInfo {
+  return {
+    release: envelope.release,
+    tz: envelope.client?.tz,
+    lang: envelope.client?.lang,
+    replay: envelope.client?.replay === true,
+  };
 }
 
 function setContractHeader(res: Response): void {
@@ -62,7 +82,9 @@ export class IngestController {
       key,
       receivedAt: this.clock.now(),
       sdk: browserSdkOf(envelope),
+      environmentClaim: envelope.environment ?? null,
       request: browserRequestOf(req),
+      envelope: browserEnvelopeOf(envelope),
     };
     const result = await this.ingest.ingestBrowserEvents(envelope, ctx);
     setContractHeader(res);
@@ -75,8 +97,20 @@ export class IngestController {
     res.status(200).json(result);
   };
 
+  /** @see ../../services/ingest.service.ts IngestService.config */
+  config: RequestHandler = (_req, res) => {
+    setContractHeader(res);
+    res.status(200).set(CACHE_CONTROL_HEADER, NO_STORE_CACHE).json(this.ingest.config(requireIngest(res).app));
+  };
+
   private contextOf(req: Request, res: Response, envelope?: ServerIngestEnvelope): IngestContext {
     const { app, key } = requireIngest(res);
-    return { app, key, receivedAt: this.clock.now(), sdk: sdkOf(req, envelope) };
+    return {
+      app,
+      key,
+      receivedAt: this.clock.now(),
+      sdk: sdkOf(req, envelope),
+      environmentClaim: envelope?.environment ?? null,
+    };
   }
 }

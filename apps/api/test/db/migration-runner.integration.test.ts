@@ -41,7 +41,16 @@ const ALL_MIGRATIONS = [
   '0004_api_requests',
   '0005_web_events',
   '0006_ingest_counters',
+  '0007_event_environment_and_client_context',
+  '0008_api_requests_page_view_index',
+  '0009_app_sdk_config',
+  '0010_ingest_rejections',
+  '0011_pii_detections',
+  '0012_sso_cookie_outcomes',
 ];
+
+/** The first version no real migration uses — temp test files take it, so they never collide. */
+const FREE_VERSION = String(ALL_MIGRATIONS.length + 1).padStart(4, '0');
 
 const separate = (password: string) => ({ mode: 'separate', password }) as const;
 
@@ -201,7 +210,7 @@ describe.skipIf(!RUN_DB_TESTS)('migration runner (db)', () => {
   it('detects checksum drift, exits non-zero and applies nothing', async () => {
     const dir = await copyMigrations();
     await appendFile(path.join(dir, '0003_admin_audit_log.sql'), '\n-- edited after apply\n');
-    await writeFile(path.join(dir, '0007_never_applied.sql'), 'CREATE TABLE traffic.should_not_exist (id int);\n');
+    await writeFile(path.join(dir, `${FREE_VERSION}_never_applied.sql`), 'CREATE TABLE traffic.should_not_exist (id int);\n');
 
     const result = await run(dir);
     expect(result.exitCode).toBe(MIGRATE_EXIT_CODES.drift);
@@ -227,21 +236,23 @@ describe.skipIf(!RUN_DB_TESTS)('migration runner (db)', () => {
     const dir = await copyMigrations(4);
     const result = await run(dir);
     expect(result.exitCode).toBe(MIGRATE_EXIT_CODES.ok);
-    expect(result.plan.unknownApplied.map((m) => m.version)).toEqual(['0005', '0006']);
+    expect(result.plan.unknownApplied.map((m) => m.version)).toEqual(
+      ALL_MIGRATIONS.slice(4).map((m) => m.slice(0, 4)),
+    );
     expect(result.plan.pending).toEqual([]);
 
     const guard = new SchemaGuard(db.appPool, dir);
     const status = await guard.check();
-    expect(status.unknownApplied).toEqual(['0005_web_events', '0006_ingest_counters']);
+    expect(status.unknownApplied).toEqual(ALL_MIGRATIONS.slice(4));
     await expect(guard.assertCurrent(quietLogger)).resolves.toBeUndefined();
   });
 
   it('dry mode lists pending files without applying them', async () => {
     const dir = await copyMigrations();
-    await writeFile(path.join(dir, '0007_extra.sql'), '-- intent: test\nCREATE TABLE traffic.dry_extra (id int);\n');
+    await writeFile(path.join(dir, `${FREE_VERSION}_extra.sql`), '-- intent: test\nCREATE TABLE traffic.dry_extra (id int);\n');
     const result = await run(dir, 'dry');
     expect(result.exitCode).toBe(MIGRATE_EXIT_CODES.ok);
-    expect(result.plan.pending.map((f) => f.fileName)).toEqual(['0007_extra.sql']);
+    expect(result.plan.pending.map((f) => f.fileName)).toEqual([`${FREE_VERSION}_extra.sql`]);
     expect(result.applied).toEqual([]);
     const { rows } = await db.ownerPool.query(`SELECT to_regclass('traffic.dry_extra') IS NULL AS absent`);
     expect(rows[0].absent).toBe(true);
@@ -250,7 +261,7 @@ describe.skipIf(!RUN_DB_TESTS)('migration runner (db)', () => {
   it('rolls back a failing migration completely and exits non-zero', async () => {
     const dir = await copyMigrations();
     await writeFile(
-      path.join(dir, '0007_broken.sql'),
+      path.join(dir, `${FREE_VERSION}_broken.sql`),
       '-- intent: test\nCREATE TABLE traffic.half_done (id int);\nSELECT 1 / 0;\n',
     );
     const result = await run(dir);
@@ -264,12 +275,12 @@ describe.skipIf(!RUN_DB_TESTS)('migration runner (db)', () => {
   it('applies a new migration and the default privileges cover its table for nexus_app', async () => {
     const dir = await copyMigrations();
     await writeFile(
-      path.join(dir, '0007_future_table.sql'),
+      path.join(dir, `${FREE_VERSION}_future_table.sql`),
       '-- intent: test\nCREATE TABLE traffic.future_table (id int GENERATED ALWAYS AS IDENTITY, note text);\n',
     );
     const result = await run(dir);
     expect(result.exitCode).toBe(MIGRATE_EXIT_CODES.ok);
-    expect(result.applied).toEqual(['0007_future_table']);
+    expect(result.applied).toEqual([`${FREE_VERSION}_future_table`]);
     await db.appPool.query(`INSERT INTO traffic.future_table (note) VALUES ('ok')`);
     const { rows } = await db.appPool.query(`SELECT count(*)::int AS n FROM traffic.future_table`);
     expect(rows[0].n).toBe(1);

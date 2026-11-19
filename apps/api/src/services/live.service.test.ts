@@ -158,7 +158,10 @@ describe('LiveService.snapshot', () => {
       activeUsers: 4,
     });
     expect(requests.calls).toEqual([
-      { filter: { from: new Date(FIRST_MINUTE), to: NOW, appId: undefined }, grain: 'minute' },
+      {
+        filter: { from: new Date(FIRST_MINUTE), to: NOW, appId: undefined, environments: ['prod'] },
+        grain: 'minute',
+      },
     ]);
   });
 
@@ -172,6 +175,7 @@ describe('LiveService.snapshot', () => {
       from: new Date(NOW.getTime() - ACTIVE_USER_WINDOW_MS),
       to: NOW,
       appId: KNOWN_APP_ID,
+      environments: ['prod'],
     });
   });
 
@@ -187,6 +191,14 @@ describe('LiveService.snapshot', () => {
       app: 'ebo-sales',
     });
     expect(asAdmin.recent[0]?.ip).toBe('203.0.113.7');
+  });
+
+  it('is PROD-ONLY (Live has no env filter; LiveFeed drops non-prod ticks — ADR 0008)', async () => {
+    const { service, requests, webEvents } = build();
+    await service.snapshot({}, PLAIN_VIEWER);
+    expect(requests.calls[0]?.filter.environments).toEqual(['prod']);
+    expect(webEvents.recentCalls[0]?.filter.environments).toEqual(['prod']);
+    expect(webEvents.activeFilters[0]?.environments).toEqual(['prod']);
   });
 
   it('404s an unknown app', async () => {
@@ -208,6 +220,7 @@ describe('LiveService.online', () => {
       to: NOW,
       appId: undefined,
       userKey: undefined,
+      environments: ['prod'],
     };
     expect(webEvents.onlineAppFilters).toEqual([expected]);
     expect(webEvents.onlineUserCalls).toEqual([{ filter: expected, limit: ONLINE_USERS_LIMIT }]);

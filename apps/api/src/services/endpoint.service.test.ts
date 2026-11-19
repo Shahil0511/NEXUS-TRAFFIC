@@ -50,6 +50,7 @@ describe('EndpointService.list', () => {
       from: new Date('2026-09-30T10:00:00Z'),
       to: NOW,
       appId: KNOWN_APP_ID,
+      environments: ['prod'],
     });
     expect(options).toEqual({ sort: 'p95', dir: 'asc', search: 'stores', limit: 3, offset: 0 });
   });

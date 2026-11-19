@@ -8,6 +8,7 @@
  */
 import {
   ERROR_CODES,
+  type Environment,
   resolveTimeWindow,
   TimeWindowError,
   type ResolvedTimeWindow,
@@ -47,18 +48,23 @@ export function toTimeWindowDto(window: ResolvedTimeWindow): TimeWindowDto {
   return { from: window.from.toISOString(), to: window.to.toISOString(), grain: window.grain };
 }
 
-/** Repository filter over the selected window. */
+/**
+ * Repository filter over the selected window. `environments` comes from `environmentsOf(query.env)`
+ * (domain/filters.ts); null = every environment.
+ */
 export function currentFilter(
   window: ResolvedTimeWindow,
   appId: string | undefined,
+  environments: readonly Environment[] | null,
 ): TrafficFilter {
-  return { from: window.from, to: window.to, appId };
+  return { from: window.from, to: window.to, appId, environments };
 }
 
-/** Repository filter over the previous equal-length window (KPI deltas). */
+/** Repository filter over the previous equal-length window (KPI deltas), same scope. */
 export function previousFilter(
   window: ResolvedTimeWindow,
   appId: string | undefined,
+  environments: readonly Environment[] | null,
 ): TrafficFilter {
-  return { from: window.previousFrom, to: window.previousTo, appId };
+  return { from: window.previousFrom, to: window.previousTo, appId, environments };
 }

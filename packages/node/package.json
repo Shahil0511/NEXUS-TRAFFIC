@@ -1,6 +1,6 @@
 {
   "name": "@nexus/node",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Data Nexus Traffic server SDK: batches server events and sends them to the Nexus ingest API with the contract's retry rules. Never throws into your app.",
   "license": "UNLICENSED",
   "type": "commonjs",

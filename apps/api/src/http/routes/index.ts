@@ -5,9 +5,11 @@
 import {
   appKeyParamsSchema,
   appSlugParamsSchema,
+  breakdownOverviewQuerySchema,
   browserIngestEnvelopeSchema,
   createAppBodySchema,
   createKeyBodySchema,
+  devicesOverviewQuerySchema,
   endpointDetailParamsSchema,
   endpointDetailQuerySchema,
   endpointListQuerySchema,
@@ -25,6 +27,7 @@ import {
   pageDetailQuerySchema,
   pageListQuerySchema,
   ROUTES,
+  sdkConfigRequestSchema,
   serverIngestEnvelopeSchema,
   sessionListQuerySchema,
   sessionParamsSchema,
@@ -34,6 +37,7 @@ import {
   toolUsageQuerySchema,
   topPathsQuerySchema,
   updateAppBodySchema,
+  updateSdkConfigBodySchema,
   userActivityQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
@@ -68,20 +72,24 @@ export function buildRouter(c: Container): Router {
     mw.ipFailureLimit,
     mw.serverIngestJsonBody,
     mw.serverKeyAuth,
+    mw.serverRejectionRecorder,
     mw.serverKeyRateLimit,
     validateBody(serverIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
     ctl.ingest.server,
   );
   // Browser: key in the BODY (sendBeacon, text/plain), so auth runs after parsing + envelope validation.
   // router.use (not r.options) keeps the route table to ROUTES leaves; it answers ONLY OPTIONS.
+  // browserIngestEarlyCors FIRST: pre-auth errors (kill codes) are readable by registered origins.
   r.use(ROUTES.ingest.browser.path, mw.browserIngestPreflight);
   r.post(
     ROUTES.ingest.browser.path,
+    mw.browserIngestEarlyCors,
     mw.browserIpFailureLimit,
     mw.beaconBody,
     mw.parseBeaconJson,
     validateBody(browserIngestEnvelopeSchema, ERROR_CODES.INVALID_ENVELOPE),
     mw.publishableKeyAuth,
+    mw.browserRejectionRecorder,
     mw.browserIngestCors,
     mw.originGuard,
     mw.browserKeyRateLimit,
@@ -89,6 +97,22 @@ export function buildRouter(c: Container): Router {
     ctl.ingest.browser,
   );
   r.get(ROUTES.ingest.verify.path, mw.ipFailureLimit, mw.anyKeyAuth, ctl.ingest.verify);
+  // SDK remote config (ADR 0009): the browser chain with its OWN rate limiter (no ingest counters),
+  // no session limiter and NO rejection recorder. text/plain body {key, client?} — no preflight.
+  r.use(ROUTES.ingest.config.path, mw.browserIngestPreflight);
+  r.post(
+    ROUTES.ingest.config.path,
+    mw.browserIngestEarlyCors,
+    mw.browserIpFailureLimit,
+    mw.beaconBody,
+    mw.parseBeaconJson,
+    validateBody(sdkConfigRequestSchema, ERROR_CODES.INVALID_ENVELOPE),
+    mw.publishableKeyAuth,
+    mw.browserIngestCors,
+    mw.originGuard,
+    mw.browserConfigRateLimit,
+    ctl.ingest.config,
+  );
 
   // ─── Dashboard: me ────────────────────────────────────────────────────────
   r.get(ROUTES.me.get.path, ...dashboard, ctl.me.get);
@@ -132,6 +156,14 @@ export function buildRouter(c: Container): Router {
     validateParams(appKeyParamsSchema),
     ctl.apps.revokeKey,
   );
+  r.patch(
+    ROUTES.apps.updateSdkConfig.path,
+    ...admin,
+    mw.dashboardJsonBody,
+    validateParams(appSlugParamsSchema),
+    validateBody(updateSdkConfigBodySchema),
+    ctl.apps.updateSdkConfig,
+  );
 
   // ─── Dashboard: overview ──────────────────────────────────────────────────
   r.get(
@@ -151,6 +183,18 @@ export function buildRouter(c: Container): Router {
     ...dashboard,
     validateQuery(overviewAppsQuerySchema),
     ctl.overview.apps,
+  );
+  r.get(
+    ROUTES.overview.breakdown.path,
+    ...dashboard,
+    validateQuery(breakdownOverviewQuerySchema),
+    ctl.overview.breakdown,
+  );
+  r.get(
+    ROUTES.overview.devices.path,
+    ...dashboard,
+    validateQuery(devicesOverviewQuerySchema),
+    ctl.overview.devices,
   );
 
   // ─── Dashboard: API routes ────────────────────────────────────────────────

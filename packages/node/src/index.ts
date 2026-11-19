@@ -16,6 +16,7 @@ export type {
   NexusClient,
   NexusClientOptions,
   NexusClientStats,
+  NexusEnvironment,
   NexusFetch,
   NexusLogger,
   NexusServerBatch,

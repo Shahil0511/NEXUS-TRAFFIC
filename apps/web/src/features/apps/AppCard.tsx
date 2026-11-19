@@ -1,7 +1,7 @@
 'use client';
 
 import type { ApiKeyDto, AppDto } from '@nexus/shared';
-import { ArrowUpRight, KeyRound, Pencil } from 'lucide-react';
+import { ArrowUpRight, KeyRound, Pencil, SlidersHorizontal } from 'lucide-react';
 import { useMemo, type ReactNode } from 'react';
 
 import { CopyableText, CopyButton } from '@/components/CopyButton';
@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EMPTY_VALUE, formatDateTime } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
 
-import { currentPublishableKey, envSnippet } from './appForm';
+import { currentPublishableKey, envSnippet, sdkConfigSummary } from './appForm';
 import type { KeyAction } from './KeyActionDialog';
 import { keyColumns } from './keyColumns';
 
@@ -23,6 +23,8 @@ export interface AppCardProps {
   /** `${PUBLIC_ORIGIN}/traffic` from the server env, or null when unknown. */
   nexusUrl: string | null;
   onEdit: (app: AppDto) => void;
+  /** Opens the remote SDK config (kill switch + module switches) of the app. */
+  onEditConfig: (app: AppDto) => void;
   onCreateKey: (app: AppDto) => void;
   onKeyAction: (action: KeyAction, app: AppDto, key: ApiKeyDto) => void;
 }
@@ -109,8 +111,19 @@ function IntegrationBlock({
   );
 }
 
-/** WHY: one registered app — settings, integration values and its keys with the admin actions. */
-export function AppCard({ app, nowMs, nexusUrl, onEdit, onCreateKey, onKeyAction }: AppCardProps) {
+/**
+ * WHY: one registered app — settings, remote SDK config, integration values and its keys with the
+ * admin actions.
+ */
+export function AppCard({
+  app,
+  nowMs,
+  nexusUrl,
+  onEdit,
+  onEditConfig,
+  onCreateKey,
+  onKeyAction,
+}: AppCardProps) {
   const headingId = `app-${app.slug}`;
   const columns = useMemo(
     () => keyColumns({ nowMs, onAction: (action, key) => onKeyAction(action, app, key) }),
@@ -126,13 +139,22 @@ export function AppCard({ app, nowMs, nexusUrl, onEdit, onCreateKey, onKeyAction
               {app.displayName}
             </CardTitle>
             {app.isActive ? null : <Badge variant="destructive">disabled</Badge>}
-            {app.browserIngestEnabled ? null : <Badge variant="muted">browser ingest off</Badge>}
+            {app.browserIngestEnabled ? null : <Badge variant="destructive">kill switch on</Badge>}
           </div>
           <p className="mt-0.5 flex min-w-0 text-2xs text-muted-foreground">
             <CopyableText value={app.slug} label="app slug" />
           </p>
         </div>
-        <div className="flex shrink-0 gap-1.5">
+        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onEditConfig(app)}
+            aria-label={`Edit remote config of ${app.displayName}`}
+          >
+            <SlidersHorizontal aria-hidden="true" />
+            Edit remote config
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -153,7 +175,7 @@ export function AppCard({ app, nowMs, nexusUrl, onEdit, onCreateKey, onKeyAction
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <dl className="grid gap-3 sm:grid-cols-3">
+        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Detail label="Base path">
             <span className="font-mono">{app.basePath ?? EMPTY_VALUE}</span>
           </Detail>
@@ -172,6 +194,14 @@ export function AppCard({ app, nowMs, nexusUrl, onEdit, onCreateKey, onKeyAction
           </Detail>
           <Detail label="Registered">
             <time dateTime={app.createdAt}>{formatDateTime(app.createdAt)}</time>
+          </Detail>
+          <Detail label="Remote config">
+            <span className={app.browserIngestEnabled ? undefined : 'text-destructive'}>
+              {sdkConfigSummary(app)}
+            </span>
+            <span className="block text-2xs text-muted-foreground">
+              version {app.sdkConfig.version}
+            </span>
           </Detail>
         </dl>
 

@@ -7,6 +7,11 @@ import { z } from 'zod';
 
 import { ERROR_CODE_PATTERN } from '../constants/ingest';
 import {
+  BREAKDOWN_DIMENSION_VALUES,
+  INGEST_SOURCE_VALUES,
+  SERVER_BREAKDOWN_DIMENSION_VALUES,
+} from '../constants/traffic';
+import {
   appSlugSchema,
   pageQueryShape,
   SORT_DIRECTION_VALUES,
@@ -23,6 +28,31 @@ export type OverviewTimeseriesQuery = z.infer<typeof overviewTimeseriesQuerySche
 /** The `app` value narrows the list to one row (the application detail page). */
 export const overviewAppsQuerySchema = timeWindowQuerySchema;
 export type OverviewAppsQuery = z.infer<typeof overviewAppsQuerySchema>;
+
+export const BREAKDOWN_LIMIT_DEFAULT = 10;
+export const BREAKDOWN_LIMIT_MAX = 50;
+
+/**
+ * Top values of ONE whitelisted dimension over the window. Server events (api_requests) only have
+ * the SERVER_BREAKDOWN_DIMENSION_VALUES columns, so other dimensions are refused for source=server.
+ */
+export const breakdownOverviewQuerySchema = timeWindowQuerySchema
+  .safeExtend({
+    source: z.enum(INGEST_SOURCE_VALUES).default('browser'),
+    dimension: z.enum(BREAKDOWN_DIMENSION_VALUES),
+    limit: z.coerce.number().int().min(1).max(BREAKDOWN_LIMIT_MAX).default(BREAKDOWN_LIMIT_DEFAULT),
+  })
+  .refine(
+    (q) =>
+      q.source === 'browser' ||
+      (SERVER_BREAKDOWN_DIMENSION_VALUES as readonly string[]).includes(q.dimension),
+    { message: 'dimension not available for source=server', path: ['dimension'] },
+  );
+export type BreakdownOverviewQuery = z.infer<typeof breakdownOverviewQuerySchema>;
+
+/** New vs returning devices over the window (lookback RETURNING_DEVICE_LOOKBACK_MS). */
+export const devicesOverviewQuerySchema = timeWindowQuerySchema;
+export type DevicesOverviewQuery = z.infer<typeof devicesOverviewQuerySchema>;
 
 // ─── endpoints ──────────────────────────────────────────────────────────────
 export const ENDPOINT_SORT_VALUES = ['calls', 'errorRate', 'p50', 'p95', 'p99', 'avg'] as const;

@@ -23,9 +23,13 @@ import {
   type AppCreatedDto,
   type AppDto,
   type AppTrafficDto,
+  type BreakdownDto,
+  type BreakdownOverviewQuery,
   type CreateAppBody,
   type CreateKeyBody,
   type CursorPage,
+  type DeviceReturnDto,
+  type DevicesOverviewQuery,
   type EndpointDetailDto,
   type EndpointDetailQuery,
   type EndpointListQuery,
@@ -68,6 +72,7 @@ import {
   type TopPathDto,
   type TopPathsQuery,
   type UpdateAppBody,
+  type UpdateSdkConfigBody,
   type UserActivityDto,
   type UserActivityQuery,
   type UserListQuery,
@@ -197,6 +202,13 @@ export const api = {
         ...o,
         params: { slug, keyId },
       }),
+    /** Remote SDK config (ADR 0009): the FULL disabled-module list + the version the admin saw. */
+    updateSdkConfig: (slug: string, body: UpdateSdkConfigBody, o?: CallOptions) =>
+      request<AppDto, typeof ROUTES.apps.updateSdkConfig>(ROUTES.apps.updateSdkConfig, undefined, {
+        ...o,
+        body,
+        params: { slug },
+      }),
   },
   overview: {
     summary: (q: OverviewSummaryQuery, o?: CallOptions) =>
@@ -205,6 +217,12 @@ export const api = {
       request<OverviewTimeseriesDto>(ROUTES.overview.timeseries, q, o),
     apps: (q: OverviewAppsQuery, o?: CallOptions) =>
       request<WindowedListDto<AppTrafficDto>>(ROUTES.overview.apps, q, o),
+    /** Top values of one dimension (browser, os, tz, release, environment …). */
+    breakdown: (q: BreakdownOverviewQuery, o?: CallOptions) =>
+      request<BreakdownDto>(ROUTES.overview.breakdown, q, o),
+    /** New vs returning devices over the window. */
+    devices: (q: DevicesOverviewQuery, o?: CallOptions) =>
+      request<DeviceReturnDto>(ROUTES.overview.devices, q, o),
   },
   endpoints: {
     list: (q: EndpointListQuery, o?: CallOptions) =>

@@ -49,6 +49,7 @@ Answer:
 |---|---|---|---|
 | `sentAt` | string (ISO-8601) | **yes** | When *this attempt* was sent. **Re-stamp it on every retry.** Used to measure your clock skew. |
 | `sdk` | object | no | `{ "name": "…", "version": "…" }` — name ≤ 64 chars, version ≤ 32. Helps us help you. |
+| `environment` | string | no | {{ENVIRONMENT_VALUES}} — which deployment sent the batch. Omitted → `{{DEFAULT_ENVIRONMENT}}`. Any other value is ignored with a `FIELD_DROPPED` warning (field `environment`) on the first stored event, never a `400`. See [chapter 9](09-environments.md). |
 | `events` | array | **yes** | 1 – {{SERVER_MAX_EVENTS}} events (below). |
 
 Each event is validated **on its own**: one bad event never fails the batch. Problems are listed in
@@ -91,6 +92,12 @@ Anything else you send is **ignored** — do not send messages, bodies, headers 
   `:num`, emails → `:email`, long hex/base64 tokens → `:token`. Short ids such as `/stores/1042` stay
   as they are and every store becomes its own "endpoint". Send `routeTemplate` and this never happens.
 - **Health checks, static assets and `OPTIONS` preflights** are noise — skip them (the snippets do).
+- **Environment** is decided per batch from the envelope claim only — we never guess it from an IP
+  address (a proxy can make production traffic look local). A process that serves staging must say
+  so: `NEXUS_ENVIRONMENT=staging`.
+- **Personal data** found in `path`, `routeTemplate`, `errorCode`, `requestId` or `release` is
+  redacted (paths) or the field is dropped (the others), with a `FIELD_REDACTED` warning — see
+  [chapter 5](05-pii.md). The event itself is always kept.
 
 ## Full example
 

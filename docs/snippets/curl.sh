@@ -6,6 +6,7 @@
 #
 # Steps: 1) verify the key  2) dry run (writes nothing)  3) send one event  4) resend the SAME event
 # → expect "accepted":1 on step 3 and "duplicates":1 on step 4 (eventId makes resends idempotent).
+# "environment" is prod | staging | dev (optional; omitted → prod) — use staging/dev off production.
 # Contract: https://nexus.libas.in/traffic/api/docs/
 set -euo pipefail
 
@@ -35,7 +36,8 @@ batch() {
   cat <<JSON
 {
   "sentAt": "$(now)",
-  "sdk": { "name": "curl", "version": "1.0.0" },
+  "sdk": { "name": "curl", "version": "1.1.0" },
+  "environment": "prod",
   "events": [
     {
       "eventId": "${EVENT_ID}",

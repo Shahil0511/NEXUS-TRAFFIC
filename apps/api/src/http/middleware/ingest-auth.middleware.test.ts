@@ -1,4 +1,10 @@
-import { browserIngestEnvelopeSchema, ERROR_CODES, INGEST_HEADERS, type KeyKind } from '@nexus/shared';
+import {
+  browserIngestEnvelopeSchema,
+  ERROR_CODES,
+  INGEST_HEADERS,
+  sdkConfigRequestSchema,
+  type KeyKind,
+} from '@nexus/shared';
 import express, { type RequestHandler } from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
@@ -73,6 +79,15 @@ describe('publishableKeyAuthMiddleware', () => {
         res.json({ keyId: requireIngest(res).key.id });
       },
     );
+    app.post(
+      '/config',
+      express.json(),
+      validateBody(sdkConfigRequestSchema, ERROR_CODES.INVALID_ENVELOPE),
+      publishableKeyAuthMiddleware(fake<AppKeyAuthenticator>({ authenticate })),
+      (_req, res) => {
+        res.json({ keyId: requireIngest(res).key.id });
+      },
+    );
     app.use(errorHandlerMiddleware(silentLogger()));
     return { app, authenticate };
   }
@@ -110,5 +125,21 @@ describe('publishableKeyAuthMiddleware', () => {
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe(ERROR_CODES.SECRET_KEY_EXPOSED);
     expect(JSON.stringify(res.body)).not.toContain('nx_sk_oops');
+  });
+
+  it('the config request body {key, client} authenticates with the same sdk label', async () => {
+    const { app, authenticate } = browserSetup(() => ({ app: BROWSER_APP, key: PUBLISHABLE }));
+    const res = await request(app)
+      .post('/config')
+      .send({ key: 'nx_pk_body', client: { sdk: '@nexus/react', version: '1.1.0' } });
+    expect(res.status).toBe(200);
+    expect(authenticate).toHaveBeenCalledWith('nx_pk_body', 'publishable', '@nexus/react@1.1.0');
+  });
+
+  it('the kill switch answers the config request with 403 BROWSER_INGEST_DISABLED', async () => {
+    const { app } = browserSetup(() => ({ app: appRow({ browser_ingest_enabled: false }), key: PUBLISHABLE }));
+    const res = await request(app).post('/config').send({ key: 'nx_pk_body' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe(ERROR_CODES.BROWSER_INGEST_DISABLED);
   });
 });

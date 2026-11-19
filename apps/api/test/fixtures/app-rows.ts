@@ -20,6 +20,9 @@ export function appRow(overrides: Partial<AppRow> = {}): AppRow {
     created_by: 'admin@libas.in',
     created_at: CREATED_AT,
     updated_at: CREATED_AT,
+    sdk_config_version: 1,
+    sdk_disabled_modules: [],
+    sdk_config_updated_at: null,
     ...overrides,
   };
 }

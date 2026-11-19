@@ -33,16 +33,27 @@ export interface PageFilters {
   app: boolean;
   /** The time range; off on pages without a window (Live, Integration, Apps). */
   range: boolean;
+  /**
+   * The environment filter (ADR 0008); on for every windowed analytics page, off where the page
+   * is production-only (Live) or deliberately unfiltered (Integration shows the mix; Apps).
+   */
+  environment: boolean;
   /** Longest window the page's queries accept (the API's range cap of its cost class). */
   maxRangeMs: number;
 }
 
 /** Count-only pages (users, tools, geography): the API accepts up to MAX_COUNT_RANGE_MS. */
-const COUNT_PAGE: PageFilters = { app: true, range: true, maxRangeMs: MAX_COUNT_RANGE_MS };
+const COUNT_PAGE: PageFilters = {
+  app: true,
+  range: true,
+  environment: true,
+  maxRangeMs: MAX_COUNT_RANGE_MS,
+};
 /** Pages with latency/time percentiles: the API caps them at MAX_PERCENTILE_RANGE_MS. */
 const PERCENTILE_PAGE: PageFilters = {
   app: true,
   range: true,
+  environment: true,
   maxRangeMs: MAX_PERCENTILE_RANGE_MS,
 };
 
@@ -93,7 +104,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         href: PAGES.live(),
         icon: Activity,
         description: 'Events as they happen',
-        filters: { ...COUNT_PAGE, range: false },
+        // Live is production-only by design (ADR 0008): no environment filter.
+        filters: { ...COUNT_PAGE, range: false, environment: false },
       },
     ],
   },
@@ -168,7 +180,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         href: PAGES.integration(),
         icon: PlugZap,
         description: 'Is every app sending data?',
-        filters: { ...COUNT_PAGE, app: false, range: false },
+        filters: { ...COUNT_PAGE, app: false, range: false, environment: false },
       },
       {
         id: 'apps',
@@ -176,7 +188,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         href: PAGES.apps(),
         icon: AppWindow,
         description: 'Register apps and manage keys',
-        filters: { ...COUNT_PAGE, app: false, range: false },
+        filters: { ...COUNT_PAGE, app: false, range: false, environment: false },
       },
     ],
   },

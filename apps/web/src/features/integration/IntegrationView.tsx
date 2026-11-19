@@ -5,7 +5,16 @@ import {
   type AppIntegrationHealthDto,
   type IntegrationHealthDto,
 } from '@nexus/shared';
-import { BookOpen, CheckCircle2, CircleDashed, Clock3, ListChecks, TriangleAlert } from 'lucide-react';
+import {
+  BadgeCheck,
+  BookOpen,
+  CheckCircle2,
+  CircleDashed,
+  Clock3,
+  ListChecks,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 
@@ -19,6 +28,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDateTime, formatInteger } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES } from '@/lib/pages';
 
 import { AppHealthCard } from './AppHealthCard';
@@ -31,6 +41,8 @@ export interface HealthTally {
   stale: number;
   never: number;
   needsAttention: number;
+  /** Apps at the `complete` integration level (computed by the API). */
+  complete: number;
 }
 
 /** Headline counts of the visible apps (an app with any warning needs attention). */
@@ -40,6 +52,7 @@ export function tallyHealth(apps: readonly AppIntegrationHealthDto[]): HealthTal
     stale: apps.filter((app) => app.status === 'stale').length,
     never: apps.filter((app) => app.status === 'never').length,
     needsAttention: apps.filter((app) => app.warnings.length > 0).length,
+    complete: apps.filter((app) => app.level === 'complete').length,
   };
 }
 
@@ -54,7 +67,10 @@ export function visibleApps(
 
 function TallyGrid({ tally, loading }: { tally: HealthTally | null; loading: boolean }) {
   return (
-    <section aria-label="Integration status" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <section
+      aria-label="Integration status"
+      className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5"
+    >
       <KpiCard
         label="Healthy"
         icon={CheckCircle2}
@@ -83,6 +99,14 @@ function TallyGrid({ tally, loading }: { tally: HealthTally | null; loading: boo
         value={formatInteger(tally?.needsAttention)}
         hint="apps with warnings"
       />
+      <KpiCard
+        label="Fully integrated"
+        info={metricInfo('integrationLevel')}
+        icon={BadgeCheck}
+        loading={loading}
+        value={formatInteger(tally?.complete)}
+        hint="linked, identified, tagged"
+      />
     </section>
   );
 }
@@ -102,12 +126,15 @@ function CardsSkeleton() {
 }
 
 /**
- * The Integration page: is each registered app actually sending? Per app — status, warnings with
- * the guide chapter that fixes them, last event and counters per source, SDK versions with clock
- * skew, the proxy-IP share and exposed keys. Teams land here from the guide's verify chapter.
+ * The Integration page: is each registered app actually sending, and how deep is the wiring? Per
+ * app — status and integration level, warnings with the guide chapter that fixes them, last event
+ * and counters per source, coverage, environments, releases, SDK versions with clock skew,
+ * redacted personal data, rejection reasons, SSO cookie outcomes, the proxy-IP share and exposed
+ * keys. NOT environment-filtered (it diagnoses staging wiring too). Teams land here from the
+ * guide's verify chapter; an app's page links here narrowed to that app (`?app=`).
  */
 export function IntegrationView() {
-  const { filters } = useGlobalFilters();
+  const { filters, setApp } = useGlobalFilters();
   const health = useIntegrationHealth();
   const apps = useMemo(() => visibleApps(health.data, filters.app), [health.data, filters.app]);
   const tally = health.data ? tallyHealth(apps) : null;
@@ -141,6 +168,16 @@ export function IntegrationView() {
       />
 
       <TallyGrid tally={tally} loading={health.isPending} />
+
+      {filters.app ? (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          Showing <span className="font-mono text-foreground">{filters.app}</span> only.
+          <Button variant="ghost" size="sm" onClick={() => setApp(null)}>
+            <X aria-hidden="true" />
+            Show all apps
+          </Button>
+        </p>
+      ) : null}
 
       <QueryState
         query={health}

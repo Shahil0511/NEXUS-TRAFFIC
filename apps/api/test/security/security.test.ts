@@ -106,12 +106,18 @@ afterAll(async () => {
 
 // ─── CSRF: X-Nexus-Dashboard on every admin mutation ────────────────────────
 
+/** A body the leaf's schema accepts, so each case is decided by the guards alone. */
+const VALID_BODIES: Partial<Record<keyof typeof ROUTES.apps, object>> = {
+  updateSdkConfig: { expectedVersion: 1, disabledModules: [] },
+};
+
 const ADMIN_MUTATIONS = Object.entries(ROUTES.apps)
   .filter(([, route]) => route.method !== 'GET')
   .map(([leaf, route]) => ({
     leaf,
     route,
     path: url(buildPath(route, { slug: 'ebo-sales', keyId: randomUUID() })),
+    body: VALID_BODIES[leaf as keyof typeof ROUTES.apps] ?? {},
   }));
 
 function send(method: string, path: string): request.Test {
@@ -131,16 +137,16 @@ function send(method: string, path: string): request.Test {
 }
 
 describe('security: admin mutations require the CSRF header and an admin', () => {
-  it('covers every non-GET apps.* leaf (create, update, createKey, expireKey, revokeKey)', () => {
+  it('covers every non-GET apps.* leaf (create, update, createKey, expireKey, revokeKey, updateSdkConfig)', () => {
     expect(ADMIN_MUTATIONS.map((m) => m.leaf).sort()).toEqual(
-      ['create', 'createKey', 'expireKey', 'revokeKey', 'update'].sort(),
+      ['create', 'createKey', 'expireKey', 'revokeKey', 'update', 'updateSdkConfig'].sort(),
     );
   });
 
   it.each(ADMIN_MUTATIONS)(
     '$leaf: admin cookie WITHOUT X-Nexus-Dashboard → 403 CSRF_HEADER_MISSING',
-    async ({ route, path }) => {
-      const res = await send(route.method, path).set('Cookie', cookieFor(ADMIN_EMAIL)).send({});
+    async ({ route, path, body }) => {
+      const res = await send(route.method, path).set('Cookie', cookieFor(ADMIN_EMAIL)).send(body);
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe(ERROR_CODES.CSRF_HEADER_MISSING);
     },
@@ -148,18 +154,18 @@ describe('security: admin mutations require the CSRF header and an admin', () =>
 
   it.each(ADMIN_MUTATIONS)(
     '$leaf: header but a NON-admin → 403 FORBIDDEN',
-    async ({ route, path }) => {
+    async ({ route, path, body }) => {
       const res = await send(route.method, path)
         .set('Cookie', cookieFor(VIEWER_EMAIL))
         .set(INGEST_HEADERS.dashboard, '1')
-        .send({});
+        .send(body);
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe(ERROR_CODES.FORBIDDEN);
     },
   );
 
-  it.each(ADMIN_MUTATIONS)('$leaf: no cookie → 401', async ({ route, path }) => {
-    const res = await send(route.method, path).set(INGEST_HEADERS.dashboard, '1').send({});
+  it.each(ADMIN_MUTATIONS)('$leaf: no cookie → 401', async ({ route, path, body }) => {
+    const res = await send(route.method, path).set(INGEST_HEADERS.dashboard, '1').send(body);
     expect(res.status).toBe(401);
   });
 });

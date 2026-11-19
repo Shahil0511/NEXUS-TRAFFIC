@@ -1,6 +1,7 @@
 import { ERROR_CODES, MAX_PERCENTILE_RANGE_MS } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
+import { environmentsOf } from '../domain/filters';
 import { BadRequestError, ValidationError } from '../errors/app-error';
 import {
   currentFilter,
@@ -47,20 +48,35 @@ describe('resolveQueryWindow', () => {
 
   it('builds current / previous filters and the echoed window', () => {
     const window = resolveQueryWindow({ range: '1h' }, NOW, MAX_PERCENTILE_RANGE_MS);
-    expect(currentFilter(window, 'app')).toEqual({
+    expect(currentFilter(window, 'app', ['prod'])).toEqual({
       from: new Date('2026-10-01T09:00:00Z'),
       to: NOW,
       appId: 'app',
+      environments: ['prod'],
     });
-    expect(previousFilter(window, undefined)).toEqual({
+    expect(previousFilter(window, undefined, null)).toEqual({
       from: new Date('2026-10-01T08:00:00Z'),
       to: new Date('2026-10-01T09:00:00Z'),
       appId: undefined,
+      environments: null,
     });
     expect(toTimeWindowDto(window)).toEqual({
       from: '2026-10-01T09:00:00.000Z',
       to: NOW.toISOString(),
       grain: 'minute',
     });
+  });
+});
+
+describe('environmentsOf', () => {
+  it('defaults an absent env to prod (history and old dashboards stay prod-only)', () => {
+    expect(environmentsOf(undefined)).toEqual(['prod']);
+    expect(environmentsOf('prod')).toEqual(['prod']);
+  });
+
+  it('narrows to one environment, and `all` disables the filter', () => {
+    expect(environmentsOf('staging')).toEqual(['staging']);
+    expect(environmentsOf('dev')).toEqual(['dev']);
+    expect(environmentsOf('all')).toBeNull();
   });
 });

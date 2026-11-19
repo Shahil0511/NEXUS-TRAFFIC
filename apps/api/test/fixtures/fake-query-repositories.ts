@@ -2,7 +2,7 @@
  * Hand-written fakes of the analytics read side (implements Pick<Repo, 'method'>), recording every
  * call so service tests can assert the filters a service derived from the query.
  */
-import type { Grain } from '@nexus/shared';
+import type { BreakdownDimension, Grain, ServerBreakdownDimension } from '@nexus/shared';
 
 import type {
   EndpointListOptions,
@@ -17,7 +17,9 @@ import type {
   ApiRequestRow,
   AppActivityRow,
   AppTrafficRow,
+  BreakdownRow,
   DailyUsersRow,
+  DeviceReturnRow,
   EndpointDetailRows,
   EndpointStatsRow,
   ErrorSummaryRows,
@@ -66,7 +68,8 @@ type RequestQueryMethods =
   | 'listFailures'
   | 'summarizeTrafficByApp'
   | 'listUserTopEndpoints'
-  | 'listPageApiCalls';
+  | 'listPageApiCalls'
+  | 'countByDimension';
 
 export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, RequestQueryMethods> {
   readonly calls: Array<{ method: RequestQueryMethods; args: unknown[] }> = [];
@@ -88,6 +91,7 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
   trafficByApp: AppTrafficRow[][] = [];
   userTopEndpoints: UserEndpointRow[] = [];
   pageApiCalls: PageApiCallRow[] = [];
+  breakdown: BreakdownRow[] = [];
 
   /** Returns `summaries` in call order (current window first, then previous). */
   async summarizeTraffic(filter: TrafficFilter): Promise<TrafficSummaryRow> {
@@ -152,6 +156,15 @@ export class FakeApiRequestQueries implements Pick<ApiRequestQueryRepository, Re
     return this.pageApiCalls;
   }
 
+  async countByDimension(
+    dimension: ServerBreakdownDimension,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<BreakdownRow[]> {
+    this.calls.push({ method: 'countByDimension', args: [dimension, filter, limit] });
+    return this.breakdown;
+  }
+
   argsOf(method: RequestQueryMethods): unknown[][] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args);
   }
@@ -177,7 +190,9 @@ type WebQueryMethods =
   | 'listPageStats'
   | 'listToolUsage'
   | 'listCountries'
-  | 'listCities';
+  | 'listCities'
+  | 'countByDimension'
+  | 'countDeviceReturn';
 
 export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQueryMethods> {
   readonly calls: Array<{ method: WebQueryMethods; args: unknown[] }> = [];
@@ -202,6 +217,22 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   toolUsage: ToolUsageRows = { tools: [], trend: [] };
   countries: GeoCountryRow[] = [];
   cities: GeoCityRow[] = [];
+  breakdown: BreakdownRow[] = [];
+  deviceReturn: DeviceReturnRow = { devices: 0, returning_devices: 0 };
+
+  async countByDimension(
+    dimension: BreakdownDimension,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<BreakdownRow[]> {
+    this.calls.push({ method: 'countByDimension', args: [dimension, filter, limit] });
+    return this.breakdown;
+  }
+
+  async countDeviceReturn(filter: TrafficFilter, lookbackFrom: Date): Promise<DeviceReturnRow> {
+    this.calls.push({ method: 'countDeviceReturn', args: [filter, lookbackFrom] });
+    return this.deviceReturn;
+  }
 
   async summarizePageViews(filter: TrafficFilter): Promise<number> {
     const index = this.calls.filter((c) => c.method === 'summarizePageViews').length;

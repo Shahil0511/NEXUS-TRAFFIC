@@ -17,9 +17,14 @@ export const GUIDE_URL = `${API_PREFIX}${ROUTES.docs.home.path}`;
 export const GUIDE_CHAPTERS = {
   overview: '00-overview',
   keys: '01-getting-keys',
+  serverContract: '02-server-contract',
+  browserContract: '03-browser-contract',
   responses: '04-responses-retries',
+  pii: '05-pii',
   clientIp: '06-client-ip',
+  userEmail: '07-user-email',
   recipes: '08-recipes',
+  environments: '09-environments',
   verify: '10-verify',
   troubleshooting: '11-troubleshooting',
 } as const;

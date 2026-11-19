@@ -2,19 +2,25 @@
  * Pure form logic of the Apps admin dialogs: form values ⇄ the SHARED request bodies.
  *
  * WHY: validation uses the very zod schemas the API validates with (`createAppBodySchema`,
- * `updateAppBodySchema`, `createKeyBodySchema` in @nexus/shared), so the form can never accept
- * what the API would refuse — and a schema change shows up here at compile time.
+ * `updateAppBodySchema`, `createKeyBodySchema`, `updateSdkConfigBodySchema` in @nexus/shared),
+ * so the form can never accept what the API would refuse — and a schema change shows up here at
+ * compile time.
  */
 import {
   createAppBodySchema,
   createKeyBodySchema,
+  INGEST_HEADERS,
+  SDK_CAPTURE_MODULE_VALUES,
   updateAppBodySchema,
+  updateSdkConfigBodySchema,
   type ApiKeyDto,
   type AppDto,
   type CreateAppBody,
   type CreateKeyBody,
   type KeyKind,
+  type SdkCaptureModule,
   type UpdateAppBody,
+  type UpdateSdkConfigBody,
 } from '@nexus/shared';
 import type { ZodError } from 'zod';
 
@@ -114,6 +120,93 @@ export function toUpdateAppBody(
   return result.success
     ? { ok: true, body: result.data }
     : { ok: false, errors: fieldErrorsOf(result.error.issues) };
+}
+
+// ─── Remote SDK config (ADR 0009) ───────────────────────────────────────────
+
+/** What each browser-SDK capture module does, in the admin's words (checklist + summary). */
+export const SDK_MODULE_COPY: Record<SdkCaptureModule, { label: string; hint: string }> = {
+  page_view: { label: 'Page views', hint: 'One event per page opened or in-app navigation.' },
+  page_time: { label: 'Time on page', hint: 'How long each page was visible.' },
+  auto_tools: {
+    label: 'Automatic tool clicks',
+    hint: 'Clicks on elements marked data-nexus-tool.',
+  },
+  manual_tools: { label: 'Manual tool events', hint: 'trackTool() calls in the app’s code.' },
+  custom: { label: 'Custom events', hint: 'trackEvent() calls with the app’s own event names.' },
+  header_propagation: {
+    label: 'Session headers on API calls',
+    hint: `Adds ${INGEST_HEADERS.session} / ${INGEST_HEADERS.pageView} so API calls link to pages.`,
+  },
+  retry_queue: {
+    label: 'Retry queue',
+    hint: 'Keeps undelivered batches in the browser and resends them on the next visit.',
+  },
+};
+
+export interface SdkConfigFormValues {
+  /** Engaged = browser capture OFF for every SDK version (`browserIngestEnabled: false`). */
+  killSwitch: boolean;
+  /** Modules that keep capturing (checked); the rest are disabled remotely. */
+  enabledModules: SdkCaptureModule[];
+}
+
+export type SdkConfigFormField = 'disabledModules' | 'expectedVersion';
+
+export function sdkConfigFormOf(app: AppDto): SdkConfigFormValues {
+  const disabled = new Set(app.sdkConfig.disabledModules);
+  return {
+    killSwitch: !app.browserIngestEnabled,
+    enabledModules: SDK_CAPTURE_MODULE_VALUES.filter((module) => !disabled.has(module)),
+  };
+}
+
+/** The unchecked modules, in SDK_CAPTURE_MODULE_VALUES order (a stable, comparable list). */
+export function disabledModulesOf(values: SdkConfigFormValues): SdkCaptureModule[] {
+  const enabled = new Set(values.enabledModules);
+  return SDK_CAPTURE_MODULE_VALUES.filter((module) => !enabled.has(module));
+}
+
+/**
+ * Body of ROUTES.apps.updateSdkConfig — the FULL disabled list plus the version the admin saw
+ * (`expectedVersion`; the API answers 409 CONFLICT when someone else changed it meanwhile).
+ * Nothing changed → null body.
+ */
+export function toUpdateSdkConfigBody(
+  values: SdkConfigFormValues,
+  app: AppDto,
+): FormResult<UpdateSdkConfigBody | null, SdkConfigFormField> {
+  const disabledModules = disabledModulesOf(values);
+  const current = SDK_CAPTURE_MODULE_VALUES.filter((module) =>
+    app.sdkConfig.disabledModules.includes(module),
+  );
+  if (disabledModules.join(',') === current.join(',')) return { ok: true, body: null };
+  const result = updateSdkConfigBodySchema.safeParse({
+    expectedVersion: app.sdkConfig.version,
+    disabledModules,
+  });
+  return result.success
+    ? { ok: true, body: result.data }
+    : { ok: false, errors: fieldErrorsOf(result.error.issues) };
+}
+
+/**
+ * The kill switch IS `browserIngestEnabled` (audited, enforced at ingest for every SDK version):
+ * an update body when it changed, else null.
+ */
+export function toKillSwitchBody(values: SdkConfigFormValues, app: AppDto): UpdateAppBody | null {
+  const browserIngestEnabled = !values.killSwitch;
+  return browserIngestEnabled === app.browserIngestEnabled ? null : { browserIngestEnabled };
+}
+
+/** One line for the Apps card: "All modules on", "2 off: …", or the engaged kill switch. */
+export function sdkConfigSummary(app: AppDto): string {
+  if (!app.browserIngestEnabled) return 'Kill switch on: browser capture stopped';
+  const off = SDK_CAPTURE_MODULE_VALUES.filter((module) =>
+    app.sdkConfig.disabledModules.includes(module),
+  );
+  if (off.length === 0) return 'All modules on';
+  return `${off.length} off: ${off.map((module) => SDK_MODULE_COPY[module].label).join(', ')}`;
 }
 
 // ─── Key form ───────────────────────────────────────────────────────────────

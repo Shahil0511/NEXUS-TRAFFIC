@@ -7,18 +7,25 @@
 import {
   APP_SLUG_PATTERN,
   AUDIT_ACTION_VALUES,
+  BEACON_ORIGIN_VALUES,
   BROWSER_EVENT_TYPE_VALUES,
+  ENVIRONMENT_VALUES,
   ERROR_CODE_PATTERN,
   HTTP_METHOD_VALUES,
   IDENTIFIED_SOURCE_VALUES,
   IDENTITY_SOURCE_VALUES,
   INGEST_LIMITS,
+  INGEST_REJECTION_CODE_VALUES,
   INGEST_SOURCE_VALUES,
   IP_CLASS_VALUES,
   KEY_KIND_VALUES,
   NAV_TYPE_VALUES,
   PAGE_TIME_REASON_VALUES,
+  PII_FIELD_VALUES,
+  PII_KIND_VALUES,
+  SDK_CAPTURE_MODULE_VALUES,
   SERVER_EVENT_KIND_VALUES,
+  SSO_COOKIE_OUTCOME_VALUES,
   TOOL_ACTION_VALUES,
   TOOL_NAME_PATTERN,
 } from '@nexus/shared';
@@ -48,6 +55,21 @@ const ENUM_CHECKS: EnumCheck[] = [
   { table: 'api_keys', constraint: 'api_keys_kind_check', values: KEY_KIND_VALUES },
   { table: 'admin_audit_log', constraint: 'admin_audit_log_action_check', values: AUDIT_ACTION_VALUES },
   { table: 'ingest_counters', constraint: 'ingest_counters_source_check', values: INGEST_SOURCE_VALUES },
+  // ─── Phase A (0007–0012) ───
+  { table: 'api_requests', constraint: 'api_requests_environment_check', values: ENVIRONMENT_VALUES },
+  { table: 'web_events', constraint: 'web_events_environment_check', values: ENVIRONMENT_VALUES },
+  { table: 'apps', constraint: 'apps_sdk_disabled_modules_check', values: SDK_CAPTURE_MODULE_VALUES },
+  { table: 'ingest_rejections', constraint: 'ingest_rejections_source_check', values: INGEST_SOURCE_VALUES },
+  { table: 'ingest_rejections', constraint: 'ingest_rejections_code_check', values: INGEST_REJECTION_CODE_VALUES },
+  { table: 'pii_detections', constraint: 'pii_detections_source_check', values: INGEST_SOURCE_VALUES },
+  { table: 'pii_detections', constraint: 'pii_detections_field_check', values: PII_FIELD_VALUES },
+  { table: 'pii_detections', constraint: 'pii_detections_kind_check', values: PII_KIND_VALUES },
+  { table: 'sso_cookie_outcomes', constraint: 'sso_cookie_outcomes_outcome_check', values: SSO_COOKIE_OUTCOME_VALUES },
+  {
+    table: 'sso_cookie_outcomes',
+    constraint: 'sso_cookie_outcomes_beacon_origin_check',
+    values: BEACON_ORIGIN_VALUES,
+  },
 ];
 
 /** Literal fragments that must appear in a constraint's definition. */
@@ -88,6 +110,19 @@ const TEXT_CHECKS: { table: string; constraint: string; contains: string }[] = [
     constraint: 'api_requests_claimed_email_check',
     contains: `<= ${INGEST_LIMITS.maxEmailLength}`,
   },
+  // ─── Phase A (0007, 0010) ───
+  { table: 'web_events', constraint: 'web_events_client_tz_check', contains: `<= ${INGEST_LIMITS.maxClientTzLength}` },
+  {
+    table: 'web_events',
+    constraint: 'web_events_client_lang_check',
+    contains: `<= ${INGEST_LIMITS.maxClientLangLength}`,
+  },
+  { table: 'web_events', constraint: 'web_events_release_check', contains: `<= ${INGEST_LIMITS.maxReleaseLength}` },
+  {
+    table: 'ingest_rejections',
+    constraint: 'ingest_rejections_schema_path_check',
+    contains: `<= ${INGEST_LIMITS.maxSchemaPathLength}`,
+  },
 ];
 
 /** `CHECK ((kind = ANY (ARRAY['http'::text, 'stream'::text])))` → ['http', 'stream']. */
@@ -126,6 +161,17 @@ describe.skipIf(!RUN_DB_TESTS)('schema parity with @nexus/shared (db)', () => {
 
   it.each(TEXT_CHECKS)('$constraint contains $contains', async ({ table, constraint, contains }) => {
     expect(await definitionOf(table, constraint)).toContain(contains);
+  });
+
+  it('the page_view_id index exists on api_requests and on its partitions (0008)', async () => {
+    const { rows } = await db.ownerPool.query<{ tablename: string }>(
+      `SELECT tablename FROM pg_catalog.pg_indexes
+        WHERE schemaname = 'traffic' AND indexdef LIKE '%(page_view_id)%'
+          AND (indexname = 'idx_api_requests_page_view_id' OR tablename LIKE 'api_requests_y%')`,
+    );
+    const tables = rows.map((r) => r.tablename);
+    expect(tables).toContain('api_requests');
+    expect(tables.some((t) => /^api_requests_y\d{4}m\d{2}$/.test(t))).toBe(true);
   });
 
   it('both event tables carry every ActorColumns column (domain/inserts.ts)', async () => {

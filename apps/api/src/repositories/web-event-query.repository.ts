@@ -6,7 +6,14 @@
  *
  * INVARIANTS (same as ApiRequestQueryRepository)
  * - Every query is bounded by `occurred_at >= from AND occurred_at < to` on EVERY table it reads
- *   (partition pruning) plus the optional app scope — see `windowConditions`.
+ *   (partition pruning) plus the optional app scope and the environment filter (ADR 0008) — see
+ *   `windowConditions`. Hand-built windows (page_time sums, the online current page, the page
+ *   views of listPageApiCalls) add `environmentConditions` themselves; a unit test checks that
+ *   every statement filters every table it reads.
+ * - The returning-device lookback is BOUNDED: [from − RETURNING_DEVICE_LOOKBACK_MS, from), with
+ *   the same app / environment scope (countDeviceReturn), so it prunes to ~1 extra month.
+ * - Breakdown GROUP BY columns come only from the `BREAKDOWN_COLUMNS` whitelist.
+ * - Coverage KPIs (identified) come ONLY from ./coverage-predicates.ts.
  * - A "user" is a VERIFIED identity only: `user_key IS NOT NULL` ⇔ identity_source ∈
  *   IDENTIFIED_SOURCE_VALUES (the CHECKs of 0004/0005 guarantee it). Claims never count.
  * - `page_time` rows carry visible-ms DELTAS; the time of a page view is Σ visible_ms of the
@@ -15,11 +22,13 @@
  * - Enum literals in SQL come from typed constants (BROWSER_EVENT_TYPE_VALUES, TimelineItemKind,
  *   IDENTITY_SOURCE_VALUES), never from input; values always go through `$n` placeholders.
  * @see ../../migrations/0005_web_events.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql (environment, client_tz, …)
  * @see ../../migrations/0004_api_requests.sql (users, timeline, sessions and geo also read api_requests)
  * @see ../../migrations/0002_apps_and_api_keys.sql (traffic.apps, joined for the public slug)
  */
 import {
   IDENTITY_SOURCE_VALUES,
+  type BreakdownDimension,
   type BrowserEventType,
   type Grain,
   type TimelineItemKind,
@@ -39,8 +48,10 @@ import type {
 import type {
   ActivityBucketRow,
   AppActivityRow,
+  BreakdownRow,
   BucketCountRow,
   DailyUsersRow,
+  DeviceReturnRow,
   GeoCityRow,
   GeoCountryRow,
   LiveEventRow,
@@ -67,7 +78,8 @@ import type {
   UserToolCountRow,
   UserUsageRow,
 } from '../domain/rows';
-import { FAILURE_PREDICATES } from './api-request-query.repository';
+import { environmentConditions, FAILURE_PREDICATES } from './api-request-query.repository';
+import { IDENTIFIED_SQL } from './coverage-predicates';
 
 // ─── SQL fragments (trusted, frozen) ────────────────────────────────────────
 
@@ -97,8 +109,8 @@ const SESSION_ORDER = 'w.seq, w.occurred_at, w.event_id';
 const IDENTITY_RANKS = `ARRAY[${IDENTITY_SOURCE_VALUES.map((v) => `'${v}'`).join(', ')}]::text[]`;
 
 /**
- * Window + app scope for a table aliased `alias` (endpoint scope does not apply to web events).
- * `alias` MUST be a trusted identifier.
+ * Window + app scope + environment filter for a table aliased `alias` (endpoint scope does not
+ * apply to web events). Works on both event tables. `alias` MUST be a trusted identifier.
  */
 function windowConditions(alias: string, filter: TrafficFilter, params: ParamList): string[] {
   const conditions = [
@@ -106,7 +118,33 @@ function windowConditions(alias: string, filter: TrafficFilter, params: ParamLis
     `${alias}.occurred_at < ${params.add(filter.to)}`,
   ];
   if (filter.appId !== undefined) conditions.push(`${alias}.app_id = ${params.add(filter.appId)}`);
+  conditions.push(...environmentConditions(alias, filter, params));
   return conditions;
+}
+
+/**
+ * Breakdown dimension → web_events column (GROUP BY). The ONLY breakdown sources (whitelist): the
+ * dimension never reaches SQL as text.
+ */
+export const BREAKDOWN_COLUMNS = Object.freeze({
+  browser: 'w.ua_browser',
+  os: 'w.ua_os',
+  device: 'w.ua_device',
+  referrer_host: 'w.referrer_host',
+  nav: 'w.nav',
+  time_reason: 'w.time_reason',
+  client_tz: 'w.client_tz',
+  client_lang: 'w.client_lang',
+  release: 'w.release',
+  environment: 'w.environment',
+} as const satisfies Record<BreakdownDimension, string>);
+
+/**
+ * The rows a dimension is counted over: page views (one per page shown), except `time_reason`,
+ * which only page_time rows carry (why the visible time was flushed).
+ */
+function breakdownEventType(dimension: BreakdownDimension): BrowserEventType {
+  return dimension === 'time_reason' ? PAGE_TIME : PAGE_VIEW;
 }
 
 /**
@@ -131,10 +169,13 @@ function pageViewVisibleMs(filter: TrafficFilter, params: ParamList): string {
   return `CASE WHEN ${IS_PAGE_VIEW} THEN (
       SELECT sum(pt.visible_ms)
         FROM traffic.web_events pt
-       WHERE pt.event_type = '${PAGE_TIME}'
-         AND pt.page_view_id = w.event_id
-         AND pt.occurred_at >= ${params.add(filter.from)}
-         AND pt.occurred_at < ${params.add(filter.to)}
+       WHERE ${[
+         `pt.event_type = '${PAGE_TIME}'`,
+         'pt.page_view_id = w.event_id',
+         `pt.occurred_at >= ${params.add(filter.from)}`,
+         `pt.occurred_at < ${params.add(filter.to)}`,
+         ...environmentConditions('pt', filter, params),
+       ].join(' AND ')}
     ) END`;
 }
 
@@ -438,7 +479,8 @@ export class WebEventQueryRepository {
 
   /**
    * Per app (apps without any event are absent): distinct verified users over BOTH tables, page
-   * views, browser sessions, tool uses and the newest event — the Applications page.
+   * views, browser sessions, tool uses and the newest event — the Applications page. `identified`
+   * uses IDENTIFIED_SQL over both sources COMBINED (Integration Health shows it per source).
    */
   async summarizeActivityByApp(
     filter: TrafficFilter,
@@ -455,7 +497,7 @@ export class WebEventQueryRepository {
               count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
               max(h.occurred_at) AS last_event_at,
               count(*) AS events,
-              count(*) FILTER (WHERE h.user_key IS NOT NULL) AS identified
+              count(*) FILTER (WHERE ${IDENTIFIED_SQL('h')}) AS identified
          FROM (
            SELECT r.app_id, r.user_key, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind
              FROM traffic.api_requests r
@@ -469,6 +511,76 @@ export class WebEventQueryRepository {
       params.values,
     );
     return rows;
+  }
+
+  /**
+   * Top values of one whitelisted dimension (BREAKDOWN_COLUMNS) over the window's page views
+   * (page_time rows for `time_reason`), busiest first (NULL = not sent, last on ties). `total` =
+   * all those rows via a window function over the groups, so it ignores the LIMIT.
+   */
+  async countByDimension(
+    dimension: BreakdownDimension,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<BreakdownRow[]> {
+    const column = BREAKDOWN_COLUMNS[dimension];
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      `w.event_type = '${breakdownEventType(dimension)}'`,
+    ];
+    const { rows } = await exec.query<BreakdownRow>(
+      `SELECT ${column} AS value, count(*) AS events, sum(count(*)) OVER ()::int8 AS total
+         FROM traffic.web_events w
+        WHERE ${where.join(' AND ')}
+        GROUP BY ${column}
+        ORDER BY events DESC, ${column} ASC NULLS LAST
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * Devices = distinct non-null anonymous_id on page views in the window; `returning_devices` =
+   * those also seen on a page view in [lookbackFrom, filter.from) with the same app / environment
+   * scope. BOTH windows are bounded (partition pruning); new devices = devices − returning.
+   */
+  async countDeviceReturn(
+    filter: TrafficFilter,
+    lookbackFrom: Date,
+    exec: Executor = this.db,
+  ): Promise<DeviceReturnRow> {
+    const params = new ParamList();
+    const lookback: TrafficFilter = { ...filter, from: lookbackFrom, to: filter.from };
+    const current = [
+      ...windowConditions('w', filter, params),
+      IS_PAGE_VIEW,
+      'w.anonymous_id IS NOT NULL',
+    ];
+    const before = [
+      ...windowConditions('p', lookback, params),
+      `p.event_type = '${PAGE_VIEW}'`,
+      'p.anonymous_id IS NOT NULL',
+    ];
+    const { rows } = await exec.query<DeviceReturnRow>(
+      `WITH current_devices AS (
+         SELECT DISTINCT w.anonymous_id
+           FROM traffic.web_events w
+          WHERE ${current.join(' AND ')}
+       ), seen_before AS (
+         SELECT DISTINCT p.anonymous_id
+           FROM traffic.web_events p
+          WHERE ${before.join(' AND ')}
+            AND p.anonymous_id IN (SELECT c.anonymous_id FROM current_devices c)
+       )
+       SELECT count(*) AS devices, count(s.anonymous_id) AS returning_devices
+         FROM current_devices c
+         LEFT JOIN seen_before s ON s.anonymous_id = c.anonymous_id`,
+      params.values,
+    );
+    return rows[0] ?? { devices: 0, returning_devices: 0 };
   }
 
   // ─── Live ─────────────────────────────────────────────────────────────────
@@ -566,6 +678,7 @@ export class WebEventQueryRepository {
     const pageWindow = [
       `p.occurred_at >= ${params.add(filter.from)}`,
       `p.occurred_at < ${params.add(filter.to)}`,
+      ...environmentConditions('p', filter, params),
     ];
     const { rows } = await exec.query<OnlineUserRow>(
       `WITH activity AS (

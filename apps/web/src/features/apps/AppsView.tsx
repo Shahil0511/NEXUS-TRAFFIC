@@ -18,6 +18,7 @@ import { AppCard } from './AppCard';
 import { AppFormDialog } from './AppFormDialog';
 import { CreateKeyDialog } from './CreateKeyDialog';
 import { KeyActionDialog, type KeyAction, type KeyActionTarget } from './KeyActionDialog';
+import { RemoteConfigDialog } from './RemoteConfigDialog';
 import { useAppList } from './useAppList';
 
 const TITLE = 'Apps';
@@ -50,6 +51,7 @@ function AppsAdmin({ nexusUrl }: AppsViewProps) {
   const apps = useAppList();
   const [form, setForm] = useState<FormState>({ open: false });
   const [keyApp, setKeyApp] = useState<AppDto | null>(null);
+  const [configApp, setConfigApp] = useState<AppDto | null>(null);
   const [keyAction, setKeyAction] = useState<KeyActionTarget | null>(null);
   // "Now" for key status = when the list was fetched (stable across re-renders, fresh on refetch).
   const nowMs = apps.dataUpdatedAt;
@@ -103,6 +105,7 @@ function AppsAdmin({ nexusUrl }: AppsViewProps) {
                 nowMs={nowMs}
                 nexusUrl={nexusUrl}
                 onEdit={onEdit}
+                onEditConfig={setConfigApp}
                 onCreateKey={setKeyApp}
                 onKeyAction={onKeyAction}
               />
@@ -128,13 +131,14 @@ function AppsAdmin({ nexusUrl }: AppsViewProps) {
         />
       ) : null}
       <KeyActionDialog target={keyAction} onClose={() => setKeyAction(null)} />
+      <RemoteConfigDialog app={configApp} onClose={() => setConfigApp(null)} />
     </div>
   );
 }
 
 /**
- * The Apps page (admins only): register and edit apps, issue keys (shown ONCE), expire (rotation
- * grace) and revoke them. Non-admins see the AdminOnly state; the API enforces the same rule
+ * The Apps page (admins only): register and edit apps, set their remote SDK config (kill switch +
+ * module switches), issue keys (shown ONCE), expire (rotation grace) and revoke them. Non-admins see the AdminOnly state; the API enforces the same rule
  * (requireAdmin on every ROUTES.apps mutation).
  */
 export function AppsView({ nexusUrl }: AppsViewProps) {

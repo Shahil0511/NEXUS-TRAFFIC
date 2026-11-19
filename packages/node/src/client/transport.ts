@@ -1,6 +1,6 @@
 import { INGEST_HEADERS } from '@nexus/shared/constants';
 
-import type { NexusFetch, NexusServerBatch, NexusServerEvent } from '../types';
+import type { NexusEnvironment, NexusFetch, NexusServerBatch, NexusServerEvent } from '../types';
 import type { RawIngestResponse } from './response-classifier';
 
 export interface TransportConfig {
@@ -9,6 +9,8 @@ export interface TransportConfig {
   sdk: { name: string; version: string };
   requestTimeoutMs: number;
   fetch: NexusFetch;
+  /** Sent in the envelope ONLY when set (ADR 0008). */
+  environment?: NexusEnvironment | undefined;
 }
 
 /**
@@ -51,6 +53,12 @@ export class IngestTransport {
   }
 
   private envelope(events: readonly NexusServerEvent[]): NexusServerBatch {
-    return { sentAt: new Date().toISOString(), sdk: this.config.sdk, events: [...events] };
+    const { environment, sdk } = this.config;
+    return {
+      sentAt: new Date().toISOString(),
+      sdk,
+      ...(environment === undefined ? {} : { environment }),
+      events: [...events],
+    };
   }
 }

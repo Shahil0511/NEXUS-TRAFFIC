@@ -18,6 +18,7 @@ import { z } from 'zod';
 
 import {
   ERROR_CODE_PATTERN,
+  INGEST_CONTRACT_VERSION,
   INGEST_LIMITS,
   PROP_KEY_PATTERN,
   TOOL_NAME_PATTERN,
@@ -27,6 +28,7 @@ import {
   HTTP_METHOD_VALUES,
   NAV_TYPE_VALUES,
   PAGE_TIME_REASON_VALUES,
+  SDK_CAPTURE_MODULE_VALUES,
   SERVER_EVENT_KIND_VALUES,
   TOOL_ACTION_VALUES,
 } from '../constants/traffic';
@@ -39,6 +41,12 @@ const isoDateTime = z.iso.datetime({ offset: true });
 
 /** Absolute path, basePath included. Query/fragment are stripped server-side. */
 const wirePath = z.string().min(1).max(INGEST_LIMITS.maxWirePathLength).startsWith('/');
+
+/**
+ * LENIENT on purpose (ADR 0008): a typo must never 400 a whole batch. The API checks the value
+ * against ENVIRONMENT_VALUES; an unknown one is stored as the default with a FIELD_DROPPED warning.
+ */
+const wireEnvironment = z.string().min(1).max(INGEST_LIMITS.maxEnvironmentWireLength);
 
 const routeTemplate = z.string().min(1).max(INGEST_LIMITS.maxRouteTemplateLength).startsWith('/');
 
@@ -93,6 +101,8 @@ export const serverIngestEnvelopeSchema = z.object({
   /** Stamped by the sender on EVERY send attempt (retries included). */
   sentAt: isoDateTime,
   sdk: sdkInfo.optional(),
+  /** `prod` | `staging` | `dev` (default prod). Unknown values are a warning, not an error. */
+  environment: wireEnvironment.optional(),
   events: z.array(z.unknown()).min(1).max(INGEST_LIMITS.server.maxEvents),
 });
 
@@ -169,12 +179,23 @@ export const browserIngestEnvelopeSchema = z.object({
   anonymousId: z.uuid().optional(),
   /** Client HINT only. A verified SSO cookie always wins. */
   user: z.object({ email: z.string().max(INGEST_LIMITS.maxEmailLength).optional() }).optional(),
+  /** `prod` | `staging` | `dev`. A loopback page Origin is always stored as `dev` (ADR 0008). */
+  environment: wireEnvironment.optional(),
+  /** The frontend build, e.g. `2026.11.18-a1b2c3d` (stored in web_events.release). */
+  release: z.string().min(1).max(INGEST_LIMITS.maxReleaseLength).optional(),
   client: z
     .object({
       sdk: z.string().max(INGEST_LIMITS.maxSdkNameLength),
       version: z.string().max(INGEST_LIMITS.maxSdkVersionLength),
-      tz: z.string().max(64).optional(),
-      lang: z.string().max(16).optional(),
+      /** IANA zone; values failing CLIENT_TZ_PATTERN are dropped with a warning. */
+      tz: z.string().max(INGEST_LIMITS.maxClientTzLength).optional(),
+      /** BCP-47 tag; values failing CLIENT_LANG_PATTERN are dropped with a warning. */
+      lang: z.string().max(INGEST_LIMITS.maxClientLangLength).optional(),
+      /**
+       * True ONLY when the batch is a cross-load replay of the SDK's retry queue (ADR 0012): the
+       * server then skips SSO-cookie identity (the cookie may belong to someone else by now).
+       */
+      replay: z.boolean().optional(),
     })
     .optional(),
   events: z.array(z.unknown()).min(1).max(INGEST_LIMITS.browser.maxEvents),
@@ -182,6 +203,36 @@ export const browserIngestEnvelopeSchema = z.object({
 
 export const browserIngestBatchSchema = browserIngestEnvelopeSchema.extend({
   events: z.array(browserEventSchema).min(1).max(INGEST_LIMITS.browser.maxEvents),
+});
+
+// ─── SDK remote config (browser SDK → POST ROUTES.ingest.config, ADR 0009) ──
+
+/**
+ * Body of the config request (sent as `text/plain`, a CORS simple request). The publishable key is
+ * in the BODY so it never reaches a URL or an access log; `client` labels the key's `last_sdk`.
+ */
+export const sdkConfigRequestSchema = z.object({
+  key: z.string().min(1).max(64),
+  client: z
+    .object({
+      sdk: z.string().min(1).max(INGEST_LIMITS.maxSdkNameLength),
+      version: z.string().min(1).max(INGEST_LIMITS.maxSdkVersionLength),
+    })
+    .optional(),
+});
+
+/**
+ * 200 body of the config request. Remote config can only DISABLE modules. `enabled` is reserved:
+ * a 200 always carries `true` — a disabled app/key answers 401/403 with an SDK_KILL_ERROR_CODES code.
+ */
+export const sdkRemoteConfigSchema = z.object({
+  contract: z.literal(INGEST_CONTRACT_VERSION),
+  /** Monotonic per app; the SDK ignores a config older than the one it has cached. */
+  version: z.int().min(1),
+  enabled: z.boolean(),
+  disabledModules: z.array(z.enum(SDK_CAPTURE_MODULE_VALUES)),
+  /** Re-fetch after this many ms. */
+  maxAgeMs: z.int().min(0),
 });
 
 // ─── Responses ──────────────────────────────────────────────────────────────
@@ -236,3 +287,6 @@ export type IngestRejection = z.infer<typeof ingestRejectionSchema>;
 export type IngestWarning = z.infer<typeof ingestWarningSchema>;
 export type IngestResultDto = z.infer<typeof ingestResultSchema>;
 export type VerifyResponseDto = z.infer<typeof verifyResponseSchema>;
+
+export type SdkConfigRequest = z.infer<typeof sdkConfigRequestSchema>;
+export type SdkRemoteConfig = z.infer<typeof sdkRemoteConfigSchema>;

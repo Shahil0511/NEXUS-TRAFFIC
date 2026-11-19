@@ -49,6 +49,7 @@ export function apiRequestInsert(overrides: Partial<ApiRequestInsert> = {}): Api
     requestId: null,
     sessionId: null,
     pageViewId: null,
+    environment: 'prod',
     ...overrides,
   };
 }
@@ -79,6 +80,10 @@ export function webEventInsert(overrides: Partial<WebEventInsert> = {}): WebEven
     value: null,
     name: null,
     props: null,
+    environment: 'prod',
+    clientTz: null,
+    clientLang: null,
+    release: null,
     ...overrides,
   };
 }

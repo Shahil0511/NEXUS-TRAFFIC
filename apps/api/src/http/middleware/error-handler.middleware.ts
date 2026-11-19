@@ -62,6 +62,8 @@ export function errorHandlerMiddleware(logger: Logger): ErrorRequestHandler {
       next(err);
       return;
     }
+    // BEFORE sending: `finish` listeners (ipFailureLimit, rejection recorder) read it.
+    res.locals.errorCode = body.error.code;
     for (const [name, value] of Object.entries(appError?.headers ?? {})) res.setHeader(name, value);
     res.status(status).json(body);
   };

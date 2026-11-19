@@ -28,6 +28,10 @@ import {
   INGEST_LIMITS,
   ingestResultSchema,
   ROUTES,
+  SDK_CONFIG_RESPONSE_EXAMPLE,
+  SDK_KILL_ERROR_CODES,
+  sdkConfigRequestSchema,
+  sdkRemoteConfigSchema,
   SERVER_BATCH_EXAMPLE,
   serverIngestBatchSchema,
   verifyResponseSchema,
@@ -123,6 +127,8 @@ function buildComponentSchemas(): Record<string, JsonObject> {
     BrowserIngestBatch: toComponentSchema(browserIngestBatchSchema),
     IngestResult: toComponentSchema(ingestResultSchema),
     VerifyResponse: toComponentSchema(verifyResponseSchema),
+    SdkConfigRequest: toComponentSchema(sdkConfigRequestSchema),
+    SdkRemoteConfig: toComponentSchema(sdkRemoteConfigSchema),
     ErrorEnvelope: toComponentSchema(apiErrorBodySchema),
   };
 }
@@ -236,6 +242,47 @@ function browserIngestOperation(): JsonObject {
   };
 }
 
+/** POST ROUTES.ingest.config — the browser SDK's remote config / kill switch (ADR 0009). */
+function sdkConfigOperation(): JsonObject {
+  const body = {
+    schema: ref('SdkConfigRequest'),
+    examples: {
+      tracker: {
+        value: { key: BROWSER_BATCH_EXAMPLE.key, client: { sdk: '@nexus/react', version: '1.1.0' } },
+      },
+    },
+  };
+  return {
+    tags: [TAG_INGEST],
+    operationId: 'getSdkConfig',
+    summary: 'Read the browser SDK remote config (publishable key IN THE BODY).',
+    description:
+      'Sent as `text/plain` (a CORS simple request: no preflight), so the key never appears in a ' +
+      'URL or an access log. Remote config can only DISABLE capture modules. A 401/403 whose code ' +
+      `is one of ${SDK_KILL_ERROR_CODES.join(', ')} is the kill switch: stop capturing for this ` +
+      'key. Network errors, 429 and 5xx keep the current state (capture fails open).',
+    security: [],
+    requestBody: { required: true, content: { 'text/plain': body, 'application/json': body } },
+    responses: {
+      '200': {
+        description: 'The current config. Sent with `Cache-Control: no-store`.',
+        content: {
+          'application/json': {
+            schema: ref('SdkRemoteConfig'),
+            examples: { oneModuleOff: { value: SDK_CONFIG_RESPONSE_EXAMPLE } },
+          },
+        },
+      },
+      '400': responseRef('BadRequest'),
+      '401': responseRef('Unauthorized'),
+      '403': responseRef('Forbidden'),
+      '413': responseRef('PayloadTooLarge'),
+      '415': responseRef('UnsupportedMediaType'),
+      '429': responseRef('RateLimited'),
+    },
+  };
+}
+
 function verifyOperation(): JsonObject {
   const E = ERROR_CODES;
   return {
@@ -287,6 +334,7 @@ function buildPaths(): OpenApiDocument['paths'] {
     [toOpenApiPath(ROUTES.ingest.server)]: { post: serverIngestOperation() },
     [toOpenApiPath(ROUTES.ingest.browser)]: { post: browserIngestOperation() },
     [toOpenApiPath(ROUTES.ingest.verify)]: { get: verifyOperation() },
+    [toOpenApiPath(ROUTES.ingest.config)]: { post: sdkConfigOperation() },
     [toOpenApiPath(ROUTES.docs.home)]: {
       get: docsOperation('getGuide', 'The integration guide (HTML).', 'text/html'),
     },

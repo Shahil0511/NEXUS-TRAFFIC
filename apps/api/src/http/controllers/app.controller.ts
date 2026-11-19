@@ -9,6 +9,7 @@ import {
   createKeyBodySchema,
   expireKeyBodySchema,
   updateAppBodySchema,
+  updateSdkConfigBodySchema,
 } from '@nexus/shared';
 import type { RequestHandler } from 'express';
 
@@ -64,5 +65,12 @@ export class AppController {
   revokeKey: RequestHandler = async (_req, res) => {
     const { slug, keyId } = validParams(res, appKeyParamsSchema);
     res.status(200).json(await this.appAdmin.revokeKey(slug, keyId, requireViewer(res)));
+  };
+
+  /** @see ../../services/app-admin.service.ts AppAdminService.updateSdkConfig */
+  updateSdkConfig: RequestHandler = async (_req, res) => {
+    const { slug } = validParams(res, appSlugParamsSchema);
+    const body = validBody(res, updateSdkConfigBodySchema);
+    res.status(200).json(await this.appAdmin.updateSdkConfig(slug, body, requireViewer(res)));
   };
 }

@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
+import {
+  ENVIRONMENT_FILTER_VALUES,
+  ENVIRONMENT_VALUES,
+  EVENT_CLOCK_POLICY,
+  BREAKDOWN_DIMENSION_VALUES,
+  SDK_DEFAULTS,
+  SERVER_BREAKDOWN_DIMENSION_VALUES,
+  SSO_COOKIE_OUTCOME_VALUES,
+  type SsoCookieOutcome,
+} from './constants';
 import { toEndpointId, uuidV5 } from './endpoint-id';
+import {
+  ERROR_CODES,
+  INGEST_EVENT_REJECT_CODES,
+  INGEST_REJECTION_CODE_VALUES,
+  IP_FAILURE_ERROR_CODES,
+  KEY_GUESS_ERROR_CODES,
+  SDK_KILL_ERROR_CODES,
+} from './errors';
 import { liveRoom, liveScopeKey, parseLiveRoom, SOCKET_EVENTS } from './events';
 import {
   buildPath,
@@ -9,7 +27,12 @@ import {
   PENDING_ROUTE_LEAVES,
   ROUTES,
 } from './routes';
-import { endpointListQuerySchema, timeWindowQuerySchema } from './schemas';
+import {
+  breakdownOverviewQuerySchema,
+  endpointListQuerySchema,
+  timeWindowQuerySchema,
+  updateSdkConfigBodySchema,
+} from './schemas';
 import { grainFor, resolveTimeWindow, TimeWindowError } from './time-window';
 
 describe('ROUTES', () => {
@@ -33,6 +56,14 @@ describe('ROUTES', () => {
 
   it('names only real groups as non-dashboard groups', () => {
     for (const group of NON_DASHBOARD_ROUTE_GROUPS) expect(ROUTES[group]).toBeDefined();
+  });
+
+  it('serves the Phase A leaves under /v1 with the agreed verbs', () => {
+    expect(ROUTES.ingest.config).toEqual({ method: 'POST', path: '/v1/ingest/config' });
+    expect(ROUTES.apps.updateSdkConfig).toEqual({ method: 'PATCH', path: '/v1/apps/:slug/sdk-config' });
+    expect(ROUTES.overview.breakdown).toEqual({ method: 'GET', path: '/v1/overview/breakdown' });
+    expect(ROUTES.overview.devices).toEqual({ method: 'GET', path: '/v1/overview/devices' });
+    expect(PENDING_ROUTE_LEAVES).toEqual([]);
   });
 
   it('buildPath encodes params and throws on missing ones', () => {
@@ -117,6 +148,75 @@ describe('time windows', () => {
     expect(timeWindowQuerySchema.safeParse({ range: 'custom' }).success).toBe(false);
     const q = endpointListQuerySchema.parse({ limit: '20', sort: 'p95' });
     expect(q).toMatchObject({ limit: 20, sort: 'p95', dir: 'desc', range: '24h' });
+  });
+});
+
+describe('Phase A contract invariants', () => {
+  it('the retry queue TTL keeps replays well inside the event clock window', () => {
+    expect(SDK_DEFAULTS.browser.retryQueueTtlMs).toBeLessThan(EVENT_CLOCK_POLICY.maxBackdateMs / 2);
+  });
+
+  it('the environment filter is the environments plus all', () => {
+    expect(ENVIRONMENT_FILTER_VALUES).toEqual([...ENVIRONMENT_VALUES, 'all']);
+  });
+
+  it('server breakdown dimensions are a subset of the browser ones', () => {
+    const all = new Set<string>(BREAKDOWN_DIMENSION_VALUES);
+    for (const d of SERVER_BREAKDOWN_DIMENSION_VALUES) expect(all.has(d), d).toBe(true);
+  });
+
+  it('kill and key-guess codes are real error codes; rejection codes extend the event codes', () => {
+    const codes = new Set<string>(Object.values(ERROR_CODES));
+    for (const c of [...SDK_KILL_ERROR_CODES, ...KEY_GUESS_ERROR_CODES]) expect(codes.has(c), c).toBe(true);
+    expect(INGEST_REJECTION_CODE_VALUES.slice(0, INGEST_EVENT_REJECT_CODES.length)).toEqual([
+      ...INGEST_EVENT_REJECT_CODES,
+    ]);
+    expect(new Set(INGEST_REJECTION_CODE_VALUES).size).toBe(INGEST_REJECTION_CODE_VALUES.length);
+  });
+
+  it('a policy denial is never counted as a key guess', () => {
+    for (const c of [ERROR_CODES.APP_DISABLED, ERROR_CODES.BROWSER_INGEST_DISABLED, ERROR_CODES.ORIGIN_NOT_ALLOWED]) {
+      expect((KEY_GUESS_ERROR_CODES as readonly string[]).includes(c), c).toBe(false);
+    }
+  });
+
+  it('the IP failure limiter counts key guesses + ORIGIN_NOT_ALLOWED, never a kill code', () => {
+    expect(IP_FAILURE_ERROR_CODES).toEqual([...KEY_GUESS_ERROR_CODES, ERROR_CODES.ORIGIN_NOT_ALLOWED]);
+    for (const c of [ERROR_CODES.APP_DISABLED, ERROR_CODES.BROWSER_INGEST_DISABLED, ERROR_CODES.SECRET_KEY_EXPOSED]) {
+      expect((IP_FAILURE_ERROR_CODES as readonly string[]).includes(c), c).toBe(false);
+    }
+  });
+
+  it('lists the SSO outcomes once each, starting with ok', () => {
+    const first: SsoCookieOutcome = 'ok';
+    expect(SSO_COOKIE_OUTCOME_VALUES[0]).toBe(first);
+    expect(new Set(SSO_COOKIE_OUTCOME_VALUES).size).toBe(SSO_COOKIE_OUTCOME_VALUES.length);
+  });
+
+  it('leaves env undefined when absent (the API applies prod) and rejects an unknown env', () => {
+    expect(timeWindowQuerySchema.parse({}).env).toBeUndefined();
+    expect(timeWindowQuerySchema.parse({ env: 'all' }).env).toBe('all');
+    expect(timeWindowQuerySchema.safeParse({ env: 'production' }).success).toBe(false);
+  });
+
+  it('breakdown queries default to browser and refuse browser-only dimensions for server', () => {
+    expect(breakdownOverviewQuerySchema.parse({ dimension: 'client_tz' })).toMatchObject({
+      source: 'browser',
+      limit: 10,
+      range: '24h',
+    });
+    expect(breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'release' }).success).toBe(true);
+    expect(breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'client_tz' }).success).toBe(false);
+    expect(breakdownOverviewQuerySchema.safeParse({ dimension: 'nope' }).success).toBe(false);
+  });
+
+  it('sdk config updates need a version and refuse duplicate or unknown modules', () => {
+    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: [] }).success).toBe(true);
+    expect(
+      updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: ['custom', 'custom'] }).success,
+    ).toBe(false);
+    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: ['nope'] }).success).toBe(false);
+    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 0, disabledModules: [] }).success).toBe(false);
   });
 });
 

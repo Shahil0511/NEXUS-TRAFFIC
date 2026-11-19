@@ -14,6 +14,7 @@ import {
   type WindowedListDto,
 } from '@nexus/shared';
 
+import { environmentsOf } from '../domain/filters';
 import { decodeOffsetCursor, encodeOffsetCursor } from '../db/sql';
 import { mapSessionEvent, mapSessionSummary, mapTopPath } from '../domain/mappers';
 import { pageFetchSize, toCursorPage } from '../domain/pagination';
@@ -41,7 +42,11 @@ export class JourneyService {
    */
   async sessions(query: SessionListQuery, viewer: Viewer): Promise<CursorPage<SessionSummaryDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
     const offset = decodeOffsetCursor(query.cursor);
 
     const rows = await this.webEvents.listSessions(filter, {
@@ -72,7 +77,11 @@ export class JourneyService {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
     const appId = await this.resolveApp(app);
 
-    const rows = await this.webEvents.getSession(appId, sessionId, currentFilter(window, appId));
+    const rows = await this.webEvents.getSession(
+      appId,
+      sessionId,
+      currentFilter(window, appId, environmentsOf(query.env)),
+    );
     if (!rows) throw new NotFoundError('No events for this session in the selected window');
     return {
       summary: mapSessionSummary(rows.summary, viewer),
@@ -87,7 +96,11 @@ export class JourneyService {
    */
   async topPaths(query: TopPathsQuery): Promise<WindowedListDto<TopPathDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.webEvents.listTopPaths(filter, query.limit);
     return { window: toTimeWindowDto(window), items: rows.map(mapTopPath) };

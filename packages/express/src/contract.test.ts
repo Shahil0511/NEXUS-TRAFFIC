@@ -7,9 +7,13 @@ import { serverIngestBatchSchema } from '@nexus/shared';
 import express5 from 'express';
 import express4 from 'express4';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createNexusClient, nexusMiddleware } from './index';
+import { createNexusClient, EXPRESS_SDK, nexusMiddleware } from './index';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ExpressFactory = (() => any) & { Router: () => any };
@@ -86,6 +90,23 @@ describe.each(FLAVOURS)('middleware events on %s', (_name, express) => {
       total += (body as { events: unknown[] }).events.length;
     }
     expect(total).toBe(5);
+    await client.shutdown(100);
+  });
+
+  it('environment (NEXUS_ENVIRONMENT) and release (NEXUS_RELEASE) from the env validate on the wire', async () => {
+    vi.stubEnv('NEXUS_ENVIRONMENT', 'staging');
+    vi.stubEnv('NEXUS_RELEASE', '2026.11.18-a1b2c3d');
+    const { bodies, fetch } = recordingFetch();
+    const client = createNexusClient({ url: 'http://localhost:4000', key: 'nx_sk_test_0123456789abcdef', fetch });
+    const app = express();
+    app.use(nexusMiddleware({ client }));
+    app.get('/x', (_req: unknown, res: { json: (b: unknown) => void }) => res.json({}));
+    await request(app).get('/x');
+    await client.flush();
+    const parsed = serverIngestBatchSchema.safeParse(bodies[0]);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(parsed.data).toMatchObject({ environment: 'staging', sdk: EXPRESS_SDK });
+    expect(parsed.data?.events[0]?.release).toBe('2026.11.18-a1b2c3d');
     await client.shutdown(100);
   });
 });

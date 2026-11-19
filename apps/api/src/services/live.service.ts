@@ -13,6 +13,7 @@ import {
   type LiveOnlineQuery,
   type LiveSnapshotDto,
   type LiveSnapshotQuery,
+  type Environment,
   type OnlineNowDto,
 } from '@nexus/shared';
 
@@ -28,6 +29,12 @@ import {
   type WebEventQueryRepository,
 } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+
+/**
+ * WHY: Live (snapshot, ticks, "who is online") is PROD-ONLY by design (ADR 0008) — the socket ticks
+ * (LiveFeed) drop non-prod rows, so the REST backfill must match them; the page has no env switch.
+ */
+const LIVE_ENVIRONMENTS: readonly Environment[] = ['prod'];
 
 /**
  * WHY: orchestrates the four snapshot queries (tick shaping lives in domain/live-ticks.ts) and the
@@ -52,11 +59,17 @@ export class LiveService {
     const now = this.clock.now();
     const appId = await this.appSlugs.resolve(query.app);
     const window = liveSnapshotWindow(now);
-    const filter: TrafficFilter = { from: window.from, to: window.to, appId };
+    const filter: TrafficFilter = {
+      from: window.from,
+      to: window.to,
+      appId,
+      environments: LIVE_ENVIRONMENTS,
+    };
     const activeWindow: TrafficFilter = {
       from: new Date(now.getTime() - ACTIVE_USER_WINDOW_MS),
       to: now,
       appId,
+      environments: LIVE_ENVIRONMENTS,
     };
 
     const [traffic, activity, recent, activeUsersNow] = await Promise.all([
@@ -92,6 +105,7 @@ export class LiveService {
       to: now,
       appId: await this.appSlugs.resolve(query.app),
       userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
+      environments: LIVE_ENVIRONMENTS,
     };
     const [apps, users] = await Promise.all([
       this.webEvents.countOnlineByApp(filter),

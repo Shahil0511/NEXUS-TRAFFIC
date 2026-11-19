@@ -5,8 +5,10 @@
  *
  * WHY: ingest knows nothing about sockets; this is the one seam between the write path and the
  * live dashboard. It never throws into ingest for a socket problem — IngestService also guards it.
+ * Live is PROD-ONLY by design (ADR 0008): staging and dev rows are stored but never streamed or
+ * counted here, so the live socket contract needs no environment dimension.
  */
-import type { BrowserEventType, LiveEventDto } from '@nexus/shared';
+import { DEFAULT_ENVIRONMENT, type BrowserEventType, type Environment, type LiveEventDto } from '@nexus/shared';
 
 import type { ApiRequestInsert, WebEventInsert } from '../domain/inserts';
 import { liveEventOfApiRequest, liveEventOfWebEvent } from '../domain/mappers';
@@ -33,6 +35,13 @@ export function liveActorOf(row: {
   return row.sessionId ? `session:${row.sessionId}` : null;
 }
 
+/** The only environment the live layer shows. */
+const LIVE_ENVIRONMENT: Environment = DEFAULT_ENVIRONMENT;
+
+function isLive(row: { environment: Environment }): boolean {
+  return row.environment === LIVE_ENVIRONMENT;
+}
+
 export class LiveFeed {
   constructor(
     private readonly window: LiveWindow,
@@ -43,7 +52,7 @@ export class LiveFeed {
   recordApiRequests(app: AppRow, rows: readonly ApiRequestInsert[]): void {
     const now = this.clock.now();
     const events: LiveEventDto[] = [];
-    for (const row of rows) {
+    for (const row of rows.filter(isLive)) {
       this.window.recordApiRequest(
         app.slug,
         {
@@ -62,7 +71,7 @@ export class LiveFeed {
   recordWebEvents(app: AppRow, rows: readonly WebEventInsert[]): void {
     const now = this.clock.now();
     const events: LiveEventDto[] = [];
-    for (const row of rows) {
+    for (const row of rows.filter(isLive)) {
       this.window.recordWebEvent(
         app.slug,
         { eventType: row.eventType, actor: liveActorOf(row) },

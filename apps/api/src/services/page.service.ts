@@ -12,6 +12,7 @@ import {
 } from '@nexus/shared';
 import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 
+import { environmentsOf } from '../domain/filters';
 import { asHttpMethod, mapPageStats, mapUserUsage } from '../domain/mappers';
 import { roundOrNull } from '../domain/numbers';
 import type { PageLinkRow } from '../domain/rows';
@@ -61,7 +62,11 @@ export class PageService {
    */
   async list(query: PageListQuery): Promise<WindowedListDto<PageStatsDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.webEvents.listPageStats(filter, query.limit);
     return { window: toTimeWindowDto(window), items: rows.map(mapPageStats) };
@@ -77,7 +82,11 @@ export class PageService {
    */
   async detail(app: string, pageId: string, query: PageDetailQuery): Promise<PageDetailDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(app),
+      environmentsOf(query.env),
+    );
 
     const templates = await this.webEvents.listPageTemplates(filter);
     const template = templates.find((candidate) => toPageId(app, candidate) === pageId);

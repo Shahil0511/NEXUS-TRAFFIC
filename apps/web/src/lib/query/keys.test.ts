@@ -29,6 +29,33 @@ describe('query keys (qk mirrors ROUTES)', () => {
     expect(qk.overview.summary({ range: '24h' })).toEqual(base);
   });
 
+  it('keys a breakdown by dimension, source and the environment filter', () => {
+    const base = qk.overview.breakdown({
+      range: '24h',
+      source: 'browser',
+      dimension: 'os',
+      limit: 10,
+    });
+    expect(base.slice(0, 2)).toEqual(['overview', 'breakdown']);
+    expect(
+      qk.overview.breakdown({ range: '24h', source: 'browser', dimension: 'browser', limit: 10 }),
+    ).not.toEqual(base);
+    expect(
+      qk.overview.breakdown({
+        range: '24h',
+        source: 'browser',
+        dimension: 'os',
+        limit: 10,
+        env: 'staging',
+      }),
+    ).not.toEqual(base);
+    expect(qk.overview.devices({ range: '7d', env: 'all' })).toEqual([
+      'overview',
+      'devices',
+      { range: '7d', env: 'all' },
+    ]);
+  });
+
   it('keys the endpoint detail by its opaque id', () => {
     expect(qk.endpoints.detail('id-1', { range: '24h' })).toEqual([
       'endpoints',

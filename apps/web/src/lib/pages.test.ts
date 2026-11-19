@@ -67,12 +67,19 @@ describe('pageFiltersFor', () => {
     expect(pageFiltersFor('/')).toEqual({
       app: true,
       range: true,
+      environment: true,
       maxRangeMs: MAX_PERCENTILE_RANGE_MS,
     });
     expect(pageFiltersFor('/users/abc').maxRangeMs).toBe(MAX_COUNT_RANGE_MS);
-    expect(pageFiltersFor('/live')).toMatchObject({ range: false });
-    expect(pageFiltersFor('/applications/ebo-sales')).toMatchObject({ app: false, range: true });
-    expect(pageFiltersFor('/apps')).toMatchObject({ app: false, range: false });
+    expect(pageFiltersFor('/live')).toMatchObject({ range: false, environment: false });
+    expect(pageFiltersFor('/applications/ebo-sales')).toMatchObject({
+      app: false,
+      range: true,
+      environment: true,
+    });
+    expect(pageFiltersFor('/apps')).toMatchObject({ app: false, range: false, environment: false });
+    expect(pageFiltersFor('/integration')).toMatchObject({ environment: false });
+    expect(pageFiltersFor('/geography').environment).toBe(true);
   });
 
   it('does not confuse /applications with /apps', () => {

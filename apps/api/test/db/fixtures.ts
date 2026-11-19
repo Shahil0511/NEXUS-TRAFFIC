@@ -45,6 +45,7 @@ export function apiRequestRow(appId: string, overrides: Partial<ApiRequestInsert
     uaOs: 'Windows 10',
     uaDevice: 'desktop',
     sdk: '@nexus/express@1.0.0',
+    environment: 'prod',
     ...overrides,
   };
 }

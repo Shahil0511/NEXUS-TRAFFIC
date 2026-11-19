@@ -11,6 +11,10 @@ reading order.
    `schemas/analytics.ts` (zod, `<leaf><Group>QuerySchema`), its DTO in `dto/<group>.ts` (`<Noun><Qualifier>Dto`).
 2. **SQL**: a method on the query repository of the table (`apps/api/src/repositories/api-request-query.repository.ts`
    or `web-event-query.repository.ts`), named after what it reads, `exec = this.db` last, `@see` the migration.
+   Every statement on `api_requests` / `web_events` must emit the environment predicate
+   (`environmentConditions`, from the required `TrafficFilter.environments`; ADR 0008) — add the new
+   method to the READS completeness table of the repository's test, which checks every `FROM` alias.
+   A coverage-style number (identified, linked) uses `apps/api/src/repositories/coverage-predicates.ts`.
    Row type in `apps/api/src/domain/rows.ts`, row → DTO in `apps/api/src/domain/mappers.ts` (IP admin-only).
 3. **Service**: method named like the leaf in `apps/api/src/services/<group>.service.ts`
    (`resolveTimeWindow` → `AppSlugResolver` → repository), `@see` the repository method.
@@ -30,7 +34,8 @@ reading order.
 1. `packages/shared/src/ingest/schemas.ts` (optional field only — contract v1 is additive), limits in
    `packages/shared/src/constants/`, update `examples.ts` if useful.
 2. A NEW migration adding the column + CHECK mirroring the zod limit (never edit an applied file).
-3. Enricher (`apps/api/src/enrichment/`) if it needs a transformation, then the ONLY wire → row mapper
+3. Enricher (`apps/api/src/enrichment/`) if it needs a transformation — a FREE-TEXT field must go
+   through `PiiScrubber` (and get a `PII_FIELD_VALUES` entry + CHECK row; ADR 0010) — then the ONLY wire → row mapper
    (`apps/api/src/domain/to-api-request-insert.ts` / `to-web-event-insert.ts`), then the `unnest` insert in
    `apps/api/src/repositories/api-request-ingest.repository.ts` / `web-event-ingest.repository.ts`.
 4. Docs: the guide chapter (`docs/integration/02-server-contract.md` / `03-browser-contract.md`),
@@ -41,8 +46,13 @@ reading order.
 
 1. `apps/api/migrations/NNNN_snake_case.sql`, next free number, a leading `-- intent` comment, schema-qualified
    names (`traffic.x`), indexes `idx_<table>_<cols>`. Additive only (rollback = older code on newer schema).
-2. New table for the api role: nothing to do in owner mode; in separate mode the default privileges in
-   `apps/api/src/db/migration-runner/grants.ts` cover it (add explicit grants there if it needs less than DML).
+2. New table for the api role: nothing to do in owner mode. In separate mode **add it to the explicit
+   DML list in `apps/api/src/db/migration-runner/grants.ts`** in the same change — the default
+   privileges do NOT cover a fresh database (there the migrations create every table before
+   `grants.ts` first runs `ALTER DEFAULT PRIVILEGES`; they only cover tables created on a later run).
+   `apps/api/test/db/privileges.integration.test.ts` writes to each table as `nexus_app`. A new hourly
+   aggregate table also goes into `AGGREGATE_TABLES` of
+   `apps/api/src/repositories/aggregate-retention.repository.ts` so the retention job prunes it.
 3. Update [07-data-model.md](07-data-model.md) and `apps/api/migrations/README.md`.
 4. `RUN_DB_TESTS=1 npm run test:db` (the runner, parity and privileges suites apply it on a fresh database).
 

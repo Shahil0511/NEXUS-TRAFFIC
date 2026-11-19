@@ -40,6 +40,7 @@ export type {
   NexusClient,
   NexusClientOptions,
   NexusClientStats,
+  NexusEnvironment,
   NexusFetch,
   NexusLogger,
   NexusServerBatch,
@@ -48,11 +49,12 @@ export type {
 } from '@nexus/node';
 
 /** WHY: the SDK identity this adapter reports in `X-Nexus-SDK`. */
-export const EXPRESS_SDK = { name: '@nexus/express', version: '1.0.0' } as const;
+export const EXPRESS_SDK = { name: '@nexus/express', version: '1.1.0' } as const;
 
 /**
- * createNexusClient from @nexus/node, reporting `@nexus/express@1.0.0` as the SDK.
- * Same options; returns a no-op client when url or key is missing. NEVER throws.
+ * createNexusClient from @nexus/node, reporting `@nexus/express@1.1.0` as the SDK.
+ * Same options (including `environment`, default NEXUS_ENVIRONMENT); returns a no-op client when url
+ * or key is missing. NEVER throws.
  */
 export function createNexusClient(options: NexusClientOptions = {}): NexusClient {
   return createNodeClient({ sdk: { ...EXPRESS_SDK }, ...options });

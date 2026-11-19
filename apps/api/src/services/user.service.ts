@@ -15,6 +15,7 @@ import {
   type UserTimelineQuery,
 } from '@nexus/shared';
 
+import { environmentsOf, type TrafficFilter } from '../domain/filters';
 import { decodeOffsetCursor, encodeKeysetCursor, encodeOffsetCursor } from '../db/sql';
 import { mapTimelineItem, mapUserProfile, mapUserSummary } from '../domain/mappers';
 import { fillCountGaps } from '../domain/timeseries-gaps';
@@ -74,7 +75,11 @@ export class UserService {
    */
   async profile(userKey: string, query: UserProfileQuery): Promise<UserProfileDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
     const key = userKeyFromHex(userKey);
 
     const [rows, topEndpoints] = await Promise.all([
@@ -94,11 +99,12 @@ export class UserService {
   async activity(query: UserActivityQuery): Promise<UserActivityDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
     const appId = await this.appSlugs.resolve(query.app);
-    const filter = currentFilter(window, appId);
-    const endingAt = (days: number) => ({
+    const filter = currentFilter(window, appId, environmentsOf(query.env));
+    const endingAt = (days: number): TrafficFilter => ({
       from: new Date(window.to.getTime() - days * DAY_MS),
       to: window.to,
       appId,
+      environments: filter.environments,
     });
 
     const [daily, wau, mau] = await Promise.all([
@@ -128,7 +134,11 @@ export class UserService {
     viewer: Viewer,
   ): Promise<CursorPage<TimelineItemDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
     const after = parseKeysetCursor(query.cursor);
 
     const rows = await this.webEvents.listUserTimeline(userKeyFromHex(userKey), filter, {
@@ -149,7 +159,11 @@ export class UserService {
     search: string | undefined,
   ): Promise<CursorPage<UserSummaryDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
     const offset = decodeOffsetCursor(query.cursor);
 
     const rows = await this.webEvents.listUsers(filter, {

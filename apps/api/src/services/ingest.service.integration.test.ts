@@ -34,6 +34,7 @@ import { GeoIpEnricher } from '../enrichment/geo-ip.enricher';
 import { IdentityResolver } from '../enrichment/identity.resolver';
 import { IpAnonymizer } from '../enrichment/ip.anonymizer';
 import { PathSanitizer } from '../enrichment/path.sanitizer';
+import { PiiScrubber } from '../enrichment/pii.scrubber';
 import { RouteNormalizer } from '../enrichment/route.normalizer';
 import { ServerEventEnricher } from '../enrichment/server-event.enricher';
 import { UserAgentParser } from '../enrichment/user-agent.parser';
@@ -46,7 +47,10 @@ import { ApiKeyRepository } from '../repositories/api-key.repository';
 import { ApiRequestIngestRepository } from '../repositories/api-request-ingest.repository';
 import { AppRepository } from '../repositories/app.repository';
 import { IngestCounterRepository } from '../repositories/ingest-counter.repository';
+import { IngestRejectionRepository } from '../repositories/ingest-rejection.repository';
 import { PartitionRepository } from '../repositories/partition.repository';
+import { PiiDetectionRepository } from '../repositories/pii-detection.repository';
+import { SsoCookieOutcomeRepository } from '../repositories/sso-cookie-outcome.repository';
 import { WebEventIngestRepository } from '../repositories/web-event-ingest.repository';
 import { IngestService } from './ingest.service';
 
@@ -111,20 +115,25 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
       poisonGeo(),
       new UserAgentParser(),
       new IdentityResolver(
-        fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'none' }) }),
+        fake<SsoIdentityReader>({ read: () => ({ ok: false, reason: 'no-cookie' }) }),
       ),
       new UserKeyHasher('u'.repeat(64)),
+      new PiiScrubber(),
     );
     service = new IngestService(
       new ApiRequestIngestRepository(db.appPool),
       new WebEventIngestRepository(db.appPool),
       new IngestCounterRepository(db.appPool),
+      new IngestRejectionRepository(db.appPool),
+      new PiiDetectionRepository(db.appPool),
+      new SsoCookieOutcomeRepository(db.appPool),
       new PartitionRepository(db.appPool),
       enricher,
       testBrowserEventEnricher(),
       new EventTimeGuard(),
       liveFeed,
       silentLogger(),
+      'https://nexus.libas.in',
     );
     auth = await authenticator.authenticate(secretKey, 'secret', '@nexus/express@1.0.0');
   });
@@ -137,11 +146,11 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
     return serverEvent({ occurredAt: new Date(Date.now() - 1000).toISOString(), ...overrides });
   }
 
-  function ingest(events: unknown[], dryRun = false) {
+  function ingest(events: unknown[], dryRun = false, environmentClaim: string | null = null) {
     const envelope: ServerIngestEnvelope = { sentAt: new Date().toISOString(), events };
     return service.ingestServerEvents(
       envelope,
-      { ...auth, receivedAt: clock.now(), sdk: 'it@1' },
+      { ...auth, receivedAt: clock.now(), sdk: 'it@1', environmentClaim },
       { dryRun },
     );
   }
@@ -225,6 +234,34 @@ describe.skipIf(!RUN_DB_TESTS)('server ingest pipeline (db)', () => {
     );
     expect(rows[0].n).toBe(4);
     expect(record.mock.calls.at(-1)?.[1]).toHaveLength(4);
+
+    // The reasons are stored as code + schema path / constraint name — never a message.
+    const reasons = await db.appPool.query(
+      `SELECT source, sdk, code, schema_path, rejected FROM traffic.ingest_rejections
+        WHERE app_id = $1 ORDER BY code, schema_path`,
+      [app.id],
+    );
+    expect(reasons.rows).toEqual(
+      expect.arrayContaining([
+        { source: 'server', sdk: 'it@1', code: 'DB_CONSTRAINT', schema_path: 'api_requests_geo_country_check', rejected: 1 },
+        { source: 'server', sdk: 'it@1', code: 'INVALID_EVENT', schema_path: expect.any(String), rejected: 1 },
+      ]),
+    );
+  });
+
+  it('stores the environment claim and counts PII detections', async () => {
+    const event = recentEvent({ path: '/ebo-sales/customers/9876543210' });
+    expect(await ingest([event], false, 'staging')).toMatchObject({ accepted: 1 });
+    const { rows } = await db.appPool.query(
+      `SELECT environment, path FROM traffic.api_requests WHERE event_id = $1`,
+      [event.eventId],
+    );
+    expect(rows[0]).toEqual({ environment: 'staging', path: '/ebo-sales/customers/:phone' });
+    const pii = await db.appPool.query(
+      `SELECT source, field, kind, detections FROM traffic.pii_detections WHERE app_id = $1`,
+      [app.id],
+    );
+    expect(pii.rows).toEqual([{ source: 'server', field: 'path', kind: 'phone', detections: 1 }]);
   });
 
   it('dryRun writes nothing', async () => {

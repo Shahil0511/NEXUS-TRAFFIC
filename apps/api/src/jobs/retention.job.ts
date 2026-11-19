@@ -1,5 +1,6 @@
 /**
- * Nightly at 02:30 Asia/Kolkata: drop monthly partitions older than RAW_RETENTION_MONTHS.
+ * Nightly at 02:30 Asia/Kolkata: drop monthly partitions older than RAW_RETENTION_MONTHS, then
+ * delete hourly diagnostic aggregates older than AGGREGATE_RETENTION_DAYS (same lock, same client).
  * The scheduler checks every 15 minutes and runs once per IST day inside the 02:30–03:30 window.
  *
  * Cross-replica safe: the drop runs on the transaction client holding ADVISORY_LOCKS.retention.
@@ -13,6 +14,7 @@ import { withAdvisoryXactLock } from '../db/transaction';
 import { ADVISORY_LOCKS } from '../db/schema';
 import type { Clock } from '../lib/clock';
 import type { Logger } from '../lib/logger';
+import type { AggregateRetentionService } from '../services/aggregate-retention.service';
 import type { PartitionService } from '../services/partition.service';
 
 export const RETENTION_CHECK_INTERVAL_MS = 15 * 60 * 1000;
@@ -33,6 +35,7 @@ export class RetentionJob {
   constructor(
     private readonly db: Pool,
     private readonly partitions: PartitionService,
+    private readonly aggregates: AggregateRetentionService,
     private readonly clock: Clock,
     private readonly logger: Logger,
   ) {}
@@ -42,14 +45,19 @@ export class RetentionJob {
     const { day, minutes } = istParts(this.clock.now());
     const inWindow = minutes >= WINDOW_START_MINUTES && minutes < WINDOW_END_MINUTES;
     if (!inWindow || this.lastRunDay === day) return;
-    const outcome = await withAdvisoryXactLock(this.db, ADVISORY_LOCKS.retention, (client) =>
-      this.partitions.dropExpired(client),
-    );
+    const outcome = await withAdvisoryXactLock(this.db, ADVISORY_LOCKS.retention, async (client) => {
+      const dropped = await this.partitions.dropExpired(client);
+      const deletedAggregates = await this.aggregates.deleteExpired(client);
+      return { dropped, deletedAggregates };
+    });
     this.lastRunDay = day;
     if (!outcome.ran) {
       this.logger.info('retention run skipped: another replica holds the lock');
       return;
     }
-    this.logger.info('retention run', { droppedCount: outcome.result.length });
+    this.logger.info('retention run', {
+      droppedCount: outcome.result.dropped.length,
+      deletedAggregates: outcome.result.deletedAggregates,
+    });
   }
 }

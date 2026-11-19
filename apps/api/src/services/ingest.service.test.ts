@@ -19,7 +19,13 @@ import {
   testBrowserEventEnricher,
   testServerEventEnricher,
 } from '../../test/ingest-fixtures';
-import type { ApiRequestInsert, IngestCounterIncrement, WebEventInsert } from '../domain/inserts';
+import type {
+  ApiRequestInsert,
+  IngestCounterIncrement,
+  IngestRejectionIncrement,
+  PiiDetectionIncrement,
+  WebEventInsert,
+} from '../domain/inserts';
 import type { AppRow } from '../domain/rows';
 import { EventTimeGuard } from '../enrichment/event-time.guard';
 import { AppError } from '../errors/app-error';
@@ -27,7 +33,10 @@ import type { Logger } from '../lib/logger';
 import type { LiveFeed } from '../live/live-feed';
 import type { ApiRequestIngestRepository } from '../repositories/api-request-ingest.repository';
 import type { IngestCounterRepository } from '../repositories/ingest-counter.repository';
+import type { IngestRejectionRepository } from '../repositories/ingest-rejection.repository';
 import type { PartitionRepository } from '../repositories/partition.repository';
+import type { PiiDetectionRepository } from '../repositories/pii-detection.repository';
+import type { SsoCookieOutcomeRepository } from '../repositories/sso-cookie-outcome.repository';
 import type { WebEventIngestRepository } from '../repositories/web-event-ingest.repository';
 import { IngestService } from './ingest.service';
 import { PARTITION_MONTHS_AHEAD, PARTITION_MONTHS_BACK } from './partition.service';
@@ -71,6 +80,53 @@ class FakeCounters implements Pick<IngestCounterRepository, 'increment'> {
   increment = vi.fn(async (_increment: IngestCounterIncrement, _at: Date) => undefined);
 }
 
+class FakeRejections implements Pick<IngestRejectionRepository, 'increment'> {
+  increment = vi.fn(async (_appId: string, _rows: readonly IngestRejectionIncrement[], _at: Date) => undefined);
+}
+
+class FakePiiDetections implements Pick<PiiDetectionRepository, 'increment'> {
+  increment = vi.fn(
+    async (_appId: string, _source: string, _rows: readonly PiiDetectionIncrement[], _at: Date) => undefined,
+  );
+}
+
+class FakeSsoOutcomes implements Pick<SsoCookieOutcomeRepository, 'increment'> {
+  increment = vi.fn(async (_appId: string, _outcome: string, _beaconOrigin: string, _at: Date) => undefined);
+}
+
+const PUBLIC_ORIGIN = 'https://nexus.libas.in';
+
+interface ServiceDeps {
+  apiRequests?: Partial<ApiRequestIngestRepository>;
+  webEvents?: Partial<WebEventIngestRepository>;
+  counters?: Partial<IngestCounterRepository>;
+  rejections?: Partial<IngestRejectionRepository>;
+  piiDetections?: Partial<PiiDetectionRepository>;
+  ssoOutcomes?: Partial<SsoCookieOutcomeRepository>;
+  partitions?: Partial<PartitionRepository>;
+  liveFeed?: Partial<LiveFeed>;
+  logger?: Logger;
+}
+
+/** The service with real enrichers and the given fakes (every repository defaults to a no-op). */
+function buildService(deps: ServiceDeps = {}): IngestService {
+  return new IngestService(
+    fake<ApiRequestIngestRepository>(deps.apiRequests ?? {}),
+    fake<WebEventIngestRepository>(deps.webEvents ?? {}),
+    fake<IngestCounterRepository>(deps.counters ?? new FakeCounters()),
+    fake<IngestRejectionRepository>(deps.rejections ?? new FakeRejections()),
+    fake<PiiDetectionRepository>(deps.piiDetections ?? new FakePiiDetections()),
+    fake<SsoCookieOutcomeRepository>(deps.ssoOutcomes ?? new FakeSsoOutcomes()),
+    fake<PartitionRepository>(deps.partitions ?? new FakePartitions()),
+    testServerEventEnricher(),
+    testBrowserEventEnricher(),
+    new EventTimeGuard(),
+    fake<LiveFeed>(deps.liveFeed ?? {}),
+    deps.logger ?? silentLogger(),
+    PUBLIC_ORIGIN,
+  );
+}
+
 class FakePartitions implements Pick<PartitionRepository, 'ensure'> {
   ensure = vi.fn(async (_back: number, _ahead: number) => ['api_requests_2026_10']);
 }
@@ -88,6 +144,8 @@ describe('IngestService.ingestServerEvents', () => {
   let counters: FakeCounters;
   let partitions: FakePartitions;
   let liveFeed: FakeLiveFeed;
+  let rejections: FakeRejections;
+  let piiDetections: FakePiiDetections;
   let logger: Logger;
   let service: IngestService;
   const ctx = ingestContext();
@@ -98,17 +156,9 @@ describe('IngestService.ingestServerEvents', () => {
     partitions = new FakePartitions();
     liveFeed = new FakeLiveFeed();
     logger = silentLogger();
-    service = new IngestService(
-      fake<ApiRequestIngestRepository>(apiRequests),
-      fake<WebEventIngestRepository>({}),
-      fake<IngestCounterRepository>(counters),
-      fake<PartitionRepository>(partitions),
-      testServerEventEnricher(),
-      testBrowserEventEnricher(),
-      new EventTimeGuard(),
-      fake<LiveFeed>(liveFeed),
-      logger,
-    );
+    rejections = new FakeRejections();
+    piiDetections = new FakePiiDetections();
+    service = buildService({ apiRequests, counters, rejections, piiDetections, partitions, liveFeed, logger });
   });
 
   const ingest = (events: unknown[], dryRun = false) =>
@@ -323,17 +373,7 @@ describe('IngestService.ingestServerEvents', () => {
 
 describe('IngestService.verify', () => {
   it('describes the authenticated app and key', () => {
-    const service = new IngestService(
-      fake<ApiRequestIngestRepository>({}),
-      fake<WebEventIngestRepository>({}),
-      fake<IngestCounterRepository>({}),
-      fake<PartitionRepository>({}),
-      testServerEventEnricher(),
-      testBrowserEventEnricher(),
-      new EventTimeGuard(),
-      fake<LiveFeed>({}),
-      silentLogger(),
-    );
+    const service = buildService();
     expect(service.verify(ingestContext())).toEqual({
       app: { slug: 'ebo-sales', displayName: 'EBO Sales' },
       keyKind: 'secret',
@@ -390,6 +430,9 @@ describe('IngestService.ingestBrowserEvents', () => {
   let counters: FakeCounters;
   let partitions: FakePartitions;
   let liveFeed: FakeBrowserLiveFeed;
+  let rejections: FakeRejections;
+  let piiDetections: FakePiiDetections;
+  let ssoOutcomes: FakeSsoOutcomes;
   let service: IngestService;
   const ctx = browserIngestContext();
 
@@ -398,17 +441,10 @@ describe('IngestService.ingestBrowserEvents', () => {
     counters = new FakeCounters();
     partitions = new FakePartitions();
     liveFeed = new FakeBrowserLiveFeed();
-    service = new IngestService(
-      fake<ApiRequestIngestRepository>({}),
-      fake<WebEventIngestRepository>(webEvents),
-      fake<IngestCounterRepository>(counters),
-      fake<PartitionRepository>(partitions),
-      testServerEventEnricher(),
-      testBrowserEventEnricher(),
-      new EventTimeGuard(),
-      fake<LiveFeed>(liveFeed),
-      silentLogger(),
-    );
+    rejections = new FakeRejections();
+    piiDetections = new FakePiiDetections();
+    ssoOutcomes = new FakeSsoOutcomes();
+    service = buildService({ webEvents, counters, rejections, piiDetections, ssoOutcomes, partitions, liveFeed });
   });
 
   const ingest = (events: unknown[], extra: Partial<BrowserIngestEnvelope> = {}) =>
@@ -532,5 +568,186 @@ describe('IngestService.ingestBrowserEvents', () => {
       code: ERROR_CODES.INGEST_UNAVAILABLE,
     });
     expect(counters.increment).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Diagnostics recorded after commit (A3, A4, A8, A9) ─────────────────────
+
+describe('IngestService server diagnostics', () => {
+  let apiRequests: FakeApiRequests;
+  let rejections: FakeRejections;
+  let piiDetections: FakePiiDetections;
+  let logger: Logger;
+  let service: IngestService;
+
+  beforeEach(() => {
+    apiRequests = new FakeApiRequests();
+    rejections = new FakeRejections();
+    piiDetections = new FakePiiDetections();
+    logger = silentLogger();
+    service = buildService({ apiRequests, rejections, piiDetections, liveFeed: new FakeLiveFeed(), logger });
+  });
+
+  const ingest = (events: unknown[], ctxOverrides: Parameters<typeof ingestContext>[0] = {}, dryRun = false) =>
+    service.ingestServerEvents(envelope(events), ingestContext(ctxOverrides), { dryRun });
+
+  it('records reject reasons as code + normalised schema path + strict sdk, never the message', async () => {
+    const poison = serverEvent();
+    apiRequests.poisonEventIds.add(poison.eventId);
+    await ingest(
+      [
+        { ...serverEvent(), status: 99 },
+        { ...serverEvent(), status: 1 },
+        { ...serverEvent(), method: 'SECRET-VALUE' },
+        serverEvent({ occurredAt: '2026-09-20T00:00:00.000Z' }),
+        poison,
+      ],
+      { sdk: '@nexus/express@1.1.0' },
+    );
+    expect(rejections.increment).toHaveBeenCalledTimes(1);
+    const [appId, rows, at] = rejections.increment.mock.calls[0]!;
+    expect(appId).toBe(ingestContext().app.id);
+    expect(at).toEqual(FIXED_NOW);
+    const sdk = '@nexus/express@1.1.0';
+    expect(rows).toEqual([
+      { source: 'server', sdk, code: 'INVALID_EVENT', schemaPath: 'status', rejected: 2 },
+      { source: 'server', sdk, code: 'INVALID_EVENT', schemaPath: 'method', rejected: 1 },
+      { source: 'server', sdk, code: 'EVENT_TIME_OUT_OF_RANGE', schemaPath: 'occurredAt', rejected: 1 },
+      { source: 'server', sdk, code: 'DB_CONSTRAINT', schemaPath: 'api_requests_path_check', rejected: 1 },
+    ]);
+    expect(JSON.stringify(rows)).not.toMatch(/SECRET|expected|violates/);
+  });
+
+  it('a 300-char sdk label becomes "" (the upsert can never break its CHECK)', async () => {
+    await ingest([{ ...serverEvent(), status: 99 }], { sdk: 'x'.repeat(300) });
+    expect(rejections.increment.mock.calls[0]![1]).toEqual([
+      { source: 'server', sdk: '', code: 'INVALID_EVENT', schemaPath: 'status', rejected: 1 },
+    ]);
+  });
+
+  it('dryRun records no reasons and no PII', async () => {
+    await ingest([{ ...serverEvent(), status: 99 }, serverEvent({ path: '/c/9876543210' })], {}, true);
+    expect(rejections.increment).not.toHaveBeenCalled();
+    expect(piiDetections.increment).not.toHaveBeenCalled();
+  });
+
+  it('counts PII detections of STORED events only (a duplicate is not counted twice)', async () => {
+    const leaky = serverEvent({ path: '/ebo-sales/customers/9876543210' });
+    const result = await ingest([leaky, { ...leaky }, serverEvent()]);
+    // Warnings describe every SENT event (the copy too); the counter counts stored ones only.
+    expect(result.warnings).toEqual([
+      { index: 0, code: ERROR_CODES.FIELD_REDACTED, field: 'path' },
+      { index: 1, code: ERROR_CODES.FIELD_REDACTED, field: 'path' },
+    ]);
+    expect(piiDetections.increment).toHaveBeenCalledWith(
+      ingestContext().app.id,
+      'server',
+      [{ field: 'path', kind: 'phone', detections: 1 }],
+      FIXED_NOW,
+    );
+    const [rows] = apiRequests.insertBatch.mock.calls[0]!;
+    expect(rows[0]?.path).toBe('/ebo-sales/customers/:phone');
+  });
+
+  it('no detections → no PII write; no rejections → no reasons write', async () => {
+    await ingest([serverEvent()]);
+    expect(piiDetections.increment).not.toHaveBeenCalled();
+    expect(rejections.increment).not.toHaveBeenCalled();
+  });
+
+  it('stores the claimed environment; an unknown claim warns on the first stored event', async () => {
+    await ingest([serverEvent()], { environmentClaim: 'staging' });
+    expect(apiRequests.insertBatch.mock.calls[0]![0][0]?.environment).toBe('staging');
+
+    const result = await ingest([{ bad: true }, serverEvent()], { environmentClaim: 'qa' });
+    expect(result.warnings).toEqual([{ index: 1, code: ERROR_CODES.FIELD_DROPPED, field: 'environment' }]);
+    expect(apiRequests.insertBatch.mock.calls[1]![0][0]?.environment).toBe('prod');
+  });
+
+  it('a rejection / PII counter failure is logged and never fails the request', async () => {
+    rejections.increment.mockRejectedValueOnce(new Error('down'));
+    piiDetections.increment.mockRejectedValueOnce(new Error('down'));
+    const warn = vi.spyOn(logger, 'warn');
+    await expect(
+      ingest([{ ...serverEvent(), status: 99 }, serverEvent({ path: '/c/9876543210' })]),
+    ).resolves.toMatchObject({ accepted: 1 });
+    expect(warn).toHaveBeenCalledWith('ingest rejection counter update failed', expect.anything());
+    expect(warn).toHaveBeenCalledWith('pii detection counter update failed', expect.anything());
+  });
+});
+
+describe('IngestService browser diagnostics', () => {
+  let webEvents: FakeWebEvents;
+  let rejections: FakeRejections;
+  let ssoOutcomes: FakeSsoOutcomes;
+  let service: IngestService;
+
+  beforeEach(() => {
+    webEvents = new FakeWebEvents();
+    rejections = new FakeRejections();
+    ssoOutcomes = new FakeSsoOutcomes();
+    service = buildService({ webEvents, rejections, ssoOutcomes, liveFeed: new FakeBrowserLiveFeed() });
+  });
+
+  const ingest = (events: unknown[], ctx = browserIngestContext()) =>
+    service.ingestBrowserEvents(browserEnvelope(events), ctx);
+
+  it('records the SSO cookie outcome once per beacon with the beacon origin', async () => {
+    await ingest([browserEvent(), browserEvent()]);
+    expect(ssoOutcomes.increment).toHaveBeenCalledTimes(1);
+    expect(ssoOutcomes.increment).toHaveBeenCalledWith(
+      browserIngestContext().app.id,
+      'no-cookie',
+      'cross_origin',
+      FIXED_NOW,
+    );
+  });
+
+  it.each([
+    [PUBLIC_ORIGIN, 'same_origin'],
+    [`${PUBLIC_ORIGIN.toUpperCase()}/`, 'same_origin'],
+    [null, 'none'],
+  ] as const)('origin %s → %s', async (origin, beaconOrigin) => {
+    const base = browserIngestContext();
+    await ingest([browserEvent()], { ...base, request: { ...base.request, origin } });
+    expect(ssoOutcomes.increment.mock.calls[0]?.[2]).toBe(beaconOrigin);
+  });
+
+  it('a replay records no SSO outcome', async () => {
+    await ingest([browserEvent()], browserIngestContext({ envelope: { replay: true } }));
+    expect(ssoOutcomes.increment).not.toHaveBeenCalled();
+  });
+
+  it('records browser reject reasons with the beacon sdk (PATH_OUTSIDE_APP → path)', async () => {
+    await ingest(
+      [browserEvent({ path: '/other-app/x' }), browserEvent({ type: 'tool_use', tool: 'NOT VALID' })],
+      browserIngestContext({ sdk: '@nexus/react@1.1.0' }),
+    );
+    const sdk = '@nexus/react@1.1.0';
+    expect(rejections.increment.mock.calls[0]![1]).toEqual([
+      { source: 'browser', sdk, code: 'PATH_OUTSIDE_APP', schemaPath: 'path', rejected: 1 },
+      { source: 'browser', sdk, code: 'INVALID_EVENT', schemaPath: 'tool', rejected: 1 },
+    ]);
+  });
+
+  it('stores envelope columns; a loopback origin is always dev', async () => {
+    const base = browserIngestContext({
+      environmentClaim: 'prod',
+      envelope: { tz: 'Asia/Kolkata', lang: 'en-IN', release: '2026.11.18-a1b2c3d', replay: false },
+    });
+    await ingest([browserEvent()], { ...base, request: { ...base.request, origin: 'http://localhost:5173' } });
+    expect(webEvents.insertBatch.mock.calls[0]![0][0]).toMatchObject({
+      environment: 'dev',
+      clientTz: 'Asia/Kolkata',
+      clientLang: 'en-IN',
+      release: '2026.11.18-a1b2c3d',
+    });
+  });
+});
+
+describe('IngestService.config', () => {
+  it('returns the app remote config', () => {
+    const config = buildService().config(browserIngestContext().app);
+    expect(config).toMatchObject({ contract: INGEST_CONTRACT_VERSION, version: 1, enabled: true, disabledModules: [] });
   });
 });

@@ -12,15 +12,29 @@ background; if Nexus is down they are dropped after the retry rules below.
 
     from app.nexus_asgi import NexusClient, NexusASGIMiddleware
 
-    nexus = NexusClient(url=os.getenv("NEXUS_URL"), key=os.getenv("NEXUS_SECRET_KEY"))
+    nexus = NexusClient(os.getenv("NEXUS_URL"), os.getenv("NEXUS_SECRET_KEY"))
     app.add_middleware(
         NexusASGIMiddleware,
         client=nexus,
         base_path="/my-app",          # public prefix your gateway strips ("" if none)
         trust_proxy_hops=2,           # REQUIRED: gateway -> Next -> api = 2; gateway -> api = 1
         get_user=lambda scope: user_email_ctx.get(),   # your VERIFIED user, read at response end
+        release=os.getenv("NEXUS_RELEASE"),             # optional build label, e.g. a git sha
     )
     # on shutdown (lifespan):  await nexus.aclose()
+
+!!! get_user DEFAULTS TO ANONYMOUS. Without it EVERY event is stored with no user and the dashboard
+!!! shows no "who". Pass a callable that returns your VERIFIED signed-in user's email; it is called
+!!! when the response has been sent, so a context variable your auth dependency sets is visible
+!!! (see the ordering note below). NEVER read it from a client-controlled header or cookie you have
+!!! not verified.
+
+Environment variables (server ONLY):
+    NEXUS_URL          https://nexus.libas.in/traffic (unset -> no-op client)
+    NEXUS_SECRET_KEY   nx_sk_...
+    NEXUS_ENVIRONMENT  prod | staging | dev (optional; unset -> the server stores prod; anything else
+                       is NOT sent). Or pass NexusClient(..., environment="staging").
+    NEXUS_RELEASE      your build label (optional; pass it as release=...)
 
 Starlette ordering: the LAST middleware added is the OUTERMOST. To read context variables that
 another middleware sets (e.g. request_context_middleware), add THIS middleware BEFORE that one, so
@@ -33,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 import uuid
@@ -55,6 +70,7 @@ UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE
 )
 ERROR_CODE_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
+ENVIRONMENT_VALUES = ("prod", "staging", "dev")
 ROUTE_PARAM = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(?::[^}]*)?\}")
 
 # --- Batching / retry defaults -----------------------------------------------
@@ -162,20 +178,24 @@ class NexusClient:
     Batches events: flush every 5 s or every 100 events, at most 500 per request.
     Retry rules (guide chapter 4): 202 done - 400/415 drop - 401/403 pause 5 min - 413 split -
     429/503 honour Retry-After - 5xx/network back off 1/2/4 s, max 3 attempts - 3xx/HTML = proxy.
-    Without url or key it is a no-op.
+    Without url or key it is a no-op. `environment` (default NEXUS_ENVIRONMENT) is sent ONLY when it
+    is one of ENVIRONMENT_VALUES; unset, the server stores prod.
     """
 
     def __init__(
         self,
         url: Optional[str],
         key: Optional[str],
+        *,
+        environment: Optional[str] = None,
         sdk_name: str = "nexus-snippet-fastapi",
-        sdk_version: str = "1.0.0",
+        sdk_version: str = "1.1.0",
     ) -> None:
         self._enabled = bool(url and key)
         self._endpoint = (url or "").rstrip("/") + SERVER_INGEST_PATH
         self._key = key or ""
         self._sdk = {"name": sdk_name, "version": sdk_version}
+        self._environment = self._valid_environment(environment or os.getenv("NEXUS_ENVIRONMENT"))
         self._queue: list[dict[str, Any]] = []
         self._dropped = 0
         self._paused_until = 0.0
@@ -221,6 +241,16 @@ class NexusClient:
         return {"queued": len(self._queue), "dropped": self._dropped}
 
     # -- internals ---------------------------------------------------------
+    @staticmethod
+    def _valid_environment(value: Optional[str]) -> Optional[str]:
+        """One of ENVIRONMENT_VALUES, else None (an invalid value is never sent)."""
+        if not value:
+            return None
+        if value in ENVIRONMENT_VALUES:
+            return value
+        logger.warning("[nexus] environment must be one of %s - not sent", ", ".join(ENVIRONMENT_VALUES))
+        return None
+
     def _enqueue(self, events: list[dict[str, Any]], at_front: bool) -> None:
         self._queue = events + self._queue if at_front else self._queue + events
         overflow = len(self._queue) - MAX_QUEUE
@@ -244,7 +274,8 @@ class NexusClient:
 
     async def _post(self, events: list[dict[str, Any]]) -> httpx.Response:
         # sentAt is re-stamped on EVERY attempt; events (eventId, occurredAt) are resent unchanged.
-        body = {"sentAt": _iso_now(), "sdk": self._sdk, "events": events}
+        body = {"sentAt": _iso_now(), "sdk": self._sdk, "environment": self._environment, "events": events}
+        body = {k: v for k, v in body.items() if v is not None}  # environment only when set
         return await self._client().post(
             self._endpoint, json=body, headers={KEY_HEADER: self._key}
         )

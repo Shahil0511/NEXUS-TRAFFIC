@@ -32,6 +32,7 @@ describe('toApiRequestInsert', () => {
     routeTemplate: '/template',
     clockSkewMs: 42,
     actor: ACTOR,
+    environment: 'staging' as const,
   };
 
   it('maps wire `status` to `statusCode` and the ISO time to a Date (same instant)', () => {
@@ -59,6 +60,7 @@ describe('toApiRequestInsert', () => {
       requestId: null,
       sessionId: null,
       pageViewId: null,
+      environment: 'staging',
     });
   });
 });

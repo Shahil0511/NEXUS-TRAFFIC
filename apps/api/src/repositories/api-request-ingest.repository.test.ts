@@ -46,4 +46,12 @@ describe('ApiRequestIngestRepository', () => {
     expect(columnList.split(',').length).toBe(placeholders.length);
     expect(toColumnArrays([row])).toHaveLength(placeholders.length);
   });
+
+  it('writes the environment column (0007)', () => {
+    const columnList = (/INSERT INTO traffic\.api_requests \(([^)]*)\)/.exec(INSERT_API_REQUESTS_SQL)?.[1] ?? '')
+      .split(',')
+      .map((c) => c.trim());
+    const column = toColumnArrays([{ ...row, environment: 'staging' }])[columnList.indexOf('environment')];
+    expect(column).toEqual(['staging']);
+  });
 });

@@ -8,7 +8,16 @@ import { verifyAccessTokenCookie, type CookieVerifyResult } from '@nexus/auth';
 import type { Clock } from '../lib/clock';
 import type { Logger } from '../lib/logger';
 
-export type SsoIdentity = { ok: true; email: string; expiresAt: number } | { ok: false; reason: string };
+/**
+ * Every reason @nexus/auth can give for an unusable cookie (`no-cookie`, `expired`, …). Typed from
+ * the library itself, so a new reason there breaks the SsoCookieOutcome parity test
+ * (sso-outcome.test.ts) instead of silently creating a value the DB CHECK rejects.
+ */
+export type CookieFailureReason = Extract<CookieVerifyResult, { ok: false }>['reason'];
+
+export type SsoIdentity =
+  | { ok: true; email: string; expiresAt: number }
+  | { ok: false; reason: CookieFailureReason };
 
 export class SsoIdentityReader {
   constructor(

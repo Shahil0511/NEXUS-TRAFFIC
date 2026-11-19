@@ -14,6 +14,159 @@ date, what was done, files touched, what's next, known issues.
 | S4 | Socket.io live + Live page |
 | S5 | Reference SDK packages, snippets, tarballs, full guide, Integration Health, Apps admin UI |
 | S6 | Retention/partition jobs, backups, nginx + DEPLOY.md, security suite, polish, push `main` |
+| Phase A | Data quality ("data theek karna", 2026-11): items A1–A11 below, ADRs 0008–0013 |
+
+---
+
+## 2026-11-19 — Phase A: data quality (environment, linking, identity, remote config, PII, diagnostics)
+
+Built by a multi-agent workflow in three waves (contract + DB first; then React SDK, node SDK +
+snippets, API ingest, API read/admin and web in parallel, each followed by a reviewer-fixer; then a
+cross-package checkpoint; then the EBO_SALES update and these docs; then a final multi-lens review
+whose confirmed findings are fixed below). One commit for all of it.
+
+**Done** (ADRs [0008](decisions/0008-environment-dimension.md) ·
+[0009](decisions/0009-sdk-remote-config-and-kill-switch.md) · [0010](decisions/0010-ingest-pii-detector.md) ·
+[0011](decisions/0011-header-propagation-and-early-entry.md) · [0012](decisions/0012-browser-retry-queue.md) ·
+[0013](decisions/0013-integration-diagnostics-and-kpis.md))
+- **A1 page grouping**: the React tracker sends `routeTemplate` (`nextRouteTemplate` from
+  `useParams()`, `:name` / catch-all `:name*`; React Router via `matchRoutes()` in the Vite snippet);
+  the API keeps it only when `isPlausibleRouteTemplate` holds, else `FIELD_DROPPED` + guess.
+  **Page-id cut-over**: dynamic routes of an upgraded app get new `toPageId`s; no backfill.
+- **A2 linking**: header propagation **on by default, same-origin** (`propagateHeadersTo` for exact
+  other origins), XHR patch (axios), live per-call gating, SDK requests on a captured native fetch,
+  early entry `@nexus/react/early` (`installNexusEarly`; Next `instrumentation-client.ts`, Vite
+  first-import `nexus-early.ts`), one `SessionStore` in global state `@nexus/react/state@2`,
+  pre-allocated page-view id. KPI: linkable = browser-device `http` calls; `AppTrafficDto.linkedPct`
+  redefined on it.
+- **A3 identity**: SSO cookie outcome per browser batch (`traffic.sso_cookie_outcomes`, typed
+  `CookieFailureReason` + `no-email`, beacon origin vs `PUBLIC_ORIGIN`, none for replays);
+  identified % per source on Integration Health and combined on Applications, both from
+  `coverage-predicates.ts`; `getUser` "defaults to anonymous" warnings in snippets, READMEs and guide.
+- **A4 environment**: `environment` on both envelopes (lenient wire, `resolveEnvironment`: loopback
+  browser origin → `dev`, no server IP heuristic), stored on both event tables (default `prod`);
+  dashboard `?env=` filter (absent = prod, `all`), `TrafficFilter.environments` required in every
+  read; Live / online / snapshot prod only; Integration Health unfiltered (environment mix).
+- **A5 hidden data**: `web_events.client_tz`, `client_lang`, `release` stored; `ROUTES.overview.breakdown`
+  (browser / os / device / referrer host / nav / time reason / tz / lang / release / environment; share =
+  of all window events) and `ROUTES.overview.devices` (new vs returning devices, 30-day bounded
+  lookback); "Audience" section on the application page.
+- **A6 retry queue**: in-page `fetch` + keepalive single-flight (`BatchSender`), `classifyDelivery`,
+  persisted per key scope in localStorage (20 batches / 128 KiB / 24 h / 3 replays, own `RetryStorage`
+  without memory fallback), `client.replay: true` (server skips the cookie), purge on kill,
+  `getNexusStats()`.
+- **A7 remote config + kill switch**: `POST /v1/ingest/config` (text/plain, no preflight, no-store,
+  own rate limiter, no rejection recorder), `apps.sdk_config_*` columns, `PATCH /v1/apps/:slug/sdk-config`
+  (optimistic `expectedVersion`, 409, audited `APP_SDK_CONFIG_UPDATE`), kill switch =
+  `browser_ingest_enabled`, pre-auth early CORS (own `AllowedOriginCache` instance, rule
+  `registered` = ANY app lists the origin, killed / disabled apps included; deduplicated in-flight
+  lookups) so kill codes are readable cross-origin, IP failure limiter counts only
+  `IP_FAILURE_ERROR_CODES` (key guesses + `ORIGIN_NOT_ALLOWED`, never a kill code). A lifted kill
+  re-arms the tracker in the same page. Apps page remote config dialog (kill switch saved first).
+- **A8 PII detector**: `PiiScrubber`, two passes (before ids; stored-path segment scrub after),
+  `FIELD_REDACTED`, counts in `traffic.pii_detections` (inserted rows only), warning `pii_detected`.
+- **A9 rejections**: `traffic.ingest_rejections` (code, strict `normalizeSdkLabel`, `normalizeSchemaPath`,
+  ≤ 20 keys per batch, never messages); recorder only on `ingest.server` / `ingest.browser`.
+- **A10 Integration Health**: identity / linking / release coverage, environment mix (source order =
+  `INGEST_SOURCE_VALUES`), PII detections, rejection reasons, SSO outcomes, SDK name/version split,
+  integration level (`not_connected` → `complete`), web panels + `CoverageValue`.
+- **A11 index**: `idx_api_requests_page_view_id` (partial). BRIN rejected (ADR 0013).
+- **Contract** (`packages/shared`): new constants (`ENVIRONMENT_*`, `SDK_CAPTURE_MODULE_VALUES`,
+  `SDK_MODULE_SWITCH_MIN_VERSION` = 1.1.0, `SSO_COOKIE_OUTCOME_VALUES`, `BEACON_ORIGIN_VALUES`,
+  `LINKABLE_DEVICE_CLASSES`, `BREAKDOWN_DIMENSION_VALUES`, `constants/pii.ts`, coverage targets,
+  `AGGREGATE_RETENTION_DAYS`, `RETURNING_DEVICE_LOOKBACK_MS`), `FIELD_REDACTED`,
+  `INGEST_REJECTION_CODE_VALUES`, `SDK_KILL_ERROR_CODES`, `KEY_GUESS_ERROR_CODES`,
+  `IP_FAILURE_ERROR_CODES`, `SDK_DEFAULTS.browser.maxPendingBatches` / `ingestTimeoutMs`, leaf
+  constants `SDK_BROWSER_SESSION_IDLE_MS` / `SDK_BROWSER_CONFIG_MAX_STALE_MS` / `SDK_BROWSER_XHR_PATCH`
+  (for the early entry's size), schemas
+  (`sdkConfigRequestSchema`, `sdkRemoteConfigSchema`, breakdown / devices queries,
+  `updateSdkConfigBodySchema`), DTOs, 4 new ROUTES leaves; `docs/openapi.json` regenerated.
+- **DB**: migrations `0007`–`0012` (environment + client context, page-view index, app SDK config +
+  audit CHECK swap, 3 aggregate tables); the 3 tables in the explicit `grants.ts` DML list (the
+  default privileges do not cover a fresh DB — README rule 8 corrected); parity, runner and
+  privileges suites extended; aggregate retention after 90 days in the nightly retention run
+  (`RetentionJob` → `AggregateRetentionService.deleteExpired` → repository).
+- **SDKs 1.1.0** (`@nexus/react`, `@nexus/node`, `@nexus/express`): `environment` option (default
+  `NEXUS_ENVIRONMENT`, sent only when valid), express `release` default `NEXUS_RELEASE`,
+  `stats().rejectedByCode` (≤ 32 codes), strict RFC UUIDs in express, FastAPI
+  `NexusClient(url, key, *, environment=None, …)`; new snippets `docs/snippets/next-instrumentation-client.ts`,
+  `docs/snippets/vite-nexus-early.ts`; snippet contract tests for both.
+- **Docs**: guide chapters 00–05, 07–11 and the appendix (environment, release, route templates,
+  early install, propagation + CORS warning, retry queue, remote config / kill switch, readable
+  cross-origin errors, PII detector, SSO cookie requirements + `getUser`, Integration page panels and
+  level, troubleshooting rows); new `{{TOKENS}}` derived from shared constants and the SDK
+  `package.json` versions in `scripts/build-docs.ts`; `docs/CHANGELOG.md` "v1 additive — 2026-11";
+  ai-context 02, 03 (§3/§3b/§3c/§4/§4b/§5/§5d), 04, 07, 08, 09, GLOSSARY.
+- **Final review fixes** (confirmed findings of the multi-lens review):
+  - **Kill switch readable for a killed app's own origin**: the early CORS used the preflight rule
+    (`is_active AND browser_ingest_enabled`), so the kill itself made the 403 unreadable
+    cross-origin. New `AppRepository.anyListsOrigin` + a second `AllowedOriginCache` (rule
+    `registered`) for the early CORS; e2e with a killed / disabled app on its own origin.
+  - **`ORIGIN_NOT_ALLOWED` floods bounded again**: counted by the per-IP failure limiter
+    (`IP_FAILURE_ERROR_CODES`, `isCountedIpFailure`); kill codes stay exempt (ADR 0009 item 10,
+    with the NAT trade-off). e2e: a forged-Origin flood from one IP ends in `429`.
+  - **PII**: `request_id` and `release` are scanned with the STRICT patterns
+    (`PiiScrubber.scrubOpaqueId`) — random hex / UUID request ids no longer read as mobiles (≈ 1 %
+    false `pii_detected`); phone patterns now match `98765 43210`, `+91-98765-43210` and a bare
+    `91` prefix (`919876543210`), also as a path segment (ADR 0010).
+  - **React SDK**: a lifted kill re-arms trackers in the same page (slow recheck timer while killed,
+    `applyEnabledForScope`); the first `load` page view keeps the session the early headers used
+    when the user hint is not known yet (`SessionStore.nextEvent(…, keepForUnknownUser)`); the
+    header source is chosen per request (`headerSourceFor(url)` — the early `propagateHeadersTo`
+    survives a tracker without one); relative URLs resolve against `document.baseURI`; a decorated
+    `Request` keeps its referrer / referrer policy; the in-page sender queue is bounded
+    (`maxPendingBatches`) and live ingest fetches time out (`ingestTimeoutMs`); unload persists a
+    failed in-flight batch; the config timeout covers the body and a refresh always settles;
+    other scopes' expired storage is pruned on start (`stale-scopes.ts`); `propagateHeadersTo` that
+    is not an array never crashes the render.
+  - **Early bundle**: `dist/early.js` 8,108 B / `early.cjs` 8,120 B (≤ 8 KiB): minified entry, no
+    class-field helper, leaf constants; `npm run sdk:pack` now fails over budget (ADR 0011 item 7,
+    pending the owner's OK on "shipped, minified" as the reading of the budget).
+  - **Docs**: redirect + CORS caveat of default-on propagation (README, chapter 3, troubleshooting),
+    README "patches stay for the page's lifetime with the early install", examples now
+    `@nexus/react` / `@nexus/express` 1.1.0, ingest-auth header comment, 08 → chapter 10 §5.
+  - **EBO_SALES**: the rebuilt `nexus-react-1.1.0.tgz` re-vendored and its lockfile integrity
+    refreshed (`npm ci` and `tsc` pass); still uncommitted there.
+- **Tests / gates after the final fixes** (throwaway `postgres:18-alpine` on :55432): `npm run
+  typecheck` and `npm test` green in every workspace (api 1058, web 387, react 140, node 119,
+  express 59, shared 65, auth 10); `RUN_DB_TESTS=1 npm run test:db` 106 files / 1311 tests;
+  `openapi:emit -- --check`, `env:example -- --check`, `docs:build`, `sdk:pack` clean. (Wave 2
+  checkpoint before them: api 1044, react 126, shared 63, DB 1295; an in-process run of the real
+  `RemoteConfigClient` against the real API — config 200, module switch v2, kill 403 readable
+  cross-origin — passed.)
+
+**Notes / known issues**
+- **Numeric props are not PII-scanned** (only string values): `{mobile: 9876543210}` is stored as is.
+  Recorded in ADR 0010 as the current choice; the owner may decide to scan numbers too (follow-up ADR).
+- PII false positives accepted: a 10-digit path segment starting 6–9 becomes `:phone` in the raw path;
+  `logo@2x.png` looks like an email; a few word+number segments look like a PAN.
+- Early-entry budget: the shipped `dist/early.js` / `.cjs` are ≤ 8 KiB because that entry is
+  minified (unminified output would be ≈ 20 KB); `sdk:pack` enforces it. Reading the spec's
+  "8 KiB unminified" this way is **pending the owner's OK** (ADR 0011 item 7).
+- `ORIGIN_NOT_ALLOWED` counts per IP again: an app whose page origin is not registered, used by many
+  people behind one office NAT, can `429` browser ingest from that IP until the origin is added.
+- The SDK config client polls at most once per `maxAgeMs` per page whatever the outcome (polling
+  floor); `keyScope` trims the key.
+- Replayed browser events are stored anonymous (by design), so identity coverage reads slightly low
+  for apps with many replays.
+- `toRejectionIncrements` may exceed 20 keys by one fold key per code (bounded); a tracker that
+  starts with a cached kill leaves earlier early patches as pass-throughs until a kill arrives in
+  the page; the `latest_release` aggregation builds one array per SDK row (revisit if the health
+  window grows).
+- Many Phase A lines exceed prettier's width; there is no format gate (HEAD is not prettier-clean
+  either) — a repo-wide prettier pass would be its own decision.
+- `npm run docs:build` wipes `docs/dist` — rerun `npm run sdk:pack` afterwards to restore the tarballs.
+- EBO_SALES (ADR 0003) has the 1.1.0 tarball, `instrumentation-client.ts`, `environment` and
+  `release` in its own working tree, left **uncommitted** there as always (its ruff, mypy, pytest
+  100, lint, tsc and build passed in P7; after the final SDK fixes the tarball was re-vendored,
+  `npm ci` and `tsc` pass). Any later `packages/react` change needs the same re-vendor (the
+  lockfile pins the tarball's sha512).
+
+**Next**: owner decisions (numeric-prop PII scanning; the early-entry budget reading — shipped
+minified ≤ 8 KiB vs "unminified"; who hosts a private npm registry — until then tarballs); tell the
+integrated teams about 1.1.0 (`environment`, early install, `getUser` check, the redirect / CORS
+note for downloads);
+watch the Integration page levels after the first deploys; Phase B (advanced analytics) on clean data.
 
 ---
 

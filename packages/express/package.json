@@ -1,6 +1,6 @@
 {
   "name": "@nexus/express",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Data Nexus Traffic Express middleware (Express 4 and 5): records one server event per request and sends it through the bundled @nexus/node client.",
   "license": "UNLICENSED",
   "type": "commonjs",

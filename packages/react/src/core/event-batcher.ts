@@ -9,6 +9,7 @@
  */
 import { INGEST_LIMITS, SDK_DEFAULTS } from '@nexus/shared/constants';
 
+import type { SendMode } from './transport';
 import type { BrowserWireEvent } from './wire';
 
 export interface EnvelopeContext {
@@ -40,8 +41,9 @@ export class EventBatcher {
 
   constructor(
     private readonly serialize: EnvelopeSerializer,
-    private readonly send: (json: string) => void,
+    private readonly send: (json: string, mode: SendMode) => void,
     private readonly limits: BatcherLimits = DEFAULT_BATCHER_LIMITS,
+    private readonly onDropped: () => void = () => undefined,
   ) {}
 
   /** WHY: the only way in — handles context switches, overflow and the size trigger. */
@@ -51,27 +53,46 @@ export class EventBatcher {
     this.queue.push(event);
     if (this.queue.length > this.limits.maxQueue) {
       this.queue.shift();
-      this.dropped++;
+      this.countDrop();
     }
     if (this.queue.length >= this.limits.flushEvents) this.flush();
   }
 
-  /** WHY: sends everything queued, split into contract-sized requests. NEVER throws. */
-  flush(): void {
+  /**
+   * WHY: sends everything queued, split into contract-sized requests. `unload` = the page may be
+   * going away (hidden / pagehide) → the transport uses the beacon. NEVER throws.
+   */
+  flush(mode: SendMode = 'live'): void {
     const context = this.context;
     const events = this.queue;
     this.queue = [];
     if (!context || events.length === 0) return;
     try {
-      for (const chunk of this.chunk(context, events)) this.send(this.serialize(context, chunk));
+      for (const chunk of this.chunk(context, events)) this.send(this.serialize(context, chunk), mode);
     } catch {
       // Lost batch: never surface tracker errors to the host app.
     }
   }
 
+  /** WHY: kill switch — forget everything queued, send nothing. */
+  clear(): void {
+    this.queue = [];
+    this.context = undefined;
+  }
+
+  /** Events waiting in memory (diagnostics). */
+  size(): number {
+    return this.queue.length;
+  }
+
   /** Events dropped because the queue overflowed (diagnostics). */
   droppedCount(): number {
     return this.dropped;
+  }
+
+  private countDrop(): void {
+    this.dropped++;
+    this.onDropped();
   }
 
   /** WHY: greedy split by event count and exact UTF-8 body size; an oversized lone event is dropped. */
@@ -83,7 +104,7 @@ export class EventBatcher {
     for (const event of events) {
       const eventBytes = byteLength(JSON.stringify(event)) + 1; // + the separating comma
       if (overhead + eventBytes > this.limits.maxBodyBytes) {
-        this.dropped++;
+        this.countDrop();
         continue;
       }
       const full =

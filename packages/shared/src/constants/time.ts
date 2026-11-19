@@ -32,6 +32,12 @@ export const RANGE_DURATIONS_MS = {
 
 export const DEFAULT_RANGE: RangePreset = '24h';
 
+/**
+ * WHY: a device (anonymous_id) is "returning" when it was also seen in this bounded lookback
+ * before the window starts — bounded so the query scans at most one extra month of partitions.
+ */
+export const RETURNING_DEVICE_LOOKBACK_MS = 30 * DAY;
+
 export const GRAIN_VALUES = ['minute', 'hour', 'day'] as const;
 export type Grain = (typeof GRAIN_VALUES)[number];
 

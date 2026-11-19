@@ -2,15 +2,18 @@
  * Write side of app management (admins only). Every mutation runs in a transaction with its
  * audit row, then invalidates the key cache so revocations take effect on the next request.
  */
-import type {
-  ApiKeyDto,
-  AppCreatedDto,
-  AppDto,
-  CreateAppBody,
-  CreateKeyBody,
-  ExpireKeyBody,
-  KeyCreatedDto,
-  UpdateAppBody,
+import {
+  SDK_CAPTURE_MODULE_VALUES,
+  type ApiKeyDto,
+  type AppCreatedDto,
+  type AppDto,
+  type CreateAppBody,
+  type CreateKeyBody,
+  type ExpireKeyBody,
+  type KeyCreatedDto,
+  type SdkCaptureModule,
+  type UpdateAppBody,
+  type UpdateSdkConfigBody,
 } from '@nexus/shared';
 import type { Pool, PoolClient } from 'pg';
 
@@ -42,6 +45,14 @@ function toAppPatch(body: UpdateAppBody): AppPatch {
   return patch;
 }
 
+/**
+ * WHY: the stored list is a SET — canonical order (SDK_CAPTURE_MODULE_VALUES) so the audit trail and
+ * the served config do not change when an admin merely re-orders the same switches.
+ */
+function canonicalModules(modules: readonly SdkCaptureModule[]): SdkCaptureModule[] {
+  return SDK_CAPTURE_MODULE_VALUES.filter((module) => modules.includes(module));
+}
+
 /** WHY: audit details for a key — enough to identify it, NEVER the secret or its hash. */
 function keyAuditDetails(key: ApiKeyRow): Record<string, unknown> {
   return { kind: key.kind, keyPrefix: key.key_prefix, label: key.label };
@@ -52,6 +63,13 @@ function appNotFound(slug: string): NotFoundError {
   return new NotFoundError(`App "${slug}" not found`);
 }
 
+/** WHY: an optimistic-concurrency miss names the version the admin saw (never anything secret). */
+function sdkConfigConflict(slug: string, expectedVersion: number): ConflictError {
+  return new ConflictError(
+    `SDK config of app "${slug}" changed since version ${expectedVersion} — reload and retry`,
+  );
+}
+
 /** WHY: one wording for "no such key of that app" (also covers revoked keys on expire). */
 function keyNotFound(slug: string, keyId: string): NotFoundError {
   return new NotFoundError(`Key "${keyId}" of app "${slug}" not found`);
@@ -60,13 +78,14 @@ function keyNotFound(slug: string, keyId: string): NotFoundError {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 /**
- * WHY: ROUTES.apps.create/update/createKey/expireKey/revokeKey. Keeping the audit row in the SAME
+ * WHY: ROUTES.apps.create/update/createKey/expireKey/revokeKey/updateSdkConfig. Keeping the audit row in the SAME
  * transaction as the change means there is never a change without its audit trail (or vice versa).
  * @see ../repositories/app.repository.ts
  * @see ../repositories/api-key.repository.ts
  * @see ../repositories/admin-audit.repository.ts
  * @see ../../migrations/0002_apps_and_api_keys.sql
  * @see ../../migrations/0003_admin_audit_log.sql
+ * @see ../../migrations/0009_app_sdk_config.sql
  */
 export class AppAdminService {
   constructor(
@@ -183,6 +202,36 @@ export class AppAdminService {
     });
     this.keyCache.invalidateApp(row.app_id);
     return mapApiKey(row);
+  }
+
+  /**
+   * Replaces the browser SDK's disabled modules (remote config can only DISABLE — ADR 0009).
+   * 404 unknown slug; 409 CONFLICT when `expectedVersion` is not the stored version (another admin
+   * changed it first). Audit: APP_SDK_CONFIG_UPDATE {slug, version, disabledModules}. The SDKs see
+   * it through AppKeyCache, invalidated AFTER commit (≤ one cache TTL for other instances).
+   * @see ../repositories/app.repository.ts AppRepository.updateSdkConfig
+   */
+  async updateSdkConfig(slug: string, body: UpdateSdkConfigBody, actor: Viewer): Promise<AppDto> {
+    const disabledModules = canonicalModules(body.disabledModules);
+    const result = await withTransaction(this.db, async (client) => {
+      const app = await this.requireApp(slug, client);
+      const updated = await this.apps.updateSdkConfig(
+        app.id,
+        disabledModules,
+        body.expectedVersion,
+        client,
+      );
+      if (!updated) throw sdkConfigConflict(slug, body.expectedVersion);
+      const keys = await this.apiKeys.listByAppIds([updated.id], client);
+      await this.record(client, actor, 'APP_SDK_CONFIG_UPDATE', 'app', updated.id, {
+        slug,
+        version: updated.sdk_config_version,
+        disabledModules,
+      });
+      return { app: updated, keys };
+    });
+    this.keyCache.invalidateApp(result.app.id);
+    return mapApp(result.app, result.keys);
   }
 
   // ─── Steps ──────────────────────────────────────────────────────────────────

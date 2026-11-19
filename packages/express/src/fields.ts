@@ -6,7 +6,11 @@
  */
 import { ERROR_CODE_PATTERN } from '@nexus/shared/constants';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * WHY strict RFC 4122/9562 (version 1–8, variant 10xx): the server's `z.uuid()` rejects anything else,
+ * and a malformed X-Nexus-Session header must cost only that field, never the whole event.
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** First value of a possibly repeated header. */
 export function headerValue(value: string | string[] | number | undefined): string | undefined {

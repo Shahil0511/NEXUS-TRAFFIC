@@ -34,6 +34,16 @@ then verify it with the normal production code. `next start` / the Docker image 
 Ports: **3000** dashboard, **4000** api, **55434** dev DB. The docker rehearsal publishes only the edge on 8080 (`NEXUS_PORT`),
 so both can run at the same time.
 
+**Local traffic is `dev`, and the dashboard hides it by default** ([ADR 0008](decisions/0008-environment-dimension.md)).
+Browser beacons from a loopback page origin (`localhost`, `127.0.0.1`, `*.local`) are always stored with
+`environment = 'dev'`, whatever the tracker claims, and every analytics page shows production unless you
+pick another environment. So after clicking through a local app (e.g. EBO_SALES on `localhost:3000`) the
+Overview looks empty: choose **All environments** in the top-bar Environment filter, or add `?env=all` (or
+`?env=dev`) to the URL. Server events follow their `environment` claim only (`NEXUS_ENVIRONMENT`; unset =
+`prod`) — set it to `dev` in local backends. The Live page is always production only; the Integration page
+shows every environment (its *Environments* panel is the quickest check that local traffic arrived).
+The Dev Launcher's *Send sample traffic* sends server events without an environment, so they are `prod`.
+
 ---
 
 ## The Dev Launcher (`npm run dev:launcher`, optional)

@@ -9,6 +9,7 @@ import {
   type WindowedListDto,
 } from '@nexus/shared';
 
+import { environmentsOf } from '../domain/filters';
 import { mapGeoCity, mapGeoCountry } from '../domain/mappers';
 import type { Clock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
@@ -30,7 +31,11 @@ export class GeoService {
    */
   async countries(query: GeoQuery): Promise<WindowedListDto<GeoCountryDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.webEvents.listCountries(filter, query.limit);
     return { window: toTimeWindowDto(window), items: rows.map(mapGeoCountry) };
@@ -42,7 +47,11 @@ export class GeoService {
    */
   async cities(query: GeoQuery): Promise<WindowedListDto<GeoCityDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.webEvents.listCities(filter, query.limit);
     return { window: toTimeWindowDto(window), items: rows.map(mapGeoCity) };

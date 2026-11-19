@@ -10,6 +10,7 @@ import {
   type EndpointStatsDto,
 } from '@nexus/shared';
 
+import { environmentsOf } from '../domain/filters';
 import { decodeOffsetCursor, encodeOffsetCursor } from '../db/sql';
 import {
   mapEndpointStats,
@@ -42,7 +43,11 @@ export class EndpointService {
    */
   async list(query: EndpointListQuery): Promise<CursorPage<EndpointStatsDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
     const offset = decodeOffsetCursor(query.cursor);
 
     const rows = await this.requests.listEndpointStats(filter, {
@@ -68,7 +73,11 @@ export class EndpointService {
     viewer: Viewer,
   ): Promise<EndpointDetailDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const rows = await this.requests.getEndpointDetail(endpointId, filter, window.grain);
     if (!rows) throw new NotFoundError('No traffic for this endpoint in the selected window');

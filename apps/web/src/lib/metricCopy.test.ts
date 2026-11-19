@@ -1,3 +1,4 @@
+import { COVERAGE_TARGET_RATIO } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import { COVERAGE_WARN_PCT, METRIC_COPY, metricInfo, type MetricKey } from './metricCopy';
@@ -29,6 +30,14 @@ const REQUIRED: readonly MetricKey[] = [
   'identifiedPct',
   'linkedPct',
   'sendingData',
+  'devices',
+  'newDevices',
+  'returningDevices',
+  'breakdownShare',
+  'identityCoverage',
+  'linkingCoverage',
+  'releaseCoverage',
+  'integrationLevel',
 ];
 
 describe('METRIC_COPY', () => {
@@ -55,6 +64,20 @@ describe('METRIC_COPY', () => {
   it('states the coverage threshold on identified % and linked %', () => {
     expect(METRIC_COPY.identifiedPct.long).toContain(`${COVERAGE_WARN_PCT} %`);
     expect(METRIC_COPY.linkedPct.long).toContain(`${COVERAGE_WARN_PCT} %`);
+    expect(METRIC_COPY.identityCoverage.long).toContain(`${COVERAGE_WARN_PCT} %`);
+    expect(METRIC_COPY.linkingCoverage.long).toContain(`${COVERAGE_WARN_PCT} %`);
+  });
+
+  it('uses the API’s coverage target as the warning threshold (one number, ADR 0013)', () => {
+    expect(COVERAGE_WARN_PCT).toBe(COVERAGE_TARGET_RATIO * 100);
+    expect(COVERAGE_WARN_PCT).toBe(80);
+  });
+
+  it('defines linked % on the linkable denominator and identified % as both sources combined', () => {
+    expect(METRIC_COPY.linkedPct.short).toMatch(/desktop, mobile and tablet/);
+    expect(METRIC_COPY.linkedPct.long).toMatch(/server-to-server/);
+    expect(METRIC_COPY.identifiedPct.short).toMatch(/combined/);
+    expect(METRIC_COPY.identityCoverage.long).toMatch(/Applications page combines both sources/);
   });
 });
 

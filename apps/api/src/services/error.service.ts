@@ -24,7 +24,7 @@ import { pageFetchSize, parseKeysetCursor, toCursorPage } from '../domain/pagina
 import { fillTimeseriesGaps } from '../domain/timeseries-gaps';
 import type { Viewer } from '../domain/viewer';
 import { userKeyFromHex } from '../enrichment/user-key.hasher';
-import type { FailureFilter } from '../domain/filters';
+import { environmentsOf, type FailureFilter } from '../domain/filters';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
@@ -49,7 +49,7 @@ export class ErrorService {
   async summary(query: ErrorSummaryQuery): Promise<ErrorSummaryDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
     const filter: FailureFilter = {
-      ...currentFilter(window, await this.appSlugs.resolve(query.app)),
+      ...currentFilter(window, await this.appSlugs.resolve(query.app), environmentsOf(query.env)),
       endpointId: query.endpointId,
       userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
       errorCode: query.errorCode,
@@ -85,7 +85,7 @@ export class ErrorService {
 
     const rows = await this.requests.listFailures(
       {
-        ...currentFilter(window, appId),
+        ...currentFilter(window, appId, environmentsOf(query.env)),
         endpointId: query.endpointId,
         userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
         errorCode: query.errorCode,

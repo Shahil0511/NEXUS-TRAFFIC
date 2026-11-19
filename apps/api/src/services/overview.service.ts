@@ -4,21 +4,30 @@
  */
 import {
   ACTIVE_USER_WINDOW_MS,
+  MAX_COUNT_RANGE_MS,
   MAX_PERCENTILE_RANGE_MS,
+  RETURNING_DEVICE_LOOKBACK_MS,
+  SERVER_BREAKDOWN_DIMENSION_VALUES,
   type AppTrafficDto,
+  type BreakdownDimension,
+  type BreakdownDto,
+  type BreakdownOverviewQuery,
+  type DeviceReturnDto,
+  type DevicesOverviewQuery,
   type OverviewAppsQuery,
   type OverviewSummaryDto,
   type OverviewSummaryQuery,
   type OverviewTimeseriesDto,
   type OverviewTimeseriesQuery,
+  type ServerBreakdownDimension,
   type WindowedListDto,
 } from '@nexus/shared';
 
 import { computeMetric } from '../domain/compute-deltas';
-import type { TrafficFilter } from '../domain/filters';
-import { mapAppTraffic, mapTimeseriesPoint } from '../domain/mappers';
+import { environmentsOf, type TrafficFilter } from '../domain/filters';
+import { mapAppTraffic, mapBreakdownItem, mapTimeseriesPoint } from '../domain/mappers';
 import { percentOf } from '../domain/numbers';
-import type { PageViewBucketRow } from '../domain/rows';
+import type { BreakdownRow, PageViewBucketRow } from '../domain/rows';
 import { fillTimeseriesGaps, withPageViews } from '../domain/timeseries-gaps';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
@@ -36,6 +45,16 @@ function byAppId<T extends { app_id: string }>(rows: readonly T[]): Map<string, 
 function byActivityDesc(a: AppTrafficDto, b: AppTrafficDto): number {
   const volume = (row: AppTrafficDto) => (row.requests.value ?? 0) + (row.pageViews.value ?? 0);
   return volume(b) - volume(a) || a.app.localeCompare(b.app);
+}
+
+/**
+ * WHY: narrows a dimension to the api_requests whitelist. breakdownOverviewQuerySchema already
+ * refuses other dimensions for source=server; this keeps the type honest without a cast.
+ */
+function isServerBreakdownDimension(
+  dimension: BreakdownDimension,
+): dimension is ServerBreakdownDimension {
+  return (SERVER_BREAKDOWN_DIMENSION_VALUES as readonly BreakdownDimension[]).includes(dimension);
 }
 
 /** WHY: page views keyed like the chart points (ISO bucket) so they can be merged in one pass. */
@@ -65,12 +84,14 @@ export class OverviewService {
     const now = this.clock.now();
     const window = resolveQueryWindow(query, now, MAX_PERCENTILE_RANGE_MS);
     const appId = await this.appSlugs.resolve(query.app);
-    const current = currentFilter(window, appId);
-    const previous = previousFilter(window, appId);
+    const environments = environmentsOf(query.env);
+    const current = currentFilter(window, appId, environments);
+    const previous = previousFilter(window, appId, environments);
     const activeWindow: TrafficFilter = {
       from: new Date(now.getTime() - ACTIVE_USER_WINDOW_MS),
       to: now,
       appId,
+      environments,
     };
 
     const [
@@ -112,7 +133,11 @@ export class OverviewService {
    */
   async timeseries(query: OverviewTimeseriesQuery): Promise<OverviewTimeseriesDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
-    const filter = currentFilter(window, await this.appSlugs.resolve(query.app));
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
 
     const [buckets, pageViewBuckets] = await Promise.all([
       this.requests.timeseries(filter, window.grain),
@@ -139,8 +164,9 @@ export class OverviewService {
   async apps(query: OverviewAppsQuery): Promise<WindowedListDto<AppTrafficDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
     const appId = await this.appSlugs.resolve(query.app);
-    const current = currentFilter(window, appId);
-    const previous = previousFilter(window, appId);
+    const environments = environmentsOf(query.env);
+    const current = currentFilter(window, appId, environments);
+    const previous = previousFilter(window, appId, environments);
 
     const [apps, traffic, previousTraffic, activity, previousActivity] = await Promise.all([
       this.registeredApps.list(),
@@ -166,5 +192,59 @@ export class OverviewService {
       )
       .sort(byActivityDesc);
     return { window: toTimeWindowDto(window), items };
+  }
+
+  /**
+   * Top `limit` values of one whitelisted dimension (browser, os, device, tz, lang, release,
+   * environment …) of one source over the window, busiest first, with each value's share of ALL
+   * the window's events. Browser: page views (page_time rows for `time_reason`); server: every API
+   * call. Counts only → MAX_COUNT_RANGE_MS.
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countByDimension
+   * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.countByDimension
+   */
+  async breakdown(query: BreakdownOverviewQuery): Promise<BreakdownDto> {
+    const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
+    const appId = await this.appSlugs.resolve(query.app);
+    const filter = currentFilter(window, appId, environmentsOf(query.env));
+    const rows = await this.countByDimension(query, filter);
+    return {
+      window: toTimeWindowDto(window),
+      source: query.source,
+      dimension: query.dimension,
+      total: rows[0]?.total ?? 0,
+      items: rows.map(mapBreakdownItem),
+    };
+  }
+
+  /**
+   * New vs returning devices (distinct anonymous_id on page views) over the window: returning =
+   * also seen in the RETURNING_DEVICE_LOOKBACK_MS before the window. Counts only → MAX_COUNT_RANGE_MS.
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countDeviceReturn
+   */
+  async devices(query: DevicesOverviewQuery): Promise<DeviceReturnDto> {
+    const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
+    const appId = await this.appSlugs.resolve(query.app);
+    const filter = currentFilter(window, appId, environmentsOf(query.env));
+    const lookbackFrom = new Date(window.from.getTime() - RETURNING_DEVICE_LOOKBACK_MS);
+    const row = await this.webEvents.countDeviceReturn(filter, lookbackFrom);
+    return {
+      window: toTimeWindowDto(window),
+      lookbackFrom: lookbackFrom.toISOString(),
+      devices: row.devices,
+      newDevices: row.devices - row.returning_devices,
+      returningDevices: row.returning_devices,
+    };
+  }
+
+  /** Routes the breakdown to the table of its source (server dimensions are a subset). */
+  private countByDimension(
+    query: BreakdownOverviewQuery,
+    filter: TrafficFilter,
+  ): Promise<BreakdownRow[]> {
+    if (query.source === 'browser') {
+      return this.webEvents.countByDimension(query.dimension, filter, query.limit);
+    }
+    if (!isServerBreakdownDimension(query.dimension)) return Promise.resolve([]);
+    return this.requests.countByDimension(query.dimension, filter, query.limit);
   }
 }

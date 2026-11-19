@@ -11,10 +11,52 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.middleware';
 import { IntegrationController } from './integration.controller';
 
 const VIEWER: Viewer = { email: 'viewer@libas.in', isAdmin: false };
+/** One app with every Phase A field, so the DTO shape is pinned at compile time too. */
 const HEALTH: IntegrationHealthDto = {
   from: '2026-09-30T10:00:00.000Z',
   to: '2026-10-01T10:00:00.000Z',
-  apps: [],
+  apps: [
+    {
+      app: 'ebo-sales',
+      displayName: 'EBO Sales',
+      isActive: true,
+      status: 'healthy',
+      lastServerEventAt: '2026-10-01T09:59:00.000Z',
+      lastBrowserEventAt: null,
+      sdks: [
+        {
+          source: 'server',
+          sdk: '@nexus/express@1.1.0',
+          name: '@nexus/express',
+          version: '1.1.0',
+          events: 40,
+          lastSeenAt: '2026-10-01T09:59:00.000Z',
+          medianClockSkewMs: 12,
+          maxAbsClockSkewMs: 30,
+        },
+      ],
+      counters: [],
+      exposedKeys: [],
+      privateIpRatio: null,
+      warnings: ['pii_detected'],
+      identityCoverage: [
+        { source: 'server', events: 40, covered: 10, ratio: 0.25 },
+        { source: 'browser', events: 0, covered: 0, ratio: null },
+      ],
+      linkingCoverage: { linkable: 0, linked: 0, pageViewLinked: 0, ratio: null },
+      environments: [{ source: 'server', environment: 'prod', events: 40 }],
+      releases: [
+        { source: 'server', events: 40, withRelease: 0, ratio: 0, latestRelease: null },
+        { source: 'browser', events: 0, withRelease: 0, ratio: null, latestRelease: null },
+      ],
+      piiDetections: [{ source: 'server', field: 'path', kind: 'phone', detections: 1 }],
+      rejections: [
+        { source: 'server', sdk: null, code: 'INVALID_EVENT', schemaPath: null, rejected: 2 },
+      ],
+      ssoCookieOutcomes: [],
+      level: 'partial',
+    },
+  ],
 };
 
 class FakeIntegration implements Pick<IntegrationService, 'health'> {

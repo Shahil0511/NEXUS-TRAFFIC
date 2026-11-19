@@ -6,12 +6,16 @@
  *
  * Owner mode (production: the api logs in as the owner) is covered by
  * migration-runner.integration.test.ts → "lets the api run as the owner: … partition functions".
+ * The same run (same advisory lock) also deletes hourly diagnostic aggregates older than
+ * AGGREGATE_RETENTION_DAYS (ADR 0013).
  */
+import { AGGREGATE_RETENTION_DAYS } from '@nexus/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { parseConfig } from '../../src/config';
 import { createContainer, type Container } from '../../src/container';
 import { PARTITIONED_TABLES } from '../../src/db/schema';
+import { RetentionJob } from '../../src/jobs/retention.job';
 import { FixedClock } from '../../src/lib/clock';
 import { recordingLogger } from '../fixtures/recording-logger';
 import {
@@ -106,5 +110,48 @@ describe.skipIf(!RUN_DB_TESTS)('RetentionJob as nexus_app, RAW_RETENTION_MONTHS=
     expect(await partitionsOf('api_requests')).toContain(
       partitionName('api_requests', utcMonthStart(now, -3)),
     );
+  });
+
+  it('deletes diagnostic aggregates older than AGGREGATE_RETENTION_DAYS (same run, same lock)', async () => {
+    const { rows: apps } = await db.ownerPool.query<{ id: string }>(
+      `INSERT INTO traffic.apps (slug, display_name, created_by) VALUES ('retention-app', 'R', 'admin@example.com')
+       RETURNING id`,
+    );
+    const appId = apps[0]!.id;
+    const expired = new Date(now.getTime() - (AGGREGATE_RETENTION_DAYS + 2) * 86_400_000);
+    const kept = new Date(now.getTime() - 86_400_000);
+    for (const at of [expired, kept]) {
+      await db.ownerPool.query(
+        `INSERT INTO traffic.ingest_rejections (app_id, source, code, bucket_hour, rejected)
+         VALUES ($1, 'server', 'INVALID_EVENT', $2, 1)`,
+        [appId, at],
+      );
+      await db.ownerPool.query(
+        `INSERT INTO traffic.pii_detections (app_id, source, field, kind, bucket_hour, detections)
+         VALUES ($1, 'browser', 'path', 'phone', $2, 1)`,
+        [appId, at],
+      );
+      await db.ownerPool.query(
+        `INSERT INTO traffic.sso_cookie_outcomes (app_id, outcome, beacon_origin, bucket_hour, beacons)
+         VALUES ($1, 'ok', 'none', $2, 1)`,
+        [appId, at],
+      );
+    }
+    // A fresh job instance: the container's one already ran today.
+    const job = new RetentionJob(
+      container.pools.write,
+      container.services.partitions,
+      container.services.aggregateRetention,
+      new FixedClock(insideRetentionWindow(now)),
+      recordingLogger().logger,
+    );
+    await job.run();
+    for (const table of ['ingest_rejections', 'pii_detections', 'sso_cookie_outcomes']) {
+      const { rows } = await db.ownerPool.query<{ bucket_hour: Date }>(
+        `SELECT bucket_hour FROM traffic.${table} WHERE app_id = $1`,
+        [appId],
+      );
+      expect(rows.map((r) => r.bucket_hour.getTime())).toEqual([kept.getTime()]);
+    }
   });
 });

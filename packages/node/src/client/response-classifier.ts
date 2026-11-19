@@ -1,9 +1,14 @@
+import { ERROR_CODE_PATTERN } from '@nexus/shared/constants';
+
+/** Per-event reject counts keyed by the server's reject CODE (codes only — never messages). */
+export type RejectCounts = Record<string, number>;
+
 /**
  * What the sender must do with an ingest response — guide chapter 4
  * (docs/integration/04-responses-retries.md).
  */
 export type IngestOutcome =
-  | { action: 'done'; accepted: number; duplicates: number; rejected: number }
+  | { action: 'done'; accepted: number; duplicates: number; rejected: number; rejectedByCode: RejectCounts }
   | { action: 'drop'; reason: string }
   | { action: 'pauseAuth'; status: number }
   | { action: 'split' }
@@ -39,17 +44,37 @@ function looksIntercepted(raw: RawIngestResponse): boolean {
   return raw.body.trim() !== '' && parseJson(raw.body) === undefined;
 }
 
+/**
+ * `rejected[]` → `{ CODE: count }`. WHY codes only: the entry's `message` may echo sender data, so it
+ * is never kept. Entries without a well-formed code still count in `rejected`, just not here.
+ */
+function rejectCountsOf(rejected: readonly unknown[]): RejectCounts {
+  const counts: RejectCounts = {};
+  for (const entry of rejected) {
+    const code = (entry as { code?: unknown } | null)?.code;
+    if (typeof code === 'string' && ERROR_CODE_PATTERN.test(code)) counts[code] = (counts[code] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** Read the counters of a 202 body, tolerating missing fields. */
-function countersOf(body: string): { accepted: number; duplicates: number; rejected: number } {
+function countersOf(body: string): {
+  accepted: number;
+  duplicates: number;
+  rejected: number;
+  rejectedByCode: RejectCounts;
+} {
   const value = parseJson(body) as
     | { accepted?: unknown; duplicates?: unknown; rejected?: unknown }
     | null
     | undefined;
   const count = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
+  const rejected: readonly unknown[] = Array.isArray(value?.rejected) ? value.rejected : [];
   return {
     accepted: count(value?.accepted),
     duplicates: count(value?.duplicates),
-    rejected: Array.isArray(value?.rejected) ? value.rejected.length : 0,
+    rejected: rejected.length,
+    rejectedByCode: rejectCountsOf(rejected),
   };
 }
 

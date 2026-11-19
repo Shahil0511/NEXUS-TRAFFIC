@@ -33,6 +33,7 @@ const ENRICHMENT: BrowserEventEnrichment = {
   referrerPath: null,
   clockSkewMs: null,
   actor: ACTOR,
+  envelope: { environment: 'prod', clientTz: null, clientLang: null, release: null },
 };
 
 const map = (overrides: Record<string, unknown>) =>
@@ -110,5 +111,11 @@ describe('toWebEventInsert', () => {
       props: null,
       tool: null,
     });
+  });
+
+  it('copies the batch-level envelope columns onto every row', () => {
+    const envelope = { environment: 'dev', clientTz: 'Asia/Kolkata', clientLang: 'en-IN', release: '2026.11.18-a1b2c3d' } as const;
+    const row = toWebEventInsert(browserEventSchema.parse(browserEvent({})), { ...ENRICHMENT, envelope });
+    expect(row).toMatchObject(envelope);
   });
 });

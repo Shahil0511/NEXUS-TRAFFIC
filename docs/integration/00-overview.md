@@ -8,10 +8,12 @@ and show them on a live dashboard.
 This guide is everything your team needs to wire it in. **You own the changes in your repository —
 Nexus never edits your code.** If anything here is unclear, contact {{DOCS_CONTACT}}.
 
-> **Status (draft, contract v{{CONTRACT_VERSION}}).** The **server endpoint is live**. The browser
-> endpoint and the reference React tracker (`@nexus/react`) follow shortly — the browser payload in
-> [chapter 3](03-browser-contract.md) is final, so you can plan against it. Changes are announced in
-> the changelog (see below).
+> **Status (contract v{{CONTRACT_VERSION}}).** Both endpoints are **live**, and so are the reference
+> SDKs: `@nexus/express` / `@nexus/node` for backends and the React tracker `@nexus/react`
+> ({{REACT_SDK_VERSION}}) for frontends, plus copy-paste snippets for other stacks. The latest
+> additions (all optional, all additive): the `environment` field, the frontend `release`, remote
+> config with a kill switch, a persistent retry queue and the PII detector — see the changelog
+> (below) and the chapters they link to.
 
 ## The two data flows
 
@@ -45,6 +47,7 @@ NEXUS_URL = {{PUBLIC_URL}}
 | `POST` | `{{SERVER_URL}}` | backend events (chapter 2) |
 | `POST` | `{{BROWSER_URL}}` | frontend events (chapter 3) |
 | `GET` | `{{VERIFY_URL}}` | check a key and read the server clock (chapter 10) |
+| `POST` | `{{CONFIG_URL}}` | remote config + kill switch for the browser SDK (chapter 3; the SDK calls it for you) |
 | `GET` | `{{DOCS_URL}}` | this guide |
 | `GET` | `{{DOCS_URL}}openapi.json` | the machine-readable contract (OpenAPI 3.1) |
 
@@ -53,8 +56,11 @@ NEXUS_URL = {{PUBLIC_URL}}
 1. **Get keys** for your app — [chapter 1](01-getting-keys.md).
 2. **Verify** the key with one curl command — [chapter 10](10-verify.md).
 3. **Add the server middleware** — pick your stack in [chapter 8](08-recipes.md).
-4. **Add the browser tracker** — [chapter 3](03-browser-contract.md).
-5. **Check the result** — dry run, then the dashboard — [chapter 10](10-verify.md).
+4. **Add the browser tracker** (and its early install, so API calls link to page views) —
+   [chapter 3](03-browser-contract.md) and [chapter 8](08-recipes.md).
+5. **Tag each deployment** with `environment` (`prod` / `staging` / `dev`) and `release` —
+   [chapter 9](09-environments.md).
+6. **Check the result** — dry run, then the dashboard's Integration page — [chapter 10](10-verify.md).
 
 ## Five rules that matter most
 
@@ -64,7 +70,8 @@ NEXUS_URL = {{PUBLIC_URL}}
 3. **One `eventId` per event, created once.** Reuse the same event object on retries — that is how
    we discard duplicates.
 4. **No personal data beyond the user's email and IP.** No bodies, no query strings, no tokens —
-   see [chapter 5](05-pii.md).
+   see [chapter 5](05-pii.md). We redact phone numbers, PAN, GSTIN, Aadhaar and emails we find in
+   free-text fields, and the Integration page shows you where they came from.
 5. **Send the real client IP and the verified user** — [chapter 6](06-client-ip.md) and
    [chapter 7](07-user-email.md).
 
@@ -86,3 +93,6 @@ NEXUS_URL = {{PUBLIC_URL}}
 | [files/examples/server-batch.json](files/examples/server-batch.json) | a valid server batch |
 | [files/examples/browser-batch.json](files/examples/browser-batch.json) | a valid browser batch |
 | [files/snippets/](08-recipes.md) | reference code per stack (listed in chapter 8) |
+| [files/sdk/nexus-react-{{REACT_SDK_VERSION}}.tgz](files/sdk/nexus-react-{{REACT_SDK_VERSION}}.tgz) | the React tracker `@nexus/react` (vendor it, see chapter 8) |
+| [files/sdk/nexus-express-{{EXPRESS_SDK_VERSION}}.tgz](files/sdk/nexus-express-{{EXPRESS_SDK_VERSION}}.tgz) | the Express middleware `@nexus/express` (the node client is bundled in) |
+| [files/sdk/nexus-node-{{NODE_SDK_VERSION}}.tgz](files/sdk/nexus-node-{{NODE_SDK_VERSION}}.tgz) | the framework-free Node client `@nexus/node` |

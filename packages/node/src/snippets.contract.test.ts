@@ -9,11 +9,19 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { ROUTES, serverIngestBatchSchema, type ServerEventInput } from '@nexus/shared';
-import { describe, expect, it, vi } from 'vitest';
+import { ENVIRONMENT_VALUES, ROUTES, serverIngestBatchSchema, type ServerEventInput } from '@nexus/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createEventId, createNexusClient, DEFAULT_NEXUS_URL, buildIngestUrl } from './index';
-import type { NexusServerBatch, NexusServerEvent } from './types';
+import { createEventId, createNexusClient, DEFAULT_NEXUS_URL, buildIngestUrl, type IngestEndpoint } from './index';
+import type { NexusEnvironment, NexusServerBatch, NexusServerEvent } from './types';
+
+beforeEach(() => {
+  vi.stubEnv('NEXUS_ENVIRONMENT', ''); // hermetic: the developer's shell must not change envelopes
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const SNIPPETS_DIR = path.resolve(__dirname, '../../../docs/snippets');
 
@@ -24,7 +32,11 @@ function snippetFiles(): Array<{ name: string; source: string }> {
 }
 
 /** Send events through a real client with a capturing fetch; return the batches it POSTed. */
-async function capturedBatches(events: NexusServerEvent[], sdk?: { name: string; version: string }) {
+async function capturedBatches(
+  events: NexusServerEvent[],
+  sdk?: { name: string; version: string },
+  environment?: NexusEnvironment,
+) {
   const bodies: Array<{ url: string; body: NexusServerBatch }> = [];
   const fetch = vi.fn(async (url: string, init: RequestInit) => {
     bodies.push({ url, body: JSON.parse(init.body as string) as NexusServerBatch });
@@ -39,6 +51,7 @@ async function capturedBatches(events: NexusServerEvent[], sdk?: { name: string;
     fetch,
     logger: { warn: () => undefined },
     ...(sdk ? { sdk } : {}),
+    ...(environment ? { environment } : {}),
   });
   for (const event of events) client.track(event);
   await client.shutdown();
@@ -87,8 +100,20 @@ describe('SDK payloads validate against the public contract', () => {
   });
 
   it('the adapter sdk identity fits the contract limits', async () => {
-    const [sent] = await capturedBatches([minimalEvent()], { name: '@nexus/express', version: '1.0.0' });
+    const [sent] = await capturedBatches([minimalEvent()], { name: '@nexus/express', version: '1.1.0' });
     expect(serverIngestBatchSchema.safeParse(sent!.body).success).toBe(true);
+  });
+
+  it.each(ENVIRONMENT_VALUES)('a batch with environment %s passes and carries it', async (environment) => {
+    const [sent] = await capturedBatches([fullEvent()], undefined, environment);
+    const parsed = serverIngestBatchSchema.safeParse(sent!.body);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(parsed.data?.environment).toBe(environment);
+  });
+
+  it('without an environment the envelope has no environment key', async () => {
+    const [sent] = await capturedBatches([minimalEvent()]);
+    expect(Object.keys(sent!.body)).not.toContain('environment');
   });
 
   it('a full 500-event batch passes (the max per request)', async () => {
@@ -108,13 +133,24 @@ describe('SDK payloads validate against the public contract', () => {
     expect(sent!.url).toBe(`${DEFAULT_NEXUS_URL}/api${ROUTES.ingest.server.path}`);
     expect(sent!.url).toBe(buildIngestUrl(DEFAULT_NEXUS_URL));
   });
+
+  it('buildIngestUrl addresses every ROUTES.ingest leaf, the remote-config one included', () => {
+    // Compile-time, both directions: IngestEndpoint is hand-mirrored (the .d.ts must not name @nexus/shared).
+    type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+    const mirrorsRoutes: Equals<IngestEndpoint, keyof typeof ROUTES.ingest> = true;
+    expect(mirrorsRoutes).toBe(true);
+    for (const [leaf, route] of Object.entries(ROUTES.ingest)) {
+      expect(buildIngestUrl(DEFAULT_NEXUS_URL, leaf as IngestEndpoint)).toBe(`${DEFAULT_NEXUS_URL}/api${route.path}`);
+    }
+    expect(buildIngestUrl(DEFAULT_NEXUS_URL, 'config')).toBe(`${DEFAULT_NEXUS_URL}/api${ROUTES.ingest.config.path}`);
+  });
 });
 
 describe('docs/snippets use the same URLs as buildIngestUrl', () => {
   const files = snippetFiles();
   const INGEST_PATH = /(?:\/api|\$\{API\})(\/v1\/ingest\/[a-z]+)/g;
   const leaves = Object.fromEntries(
-    Object.entries(ROUTES.ingest).map(([leaf, route]) => [route.path, leaf as 'server' | 'browser' | 'verify']),
+    Object.entries(ROUTES.ingest).map(([leaf, route]) => [route.path, leaf as IngestEndpoint]),
   );
 
   it('found the snippets', () => {

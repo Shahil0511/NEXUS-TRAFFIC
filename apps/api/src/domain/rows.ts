@@ -4,15 +4,25 @@
  */
 import type {
   AuditAction,
+  BeaconOrigin,
+  Environment,
   IdentitySource,
+  IngestRejectionCode,
   IngestSource,
   IpClass,
   KeyKind,
+  PiiField,
+  PiiKind,
+  SdkCaptureModule,
   ServerEventKind,
+  SsoCookieOutcome,
   TimelineItemKind,
 } from '@nexus/shared';
 
-/** @see ../../migrations/0002_apps_and_api_keys.sql */
+/**
+ * @see ../../migrations/0002_apps_and_api_keys.sql
+ * @see ../../migrations/0009_app_sdk_config.sql (sdk_config_*, sdk_disabled_modules)
+ */
 export interface AppRow {
   id: string;
   slug: string;
@@ -24,6 +34,12 @@ export interface AppRow {
   created_by: string;
   created_at: Date;
   updated_at: Date;
+  /** Remote SDK config version (>= 1), bumped on every change (optimistic concurrency). */
+  sdk_config_version: number;
+  /** Browser SDK modules switched OFF (CHECK ⊆ SDK_CAPTURE_MODULE_VALUES). */
+  sdk_disabled_modules: SdkCaptureModule[];
+  /** null until the first change. */
+  sdk_config_updated_at: Date | null;
 }
 
 /** @see ../../migrations/0002_apps_and_api_keys.sql */
@@ -116,8 +132,32 @@ export interface AppTrafficRow extends TrafficSummaryRow {
   last_event_at: Date | null;
   /** API calls with a verified user. */
   identified: number;
-  /** API calls with a browser session id. */
+  /** Linkable API calls (LINKABLE_SQL: http calls from browser-capable devices). */
+  linkable: number;
+  /** Linkable API calls with a browser session id (LINKED_SQL). */
   linked: number;
+}
+
+/**
+ * One value of a breakdown dimension (NULL = the column was empty) and `total` = events in the
+ * window over ALL values (window function, so it ignores the LIMIT).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countByDimension
+ * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.countByDimension
+ */
+export interface BreakdownRow {
+  value: string | null;
+  events: number;
+  total: number;
+}
+
+/**
+ * Devices (distinct anonymous_id on page views) in the window, and how many of them were also
+ * seen in the bounded lookback before it.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.countDeviceReturn
+ */
+export interface DeviceReturnRow {
+  devices: number;
+  returning_devices: number;
 }
 
 /**
@@ -603,6 +643,59 @@ export interface SdkHealthRow {
   max_abs_skew_ms: number | null;
   private_ip_events: number;
   classified_ip_events: number;
+  /** Events with a VERIFIED user (IDENTIFIED_SQL). */
+  identified: number;
+  /** Linkable API calls (LINKABLE_SQL) — always 0 for browser rows. */
+  linkable: number;
+  /** Linkable calls with a session id (LINKED_SQL) — always 0 for browser rows. */
+  linked: number;
+  /** Linkable calls with a page-view id (PAGE_VIEW_LINKED_SQL) — always 0 for browser rows. */
+  page_view_linked: number;
+  /** Events carrying `release`. */
+  with_release: number;
+  /** The release of the newest event that had one (null: none had). */
+  latest_release: string | null;
+  /** occurred_at of that event (picks the newest across SDK rows of one source). */
+  latest_release_at: Date | null;
+}
+
+/** Events per (app, source, environment) in the health window. */
+export interface EnvironmentMixRow {
+  app_id: string;
+  source: IngestSource;
+  environment: Environment;
+  events: number;
+}
+
+/**
+ * Σ of `traffic.ingest_rejections` per reason over the health window, busiest first per app.
+ * `sdk` / `schema_path` are '' when unknown (part of the primary key, so never NULL).
+ * @see ../../migrations/0010_ingest_rejections.sql
+ */
+export interface RejectionReasonRow {
+  app_id: string;
+  source: IngestSource;
+  sdk: string;
+  code: IngestRejectionCode;
+  schema_path: string;
+  rejected: number;
+}
+
+/** @see ../../migrations/0011_pii_detections.sql */
+export interface PiiDetectionRow {
+  app_id: string;
+  source: IngestSource;
+  field: PiiField;
+  kind: PiiKind;
+  detections: number;
+}
+
+/** @see ../../migrations/0012_sso_cookie_outcomes.sql */
+export interface SsoCookieOutcomeRow {
+  app_id: string;
+  outcome: SsoCookieOutcome;
+  beacon_origin: BeaconOrigin;
+  beacons: number;
 }
 
 /** A secret key flagged by the browser endpoint that still authenticates (not revoked/expired). */
@@ -620,4 +713,8 @@ export interface IngestHealthRows {
   counters: IngestCounterSumRow[];
   sdks: SdkHealthRow[];
   exposedKeys: ExposedKeyRow[];
+  environmentMix: EnvironmentMixRow[];
+  rejections: RejectionReasonRow[];
+  piiDetections: PiiDetectionRow[];
+  ssoOutcomes: SsoCookieOutcomeRow[];
 }

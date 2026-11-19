@@ -24,9 +24,12 @@ import { ADVISORY_LOCKS, APP_ROLE } from '../schema';
 export const APP_ROLE_GRANT_STATEMENTS: readonly string[] = [
   `GRANT USAGE ON SCHEMA traffic TO ${APP_ROLE}`,
 
+  // EVERY table a migration creates MUST be listed here: on a fresh database the migrations run
+  // BEFORE the default privileges below exist, so those never cover migration-created tables.
   `GRANT SELECT, INSERT, UPDATE, DELETE
      ON traffic.apps, traffic.api_keys, traffic.api_requests, traffic.web_events,
-        traffic.ingest_counters
+        traffic.ingest_counters, traffic.ingest_rejections, traffic.pii_detections,
+        traffic.sso_cookie_outcomes
      TO ${APP_ROLE}`,
 
   `GRANT SELECT, INSERT ON traffic.admin_audit_log TO ${APP_ROLE}`,

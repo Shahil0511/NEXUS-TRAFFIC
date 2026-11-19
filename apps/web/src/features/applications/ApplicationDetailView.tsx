@@ -53,6 +53,7 @@ import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
+import { ApplicationAudienceSection } from './ApplicationAudienceSection';
 import { useAppTraffic } from './useAppTraffic';
 
 /** Rows of every "top N" panel on the page; "View all" opens the full list filtered to the app. */
@@ -61,8 +62,9 @@ const TOP_N = 8;
 type LinkQuery = Record<string, string | undefined>;
 
 /**
- * One application: who uses it, what they use (routes, pages, tools), what fails and how it
- * trends — each panel a preview of a full page, opened already filtered to this app. Reached
+ * One application: who uses it, what they use (routes, pages, tools), what fails, how it trends
+ * and its audience (devices, browsers, releases) — each panel a preview of a full page, opened
+ * already filtered to this app. Reached
  * through PAGES.applicationDetail(app) with the REGISTERED slug (validated by the page file).
  */
 export function ApplicationDetailView({ app }: { app: string }) {
@@ -121,6 +123,7 @@ export function ApplicationDetailView({ app }: { app: string }) {
         <PagesPanel filters={filters} linkQuery={linkQuery} />
         <ToolsPanel filters={filters} linkQuery={linkQuery} />
       </div>
+      <ApplicationAudienceSection filters={filters} />
     </div>
   );
 }
@@ -163,7 +166,7 @@ function AppHeader({
             </Link>
           </Button>
           <Button asChild variant="outline">
-            <Link href={PAGES.integration()}>
+            <Link href={withQuery(PAGES.integration(), { app: row.app })}>
               <PlugZap aria-hidden="true" /> Integration health
             </Link>
           </Button>

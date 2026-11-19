@@ -5,7 +5,7 @@ import type { NexusClient, NexusServerEvent } from '@nexus/node';
 import express5, { type Request as Request5 } from 'express';
 import express4, { type Request as Request4 } from 'express4';
 import request from 'supertest';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { nexusMiddleware } from './middleware';
 import type { NexusMiddlewareOptions } from './types';
@@ -26,9 +26,19 @@ function fakeClient(): NexusClient & { events: NexusServerEvent[] } {
     },
     flush: () => Promise.resolve(),
     shutdown: () => Promise.resolve(),
-    stats: () => ({ queued: 0, accepted: 0, duplicates: 0, rejected: 0, dropped: 0, attempts: 0, paused: false, enabled: true }),
+    stats: () => ({
+      queued: 0,
+      accepted: 0,
+      duplicates: 0,
+      rejected: 0,
+      rejectedByCode: {},
+      dropped: 0,
+      attempts: 0,
+      paused: false,
+      enabled: true,
+    }),
     trustProxyHops: 1,
-    sdk: { name: 'test', version: '1.0.0' },
+    sdk: { name: 'test', version: '1.1.0' },
   };
 }
 
@@ -88,6 +98,10 @@ async function oneEvent(client: { events: NexusServerEvent[] }): Promise<NexusSe
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 30));
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 // ─── Typings ────────────────────────────────────────────────────────────────
 
@@ -239,6 +253,49 @@ describe.each(FLAVOURS)('nexusMiddleware on %s', (_name, express) => {
     const forced = buildApp(express, { classify: () => 'http' });
     await request(forced.app).get('/sse').expect(200);
     expect((await oneEvent(forced.client)).kind).toBe('http');
+  });
+
+  it.each([
+    ['not a uuid', 'abc'],
+    ['version nibble 0', '0b9f5c1e-2a43-0c4e-9d1a-6f2b8c3d4e5f'],
+    ['variant nibble c (not RFC)', '0b9f5c1e-2a43-4c4e-cd1a-6f2b8c3d4e5f'],
+    ['trailing junk', `${SESSION_ID}x`],
+  ])('drops a malformed session/page-view header (%s) and keeps the event', async (_label, value) => {
+    const { app, client } = buildApp(express);
+    await request(app).get('/me').set('X-Nexus-Session', value).set('X-Nexus-Page-View', value).expect(200);
+    const event = await oneEvent(client);
+    expect(event).toMatchObject({ path: '/me', status: 200 });
+    expect(event.sessionId).toBeUndefined();
+    expect(event.pageViewId).toBeUndefined();
+  });
+
+  it('lower-cases a valid upper-case uuid header', async () => {
+    const { app, client } = buildApp(express);
+    await request(app).get('/me').set('X-Nexus-Session', SESSION_ID.toUpperCase()).expect(200);
+    expect((await oneEvent(client)).sessionId).toBe(SESSION_ID);
+  });
+
+  it('release defaults to NEXUS_RELEASE; the option wins; an over-long value is not sent', async () => {
+    vi.stubEnv('NEXUS_RELEASE', '2026.11.18-a1b2c3d');
+    const fromEnv = buildApp(express);
+    await request(fromEnv.app).get('/me').expect(200);
+    expect((await oneEvent(fromEnv.client)).release).toBe('2026.11.18-a1b2c3d');
+
+    const fromOption = buildApp(express, { release: 'v9' });
+    await request(fromOption.app).get('/me').expect(200);
+    expect((await oneEvent(fromOption.client)).release).toBe('v9');
+
+    vi.stubEnv('NEXUS_RELEASE', 'x'.repeat(65));
+    const tooLong = buildApp(express);
+    await request(tooLong.app).get('/me').expect(200);
+    expect((await oneEvent(tooLong.client)).release).toBeUndefined();
+  });
+
+  it('sends no release when neither the option nor NEXUS_RELEASE is set', async () => {
+    vi.stubEnv('NEXUS_RELEASE', '');
+    const { app, client } = buildApp(express);
+    await request(app).get('/me').expect(200);
+    expect((await oneEvent(client)).release).toBeUndefined();
   });
 
   it('reads the error code from res.locals.errorCode', async () => {

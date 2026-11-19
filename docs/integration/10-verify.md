@@ -1,6 +1,6 @@
 # Verify your integration
 
-Four checks, in order. Each takes a minute.
+Five checks, in order. Each takes a minute.
 
 ## 1. The key works
 
@@ -50,7 +50,21 @@ Aim for **no `rejected`** and **no `warnings`**.
 If step 4 says `accepted: 1` again, the `eventId` or `occurredAt` changed between attempts — fix that
 before going live, or every retry will count twice.
 
-## 4. Real traffic
+## 4. The browser tracker
+
+Open your app with the browser's developer tools on the **Network** tab:
+
+- a `POST …/api/v1/ingest/config` answers `200` (the remote config; at most every
+  {{SDK_CONFIG_MAX_AGE}} minutes, so reload with an empty cache if you miss it);
+- `POST …/api/v1/ingest/browser` requests answer `202` with your `environment`, `release` and the
+  `routeTemplate` of the page in their payload;
+- your own `/api/…` requests — including the very first ones of a page load — carry
+  `X-Nexus-Session` and `X-Nexus-Page-View`.
+
+A `403` on either Nexus request means the key, the origin or the kill switch — the body's
+`error.code` says which ([chapter 11](11-troubleshooting.md)).
+
+## 5. Real traffic
 
 Deploy, click through your app for a minute, then open your app on the dashboard's **Integration**
 page: [{{PUBLIC_URL}}/integration]({{PUBLIC_URL}}/integration) (portal sign-in). No dashboard access?
@@ -58,17 +72,37 @@ Ask {{DOCS_CONTACT}} to check it for you.
 
 ### What the Integration page shows
 
+Everything covers the last 24 hours and **all environments** (the page is not filtered by
+environment, so staging wiring shows up too).
+
 | Item | What it tells you |
 |---|---|
 | Status | **healthy** (events are arriving), **stale** (nothing for a while — did a deploy drop the middleware or `NEXUS_URL`?) or **never** (no event has ever arrived) |
+| Integration level | how far the integration has got — see the table below |
 | Last server event / last browser event | when your backend middleware and your frontend tracker last delivered |
-| Counters (last 24 h) | per source: `accepted`, `duplicates`, `rejected`, `rate limited` |
-| SDKs | every SDK name@version that sent events, with its clock skew (our receive time minus your `sentAt`) |
+| Counters | per source: `accepted`, `duplicates`, `rejected`, `rate limited` |
+| SDKs | every SDK name and version that sent events, with its clock skew (our receive time minus your `sentAt`) |
+| Coverage | **Identified (server / browser)**: share of events with a verified user ([chapter 7](07-user-email.md)). **Linked API calls**: share of linkable API calls (`http` calls from desktop, mobile or tablet browsers) that carry the tracker's session header, and how many carry the page-view header ([chapter 3](03-browser-contract.md)). Shown once a source has {{COVERAGE_MIN_EVENTS}} events. |
+| Environments | events per source and environment ({{ENVIRONMENT_VALUES}}) — is staging tagged as staging? |
+| Releases | per source: share of events carrying `release`, and the newest release seen |
+| Personal data | what the PII detector redacted: source, field, kind and count — never the value ([chapter 5](05-pii.md)) |
+| Rejection reasons | why events were refused: code, SDK and the field that failed (e.g. `occurredAt`, `props.*` — never the value or a message) |
+| SSO cookie (browser identity) | per browser beacon: what happened to the SSO cookie (`ok`, `no-cookie`, `expired`, …) and whether the beacon came from the collector's own origin |
 | Warnings | the problems below — each one links to the chapter that fixes it |
+
+### Integration level
+
+| Level | Meaning |
+|---|---|
+| **Not connected** | no event has arrived yet |
+| **Partial** | only one source sends (server or browser), or nothing arrived recently |
+| **Connected** | both sources send |
+| **Fully integrated** | connected, **and** at least {{COVERAGE_TARGET}} % of linkable API calls are linked, at least {{COVERAGE_TARGET}} % of browser events are identified, at least {{RELEASE_TARGET}} % of each source's events carry a `release`, and there is no *exposed secret key*, *personal data* or *app disabled* warning. A ratio with too few events ({{COVERAGE_MIN_EVENTS}}) does not count. |
 
 | Warning | Meaning | Fix |
 |---|---|---|
 | Exposed secret key | an `nx_sk_` key was sent to the browser endpoint | treat it as leaked: create a new key, deploy it, revoke the old one ([chapter 1](01-getting-keys.md)) |
+| Personal data detected | the PII detector redacted an email, phone number, PAN, GSTIN or Aadhaar number in your events | find the field in the *Personal data* panel and stop sending it ([chapter 5](05-pii.md)) |
 | Private IPs (> 90 %) | your events carry your own proxy's address, not the user's | set `trustProxyHops` to your real proxy count ([chapter 6](06-client-ip.md)) |
 | Clock skew | your server's clock is off by more than about a minute | enable NTP on the host; events too far off are rejected |
 | Rejected events | some events break the contract | read `rejected[].code` in our responses ([chapter 4](04-responses-retries.md), [chapter 11](11-troubleshooting.md)) |
@@ -80,8 +114,12 @@ What good looks like:
 | Check | Good | If not |
 |---|---|---|
 | Events arrive | your endpoints appear within a minute | logs show `[nexus]` warnings? see chapter 11 |
-| Route templates | `/my-app/api/stores/:id`, not one row per id | send `routeTemplate` (chapter 2) |
+| Route templates | `/my-app/api/stores/:id`, not one row per id | send `routeTemplate` (chapter 2; browser: chapter 3) |
+| Environment | production traffic under `prod`, staging under `staging`, laptops under `dev` | set `NEXUS_ENVIRONMENT` / the tracker's `environment` (chapter 9) |
+| Release | every event carries one; the newest release is the one you just deployed | set `NEXUS_RELEASE` / the tracker's `release` (chapter 9) |
+| Linked API calls | close to 100 % for a single-page app | mount the early install, check CORS for other origins (chapters 3 and 8) |
 | IP addresses | public addresses, varied countries/cities | wrong `trustProxyHops` (chapter 6) |
 | Users | signed-in users show an email | `getUser` reads too early or the wrong field (chapter 7) |
 | Status codes | your 4xx/5xx show up | the middleware is mounted after an error handler that ends the response |
 | `rejected` / `warnings` | zero | the codes tell you which field (chapter 4) |
+| Personal data | nothing | the panel names the field — fix the sender (chapter 5) |

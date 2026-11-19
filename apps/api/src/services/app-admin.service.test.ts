@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '@nexus/shared';
-import type { KeyKind } from '@nexus/shared';
+import type { KeyKind, SdkCaptureModule } from '@nexus/shared';
 import type { Pool, PoolClient } from 'pg';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -37,12 +37,37 @@ function fakePool(log: Log): { pool: Pool; client: PoolClient } {
   return { pool, client };
 }
 
-class FakeApps implements Pick<AppRepository, 'findBySlug' | 'insert' | 'update'> {
+class FakeApps implements Pick<
+  AppRepository,
+  'findBySlug' | 'insert' | 'update' | 'updateSdkConfig'
+> {
   rows: AppRow[] = [appRow()];
   failInsertWith: unknown = null;
   readonly execs: Executor[] = [];
   lastPatch: AppPatch | null = null;
+  lastSdkConfig: { disabledModules: readonly SdkCaptureModule[]; expectedVersion: number } | null =
+    null;
   constructor(private readonly log: Log) {}
+
+  /** Mirrors the conditional UPDATE: null unless the stored version equals expectedVersion. */
+  async updateSdkConfig(
+    appId: string,
+    disabledModules: readonly SdkCaptureModule[],
+    expectedVersion: number,
+    exec?: Executor,
+  ): Promise<AppRow | null> {
+    this.execs.push(exec as Executor);
+    this.log.push('apps.updateSdkConfig');
+    this.lastSdkConfig = { disabledModules, expectedVersion };
+    const row = this.rows.find((r) => r.id === appId);
+    if (!row || row.sdk_config_version !== expectedVersion) return null;
+    return {
+      ...row,
+      sdk_config_version: row.sdk_config_version + 1,
+      sdk_disabled_modules: [...disabledModules],
+      sdk_config_updated_at: NOW,
+    };
+  }
 
   async findBySlug(slug: string, exec?: Executor): Promise<AppRow | null> {
     this.execs.push(exec as Executor);
@@ -426,6 +451,65 @@ describe('AppAdminService', () => {
         ERROR_CODES.NOT_FOUND,
       );
       expect(t.log).not.toContain(`invalidate:${APP_ID}`);
+    });
+  });
+
+  describe('updateSdkConfig', () => {
+    it('updates on the expected version, audits, and invalidates the key cache AFTER commit', async () => {
+      const dto = await t.service.updateSdkConfig(
+        'ebo-sales',
+        { expectedVersion: 1, disabledModules: ['retry_queue', 'auto_tools'] },
+        ADMIN,
+      );
+
+      expect(t.log).toEqual([
+        'BEGIN',
+        'apps.updateSdkConfig',
+        'audit.APP_SDK_CONFIG_UPDATE',
+        'COMMIT',
+        'release',
+        `invalidate:${APP_ID}`,
+      ]);
+      // stored as a set in SDK_CAPTURE_MODULE_VALUES order
+      expect(t.apps.lastSdkConfig).toEqual({
+        disabledModules: ['auto_tools', 'retry_queue'],
+        expectedVersion: 1,
+      });
+      expect(t.audit.entries[0]).toEqual({
+        actorEmail: ADMIN.email,
+        action: 'APP_SDK_CONFIG_UPDATE',
+        targetType: 'app',
+        targetId: APP_ID,
+        details: { slug: 'ebo-sales', version: 2, disabledModules: ['auto_tools', 'retry_queue'] },
+      });
+      expect(dto.sdkConfig).toEqual({
+        version: 2,
+        disabledModules: ['auto_tools', 'retry_queue'],
+        updatedAt: NOW.toISOString(),
+      });
+      expect(dto.keys.map((k) => k.id)).toEqual([KEY_ID]);
+      expect(t.apps.execs.every((exec) => exec === t.client)).toBe(true);
+      expect(t.keys.execs).toEqual([t.client]);
+    });
+
+    it('409 CONFLICT on a stale expectedVersion: rolled back, no audit, no invalidation', async () => {
+      t.apps.rows = [appRow({ sdk_config_version: 4 })];
+      await expectAppError(
+        t.service.updateSdkConfig('ebo-sales', { expectedVersion: 3, disabledModules: [] }, ADMIN),
+        409,
+        ERROR_CODES.CONFLICT,
+      );
+      expect(t.log).toEqual(['BEGIN', 'apps.updateSdkConfig', 'ROLLBACK', 'release']);
+      expect(t.audit.entries).toEqual([]);
+    });
+
+    it('404s an unknown slug before any update', async () => {
+      await expectAppError(
+        t.service.updateSdkConfig('nope', { expectedVersion: 1, disabledModules: [] }, ADMIN),
+        404,
+        ERROR_CODES.NOT_FOUND,
+      );
+      expect(t.log).toEqual(['BEGIN', 'ROLLBACK', 'release']);
     });
   });
 });

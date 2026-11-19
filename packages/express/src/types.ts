@@ -51,7 +51,7 @@ export interface NexusMiddlewareOptions<Req extends NexusRequestLike = NexusRequ
   trustIdentityHeader?: boolean;
   /** Your app's error CODE for this response (never a message). Default `res.locals.errorCode`. */
   getErrorCode?: (req: Req, res: NexusResponseLike) => string | null | undefined;
-  /** Your release/version label, e.g. a git sha. */
+  /** Your release/version label, e.g. a git sha. Default `process.env.NEXUS_RELEASE`; over 64 chars → not sent. */
   release?: string;
 }
 

@@ -23,7 +23,9 @@ flowchart LR
     PG[(PostgreSQL 18\ndatabase nexus_traffic\nschema traffic)]
   end
   BE -- POST /traffic/api/v1/ingest/server\nX-Nexus-Key: nx_sk_… --> NG
-  FE -- sendBeacon /traffic/api/v1/ingest/browser\nkey nx_pk_… + SSO cookie --> NG
+  FE -- fetch/sendBeacon /traffic/api/v1/ingest/browser\nkey nx_pk_… + SSO cookie --> NG
+  FE -- POST /traffic/api/v1/ingest/config\nremote config + kill switch --> NG
+  FE -. X-Nexus-Session / X-Nexus-Page-View\non same-origin API calls .-> BE
   NG --> EDGE
   EDGE --> API
   EDGE --> WEB
@@ -73,13 +75,40 @@ Handoff: the Team Lead gets a zip from `scripts/handoff/make-handoff-zip.ps1` (s
 
 1. An app's middleware batches events and POSTs to `/v1/ingest/server` with its **secret key**.
 2. `server-key-auth` checks the key (HMAC hash lookup), rate limits apply per key.
-3. The envelope is validated; each event is validated **separately** (one bad event never fails the batch).
-4. Enrichers run in order: path sanitizer → route normalizer → endpoint id → geo → IP anonymizer →
-   user agent → identity → user key.
+3. The envelope is validated (a failure after auth is counted in `ingest_rejections`); each event is
+   validated **separately** (one bad event never fails the batch).
+4. Once per batch the `environment` is resolved from the claim (ADR 0008). Enrichers run per event:
+   path sanitizer → **PII scrubber pass 1** → route normalizer → endpoint id → **PII pass 2** (stored
+   path segments) → geo → IP anonymizer → user agent → identity → user key (ADR 0010).
 5. One `INSERT … ON CONFLICT DO NOTHING RETURNING` writes the batch (synchronous — no data lost on crash).
    Retries of the same `eventId` become `duplicates`.
-6. Committed rows feed the live window → Socket.io `traffic:tick` / `traffic:events`.
+6. After commit: `ingest_counters`, rejection reasons and PII detections are upserted (each failure
+   only logged); committed **prod** rows feed the live window → Socket.io `traffic:tick` / `traffic:events`.
 7. The app gets `202 {accepted, duplicates, rejected[], warnings[]}`.
+
+## Browser endpoints and the CORS layering
+
+`POST /v1/ingest/browser` (beacons) and `POST /v1/ingest/config` (the SDK's remote config, ADR 0009)
+take the publishable key in a `text/plain` body, so they are CORS *simple* requests. Three CORS steps:
+
+| Step | When | Rule |
+|---|---|---|
+| `browserIngestPreflight` (`r.use`, OPTIONS only) | preflights | reflect the Origin if **some** active, browser-enabled app allows it (`AllowedOriginCache`, 30 s LRU) |
+| `browserIngestEarlyCors` | FIRST on both POSTs, before the body is even read | looser rule: **any** registered app lists the origin, whatever `is_active` / `browser_ingest_enabled` (own `AllowedOriginCache` instance) → `ACAO` + `ACAC` + exposed `X-Nexus-Contract, Retry-After`, so pre-auth errors (bad key, kill switch, `413`) are readable by the SDK — also for a killed app's own origin |
+| `browserIngestCors` | after `publishableKeyAuth` | the strict per-app list (`apps.allowed_origins`) for the success path; `originGuard` then refuses anything else |
+
+The config route uses its own rate limiter (`browserConfigRateLimit`, no ingest counters), no session
+limiter and no rejection recorder. Its answer rides `AppKeyCache`, so it costs no extra query. The
+browser beacon also records the SSO cookie outcome per batch (`sso_cookie_outcomes`), except for
+retry-queue replays. The per-IP failure limiter counts only key-guess codes plus
+`ORIGIN_NOT_ALLOWED` (`IP_FAILURE_ERROR_CODES`), so kill-switch `403`s never block an IP.
+
+## Diagnostics tables
+
+Next to `ingest_counters` (accepted / duplicates / rejected / rate-limited per hour), three hourly
+aggregates feed the Integration page (ADR 0013): `ingest_rejections` (code, SDK, normalised schema
+path), `pii_detections` (field, kind) and `sso_cookie_outcomes` (outcome, beacon origin). They hold
+codes and counts only and are pruned after `AGGREGATE_RETENTION_DAYS` (90) by the retention job.
 
 ## Lifecycle of a dashboard request
 
@@ -90,7 +119,8 @@ component. The exact files are listed in [03-code-navigation.md](03-code-navigat
 
 ## Real-time
 
-- Namespace `/live`; client subscribes with `live:subscribe {app?}`.
+- Namespace `/live`; client subscribes with `live:subscribe {app?}`. Live is **production only**
+  (`LiveFeed` drops non-prod rows; ADR 0008) — every other analytics page takes the `env` filter.
 - Every 2 s the server emits `traffic:tick` (cumulative counts for the *current minute*).
 - New committed events are pushed in batches (`traffic:events`, ≤ 1/s).
 - On (re)connect the dashboard loads `GET /v1/live/snapshot`, built from the database, so nothing is
@@ -107,3 +137,9 @@ component. The exact files are listed in [03-code-navigation.md](03-code-navigat
 
 See [decisions/0001-contract-and-naming.md](decisions/0001-contract-and-naming.md) and, for the
 database location and role modes, [decisions/0002-external-database.md](decisions/0002-external-database.md).
+Phase A (data quality): environment [0008](decisions/0008-environment-dimension.md), remote config +
+kill switch + CORS layering [0009](decisions/0009-sdk-remote-config-and-kill-switch.md), PII detector
+[0010](decisions/0010-ingest-pii-detector.md), header propagation + early entry
+[0011](decisions/0011-header-propagation-and-early-entry.md), retry queue
+[0012](decisions/0012-browser-retry-queue.md), diagnostics + KPIs
+[0013](decisions/0013-integration-diagnostics-and-kpis.md).

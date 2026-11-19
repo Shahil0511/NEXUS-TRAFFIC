@@ -28,9 +28,16 @@ Stack:                  e.g. Express 4 (TypeScript, ESM) + Next.js 16
 
 ### Staging and local development
 
-There is **no environment field**. Register a separate app for non-production use, with the suffix
-`-dev` (e.g. `ebo-sales-dev`) and origins such as `http://localhost:3000`. Its data stays separate
-from production. See [chapter 9](09-environments.md).
+Every event carries an **`environment`** ({{ENVIRONMENT_VALUES}}; default `{{DEFAULT_ENVIRONMENT}}`),
+and the dashboard shows production unless a viewer picks another environment. So one app — one set
+of keys — can serve production, staging and local development: set `NEXUS_ENVIRONMENT` /
+the tracker's `environment` per deployment ([chapter 9](09-environments.md)). Browser events from
+`localhost` are always stored as `dev`, whatever they claim.
+
+A browser on `localhost` can only send if its origin (e.g. `http://localhost:3000`) is registered
+for the app. If you would rather not list developer origins on your production app, a separate app
+with the suffix `-dev` (e.g. `ebo-sales-dev`) is **still allowed**: it gets its own keys, its own
+origins and its own kill switch, and its data stays apart from production.
 
 ## The two kinds of key
 

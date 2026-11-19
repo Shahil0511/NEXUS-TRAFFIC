@@ -6,6 +6,7 @@
  * - Idempotent: ON CONFLICT (occurred_at, event_id) DO NOTHING; returns only the inserted event ids,
  *   so the service reports `duplicates = sent - inserted`.
  * @see ../../migrations/0004_api_requests.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql (environment)
  */
 import type { Pool } from 'pg';
 
@@ -58,6 +59,7 @@ const COLUMNS: readonly ColumnSpec[] = [
   { column: 'ua_os', arrayType: 'text[]', value: (r) => r.uaOs },
   { column: 'ua_device', arrayType: 'text[]', value: (r) => r.uaDevice },
   { column: 'sdk', arrayType: 'text[]', value: (r) => r.sdk },
+  { column: 'environment', arrayType: 'text[]', value: (r) => r.environment },
 ];
 
 /** Built once: INSERT INTO … SELECT * FROM unnest($1::timestamptz[], …) ON CONFLICT DO NOTHING. */

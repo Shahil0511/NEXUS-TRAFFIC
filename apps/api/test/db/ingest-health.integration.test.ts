@@ -11,8 +11,13 @@
  *               2 browser page views (sdk @nexus/react@1.0.0, skew 90 000 ms); counters: server
  *               accepted 25 / rejected 2, browser rate-limited 1; one EXPOSED secret key, one
  *               exposed-but-revoked key.
+ *               Diagnostics (ADR 0013): PII detections (server path/phone ×2, browser label/email
+ *               ×1, plus one 3 days old), rejection reasons (browser ORIGIN_NOT_ALLOWED ×5 with
+ *               sdk/path '', server INVALID_EVENT ×2, plus one 3 days old), SSO outcomes
+ *               (no-cookie/cross_origin ×7, ok/same_origin ×3).
  * - old-app     one server event 3 days ago (stale), nothing in the window.
  * - silent-app  nothing at all (never).
+ * - stage-app   2 STAGING server events + 1 DEV page view (Integration Health is NOT env-filtered).
  */
 import { randomUUID } from 'node:crypto';
 
@@ -67,13 +72,54 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
     return key.id;
   }
 
-  async function insertPageView(appId: string, at: Date, skewMs: number): Promise<void> {
+  async function insertPageView(
+    appId: string,
+    at: Date,
+    skewMs: number,
+    environment = 'prod',
+  ): Promise<void> {
     await db.ownerPool.query(
       `INSERT INTO traffic.web_events
          (occurred_at, event_id, clock_skew_ms, app_id, session_id, seq, event_type, path,
-          path_template, identity_source, ip_class, sdk)
-       VALUES ($1, $2, $3, $4, $5, 0, 'page_view', '/home', '/home', 'anonymous', 'unknown', $6)`,
-      [at, randomUUID(), skewMs, appId, randomUUID(), '@nexus/react@1.0.0'],
+          path_template, identity_source, ip_class, sdk, environment)
+       VALUES ($1, $2, $3, $4, $5, 0, 'page_view', '/home', '/home', 'anonymous', 'unknown', $6, $7)`,
+      [at, randomUUID(), skewMs, appId, randomUUID(), '@nexus/react@1.0.0', environment],
+    );
+  }
+
+  /** Hour bucket of `at`, aligned like the counter repositories (IST date_bin). */
+  async function hourOf(at: Date): Promise<Date> {
+    const { rows } = await db.ownerPool.query<{ bucket: Date }>(
+      `SELECT date_bin('1 hour', $1::timestamptz, TIMESTAMPTZ '2000-01-01T00:00:00+05:30') AS bucket`,
+      [at],
+    );
+    return rows[0]?.bucket ?? at;
+  }
+
+  /** The three hourly diagnostic tables, written as the owner (independent of the ingest code). */
+  async function seedDiagnostics(appId: string): Promise<void> {
+    const recent = await hourOf(ago(MINUTE));
+    const old = await hourOf(ago(3 * DAY));
+    await db.ownerPool.query(
+      `INSERT INTO traffic.pii_detections (app_id, source, field, kind, bucket_hour, detections)
+       VALUES ($1, 'server', 'path', 'phone', $2, 2),
+              ($1, 'browser', 'label', 'email', $2, 1),
+              ($1, 'server', 'path', 'email', $3, 50)`,
+      [appId, recent, old],
+    );
+    await db.ownerPool.query(
+      `INSERT INTO traffic.ingest_rejections
+         (app_id, source, sdk, code, schema_path, bucket_hour, rejected)
+       VALUES ($1, 'browser', '', 'ORIGIN_NOT_ALLOWED', '', $2, 5),
+              ($1, 'server', '@nexus/express@1.0.0', 'INVALID_EVENT', 'events.*.path', $2, 2),
+              ($1, 'server', '', 'DB_CONSTRAINT', '', $3, 99)`,
+      [appId, recent, old],
+    );
+    await db.ownerPool.query(
+      `INSERT INTO traffic.sso_cookie_outcomes (app_id, outcome, beacon_origin, bucket_hour, beacons)
+       VALUES ($1, 'no-cookie', 'cross_origin', $2, 7),
+              ($1, 'ok', 'same_origin', $2, 3)`,
+      [appId, recent],
     );
   }
 
@@ -82,20 +128,33 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
     const busy = await newApp('busy-app');
     const old = await newApp('old-app');
     await newApp('silent-app');
+    const stage = await newApp('stage-app');
 
     const ingest = new ApiRequestIngestRepository(db.appPool);
     await ingest.insertBatch([
       ...Array.from({ length: 24 }, (_, i) =>
-        apiRequestRow(busy, { occurredAt: ago((i + 1) * MINUTE), ip: '10.0.0.5', ipClass: 'private' }),
+        apiRequestRow(busy, {
+          occurredAt: ago((i + 1) * MINUTE),
+          ip: '10.0.0.5',
+          ipClass: 'private',
+        }),
       ),
       apiRequestRow(busy, { occurredAt: ago(30 * MINUTE) }),
       apiRequestRow(old, { occurredAt: ago(3 * DAY) }),
+      ...[4, 5].map((minutes) =>
+        apiRequestRow(stage, { occurredAt: ago(minutes * MINUTE), environment: 'staging' }),
+      ),
     ]);
+    await insertPageView(stage, ago(6 * MINUTE), 0, 'dev');
+    await seedDiagnostics(busy);
     await insertPageView(busy, ago(2 * MINUTE), 90_000);
     await insertPageView(busy, ago(3 * MINUTE), 90_000);
 
     const counters = new IngestCounterRepository(db.appPool);
-    const count = (source: 'server' | 'browser', fields: Partial<Record<'accepted' | 'rejected' | 'rateLimited', number>>) =>
+    const count = (
+      source: 'server' | 'browser',
+      fields: Partial<Record<'accepted' | 'rejected' | 'rateLimited', number>>,
+    ) =>
       counters.increment(
         { appId: busy, source, accepted: 0, duplicates: 0, rejected: 0, rateLimited: 0, ...fields },
         ago(MINUTE),
@@ -117,7 +176,10 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
     await newSecretKey(busy, 'CleanKey');
 
     queryPool = createQueryPool(db.appUrl, 4, quietLogger);
-    const service = new IntegrationService(new IngestHealthRepository(queryPool), new FixedClock(now));
+    const service = new IntegrationService(
+      new IngestHealthRepository(queryPool),
+      new FixedClock(now),
+    );
     health = await service.health();
   });
 
@@ -133,6 +195,7 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
       ['busy-app', 'healthy'],
       ['old-app', 'stale'],
       ['silent-app', 'never'],
+      ['stage-app', 'healthy'],
     ]);
   });
 
@@ -153,8 +216,19 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
 
   it('reports each SDK with its median / worst clock skew, busiest first', () => {
     expect(appOf('busy-app')?.sdks).toEqual([
-      expect.objectContaining({ source: 'server', sdk: '@nexus/express@1.0.0', events: 25, medianClockSkewMs: 120, maxAbsClockSkewMs: 120 }),
-      expect.objectContaining({ source: 'browser', sdk: '@nexus/react@1.0.0', events: 2, medianClockSkewMs: 90_000 }),
+      expect.objectContaining({
+        source: 'server',
+        sdk: '@nexus/express@1.0.0',
+        events: 25,
+        medianClockSkewMs: 120,
+        maxAbsClockSkewMs: 120,
+      }),
+      expect.objectContaining({
+        source: 'browser',
+        sdk: '@nexus/react@1.0.0',
+        events: 2,
+        medianClockSkewMs: 90_000,
+      }),
     ]);
     expect(appOf('old-app')?.sdks).toEqual([]);
   });
@@ -162,7 +236,14 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
   it('computes the private-IP share of server events and warns', () => {
     const busy = appOf('busy-app');
     expect(busy?.privateIpRatio).toBe(0.96);
-    expect(busy?.warnings).toEqual(['exposed_key', 'private_ips', 'clock_skew', 'rejected_events', 'rate_limited']);
+    expect(busy?.warnings).toEqual([
+      'exposed_key',
+      'pii_detected',
+      'private_ips',
+      'clock_skew',
+      'rejected_events',
+      'rate_limited',
+    ]);
   });
 
   it('lists only the exposed key that still authenticates (revoked one hidden, no secrets)', () => {
@@ -170,5 +251,80 @@ describe.skipIf(!RUN_DB_TESTS)('integration health as nexus_app on the query poo
       expect.objectContaining({ keyPrefix: 'nx_sk_Exposed1', label: 'key Exposed1' }),
     ]);
     expect(JSON.stringify(health)).not.toMatch(/key_hash|keyHash/);
+  });
+
+  // ─── Diagnostics and KPIs (ADR 0013) ──────────────────────────────────────
+
+  it('splits each SDK label into name and version', () => {
+    expect(appOf('busy-app')?.sdks.map((sdk) => [sdk.name, sdk.version])).toEqual([
+      ['@nexus/express', '1.0.0'],
+      ['@nexus/react', '1.0.0'],
+    ]);
+  });
+
+  it('identity, linking and release coverage per source (null below COVERAGE_MIN_EVENTS)', () => {
+    const busy = appOf('busy-app');
+    // apiRequestRow: verified user, session id, desktop UA, http, release 1.4.2 on every call
+    expect(busy?.identityCoverage).toEqual([
+      { source: 'server', events: 25, covered: 25, ratio: 1 },
+      { source: 'browser', events: 2, covered: 0, ratio: null },
+    ]);
+    expect(busy?.linkingCoverage).toEqual({
+      linkable: 25,
+      linked: 25,
+      pageViewLinked: 0,
+      ratio: 1,
+    });
+    expect(busy?.releases).toEqual([
+      { source: 'server', events: 25, withRelease: 25, ratio: 1, latestRelease: '1.4.2' },
+      { source: 'browser', events: 2, withRelease: 0, ratio: null, latestRelease: null },
+    ]);
+  });
+
+  it('the environment mix is per source (INGEST_SOURCE_VALUES order) and NOT filtered to prod', () => {
+    expect(appOf('busy-app')?.environments).toEqual([
+      { source: 'server', environment: 'prod', events: 25 },
+      { source: 'browser', environment: 'prod', events: 2 },
+    ]);
+    expect(appOf('stage-app')?.environments).toEqual([
+      { source: 'server', environment: 'staging', events: 2 },
+      { source: 'browser', environment: 'dev', events: 1 },
+    ]);
+  });
+
+  it('PII detections, rejection reasons and SSO outcomes of the window, busiest first', () => {
+    const busy = appOf('busy-app');
+    expect(busy?.piiDetections).toEqual([
+      { source: 'server', field: 'path', kind: 'phone', detections: 2 },
+      { source: 'browser', field: 'label', kind: 'email', detections: 1 },
+    ]);
+    expect(busy?.rejections).toEqual([
+      { source: 'browser', sdk: null, code: 'ORIGIN_NOT_ALLOWED', schemaPath: null, rejected: 5 },
+      {
+        source: 'server',
+        sdk: '@nexus/express@1.0.0',
+        code: 'INVALID_EVENT',
+        schemaPath: 'events.*.path',
+        rejected: 2,
+      },
+    ]);
+    expect(busy?.ssoCookieOutcomes).toEqual([
+      { outcome: 'no-cookie', beaconOrigin: 'cross_origin', beacons: 7 },
+      { outcome: 'ok', beaconOrigin: 'same_origin', beacons: 3 },
+    ]);
+    expect(appOf('old-app')).toMatchObject({
+      piiDetections: [],
+      rejections: [],
+      ssoCookieOutcomes: [],
+    });
+  });
+
+  it('integration level: blocking warnings keep busy-app at connected', () => {
+    expect(health.apps.map((app) => [app.app, app.level])).toEqual([
+      ['busy-app', 'connected'],
+      ['old-app', 'partial'],
+      ['silent-app', 'not_connected'],
+      ['stage-app', 'connected'],
+    ]);
   });
 });

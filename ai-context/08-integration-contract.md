@@ -1,7 +1,9 @@
 # 08 — integration contract (one-page summary)
 
 > Filled in S1 (server contract live, browser contract specified). Completed in S5: SDK packages,
-> snippet contract tests, the Integration page and the Apps admin page.
+> snippet contract tests, the Integration page and the Apps admin page. Phase A (2026-11, all
+> additive within v1): environment, browser release, remote config + kill switch, retry queue, PII
+> detector, rejection reasons, coverage KPIs (ADRs 0008–0013).
 
 **The link to send other teams:** `https://nexus.libas.in/traffic/api/docs/` (public, no SSO).
 It is built from `docs/integration/*.md` by `scripts/build-docs.ts` (`npm run docs:build`) and served
@@ -21,10 +23,16 @@ when stale). Contract changes are logged in `docs/CHANGELOG.md`.
 | `ingest.server` | `POST /v1/ingest/server` (`?dryRun=1`), JSON, ≤ 500 events / 512 KiB | secret key `nx_sk_…` in `X-Nexus-Key` | `202 {accepted, duplicates, rejected[], warnings[], dryRun?}` |
 | `ingest.browser` | `POST /v1/ingest/browser`, `text/plain` beacon, ≤ 50 events / 60 KiB | publishable key `nx_pk_…` in the body + Origin allowlist + base-path rule | same `202` body (live since S3; chain in [03-code-navigation.md](03-code-navigation.md) §3b) |
 | `ingest.verify` | `GET /v1/ingest/verify` | either key in `X-Nexus-Key` | `200 {app, keyKind, contractVersion, serverTime}` |
+| `ingest.config` | `POST /v1/ingest/config`, `text/plain` `{key, client?: {sdk, version}}` (simple request) | publishable key in the body + the browser Origin rules | `200 SdkRemoteConfig {contract, version, enabled, disabledModules, maxAgeMs}`, `Cache-Control: no-store`; kill = `401/403` with `SDK_KILL_ERROR_CODES` ([ADR 0009](decisions/0009-sdk-remote-config-and-kill-switch.md)) |
 
 Errors use `{ error: { code, message, details?, requestId? } }`. Sender rules: 202 never retry ·
 400/415 drop · 401/403 pause 5 min · 413 split · 429/503 honour `Retry-After` · 5xx/network back off
 1/2/4 s, max 3 · re-stamp `sentAt` per attempt · 3xx/HTML = a proxy is intercepting.
+Error responses of the two browser POSTs carry ACAO + ACAC for any origin registered for some app
+— killed or disabled apps included (pre-auth early CORS) — so a cross-origin SDK can read kill codes.
+Only `IP_FAILURE_ERROR_CODES` (the key guesses + `ORIGIN_NOT_ALLOWED`) count toward the per-IP failure
+limiter; kill codes never do. Warnings: `FIELD_DROPPED`, `FIELD_TRUNCATED`, `FIELD_REDACTED`
+(PII replaced or dropped — [ADR 0010](decisions/0010-ingest-pii-detector.md)).
 
 ## What a server event carries
 
@@ -33,21 +41,32 @@ offset), `method`, `path` (public path incl. base path, no query), `status`, `du
 Optional: `routeTemplate` (strongly recommended), `kind` (`http`|`stream`), `ip` (resolved with the
 right-to-left hop algorithm), `userEmail` (verified identity → `app_attested`), `requestId`,
 `userAgent`, `requestBytes`, `responseBytes`, `errorCode` (code only), `release`, `sessionId`,
-`pageViewId`. Envelope `{sentAt, sdk?, events[1..500]}`. Window: −7 days / +5 minutes.
+`pageViewId`. Envelope `{sentAt, sdk?, environment?, events[1..500]}`. Window: −7 days / +5 minutes.
+`environment` (`prod` | `staging` | `dev`) is lenient on the wire: unknown → `FIELD_DROPPED`, stored
+as `prod`; never guessed from an IP ([ADR 0008](decisions/0008-environment-dimension.md)).
 
 ## What a browser batch carries
 
-Envelope `{key, sentAt, sessionId, anonymousId?, user?.email (hint → client_claimed), client?, events[1..50]}`.
+Envelope `{key, sentAt, sessionId, anonymousId?, user?.email (hint → client_claimed), environment?,
+release?, client? {sdk, version, tz, lang, replay}, events[1..50]}`. A loopback page origin is
+always stored as `dev`. `client.replay: true` = a persistent-retry-queue replay: no SSO cookie, stored
+anonymous ([ADR 0012](decisions/0012-browser-retry-queue.md)). `tz` / `lang` are stored when they
+match `CLIENT_TZ_PATTERN` / `CLIENT_LANG_PATTERN`.
 Event types `page_view` (nav), `page_time` (`pageViewId`, `visibleMs` **delta**, `final`, `reason`),
-`tool_use` (`tool`, auto-captured from `[data-nexus-tool]`), `custom` (`name`).
+`tool_use` (`tool`, auto-captured from `[data-nexus-tool]`), `custom` (`name`). `routeTemplate`
+(`:name`, trailing catch-all `:name*`) is kept only when it fits the path, else dropped and guessed.
 
 ## Reference code (`docs/snippets/`, downloadable at `…/api/docs/files/snippets/*`)
 
 `express-cjs.js` (plain JS), `express-esm.ts` (TS ESM/NodeNext, also used by NestJS),
 `nestjs.main.ts`, `fastapi_nexus_asgi.py` (pure ASGI + httpx, explicit `trust_proxy_hops`), `curl.sh`
 (verify → dry run → send → resend = duplicates). All batch (5 s / 100 events / ≤ 500 per request),
-follow the retry rules and never throw into the host app. Browser: `next-tracker.tsx` / `vite-react-tracker.tsx`
-(`@nexus/react`). SDK tarballs: `npm run sdk:pack` (after `docs:build`, which wipes `docs/dist`).
+follow the retry rules and never throw into the host app; they send `environment` (default
+`NEXUS_ENVIRONMENT`, only when valid) and `release` (`NEXUS_RELEASE`). Browser: `next-tracker.tsx` /
+`vite-react-tracker.tsx` (`@nexus/react`), plus the early install `next-instrumentation-client.ts` /
+`vite-nexus-early.ts` (`@nexus/react/early`, [ADR 0011](decisions/0011-header-propagation-and-early-entry.md)).
+SDKs `@nexus/react`, `@nexus/node`, `@nexus/express` are **1.1.0**; tarballs: `npm run sdk:pack`
+(after `docs:build`, which wipes `docs/dist`), served at `…/api/docs/files/sdk/*`.
 
 **Snippet contract tests** keep snippets, SDKs and the guide on the contract:
 `packages/node/src/snippets.contract.test.ts` (URLs = `buildIngestUrl`),
@@ -65,15 +84,29 @@ Rotation = create a new key → team deploys it → **expire** the old key with 
 
 ## Integration Health (`ROUTES.integration.health`, any dashboard user)
 
-The dashboard's **Integration** page is where teams check their wiring (guide chapter 10 §4). Per app,
+The dashboard's **Integration** page is where teams check their wiring (guide chapter 10 §5). Per app,
 over the last 24 h (`INTEGRATION_HEALTH_WINDOW_MS`): status `healthy | stale | never` (newest event of
 either source vs `INTEGRATION_STALE_AFTER_MS`), last server / browser event, accepted / duplicates /
-rejected / rate-limited (`ingest_counters`), SDKs (`name@version`) with median and worst clock skew,
-private-IP share of server events, exposed secret keys that still authenticate, and warnings
-(`INTEGRATION_WARNING_VALUES`: exposed_key, app_disabled, never_received, stale, private_ips > 90 %
-→ trustProxyHops, clock_skew > 60 s, rejected_events, rate_limited). Thresholds:
-`packages/shared/src/constants/integration.ts`; rules: `apps/api/src/domain/integration-health.ts`; each
-warning links the guide chapter that fixes it (`apps/web/src/features/integration/integrationCopy.ts`).
+rejected / rate-limited (`ingest_counters`), SDKs (`name@version`, split into name and version) with
+median and worst clock skew, private-IP share of server events, exposed secret keys that still
+authenticate, and warnings (`INTEGRATION_WARNING_VALUES`: exposed_key, pii_detected, app_disabled,
+never_received, stale, private_ips > 90 % → trustProxyHops, clock_skew > 60 s, rejected_events,
+rate_limited). Phase A adds ([ADR 0013](decisions/0013-integration-diagnostics-and-kpis.md)): identity
+coverage per source, linking coverage (linkable = browser-device `http` calls), release coverage +
+newest release, environment mix, PII detections, rejection reasons (code, normalised SDK, schema
+path), SSO cookie outcomes per beacon origin, and the integration **level** (`not_connected` →
+`partial` → `connected` → `complete`). It is never filtered by environment. Thresholds:
+`packages/shared/src/constants/integration.ts`; rules: `apps/api/src/domain/integration-health.ts`; KPI
+SQL: `apps/api/src/repositories/coverage-predicates.ts`; each warning links the guide chapter that
+fixes it (`apps/web/src/features/integration/integrationCopy.ts`).
+
+## Remote config (Apps page, admins)
+
+The Apps page's remote config dialog (`apps/web/src/features/apps/RemoteConfigDialog.tsx`) edits the
+kill switch (`browserIngestEnabled`, through `apps.update`) and the module switches
+(`ROUTES.apps.updateSdkConfig`, `{expectedVersion, disabledModules}`, `409 CONFLICT` on a stale
+version, audited `APP_SDK_CONFIG_UPDATE`). Module switches reach SDK ≥ `SDK_MODULE_SWITCH_MIN_VERSION`
+within `configMaxAgeMs` (5 min) + the 30 s key cache.
 
 ## Per-app hints (informational — we never edit `D:\server`)
 

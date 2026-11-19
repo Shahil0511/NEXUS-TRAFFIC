@@ -5,7 +5,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { loadMigrations } from '../../src/db/migration-runner/loader';
 import { isDataError, isMissingPartition } from '../../src/db/pg-errors';
+import { MIGRATIONS_DIR } from '../../src/db/schema';
 import type { AppRow } from '../../src/domain/rows';
 import { AdminAuditRepository } from '../../src/repositories/admin-audit.repository';
 import { ApiRequestIngestRepository } from '../../src/repositories/api-request-ingest.repository';
@@ -64,7 +66,43 @@ describe.skipIf(!RUN_DB_TESTS)('nexus_app privileges and error classification (d
     const audit = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.admin_audit_log');
     const ledger = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.schema_migrations');
     expect(audit.rows[0].n).toBe(1);
-    expect(ledger.rows[0].n).toBe(6);
+    expect(ledger.rows[0].n).toBe((await loadMigrations(MIGRATIONS_DIR)).length);
+  });
+
+  // ─── the diagnostic aggregates (0010–0012): listed explicitly in grants.ts ─
+
+  it.each([
+    [
+      'ingest_rejections',
+      `INSERT INTO traffic.ingest_rejections (app_id, source, sdk, code, schema_path, bucket_hour, rejected)
+       VALUES ($1, 'browser', '', 'INVALID_EVENT', 'events.*.path', $2, 1)
+       ON CONFLICT (app_id, source, sdk, code, schema_path, bucket_hour)
+       DO UPDATE SET rejected = traffic.ingest_rejections.rejected + EXCLUDED.rejected`,
+      `SELECT rejected AS n FROM traffic.ingest_rejections WHERE app_id = $1`,
+    ],
+    [
+      'pii_detections',
+      `INSERT INTO traffic.pii_detections (app_id, source, field, kind, bucket_hour, detections)
+       VALUES ($1, 'server', 'path', 'email', $2, 1)
+       ON CONFLICT (app_id, source, field, kind, bucket_hour)
+       DO UPDATE SET detections = traffic.pii_detections.detections + EXCLUDED.detections`,
+      `SELECT detections AS n FROM traffic.pii_detections WHERE app_id = $1`,
+    ],
+    [
+      'sso_cookie_outcomes',
+      `INSERT INTO traffic.sso_cookie_outcomes (app_id, outcome, beacon_origin, bucket_hour, beacons)
+       VALUES ($1, 'no-cookie', 'cross_origin', $2, 1)
+       ON CONFLICT (app_id, outcome, beacon_origin, bucket_hour)
+       DO UPDATE SET beacons = traffic.sso_cookie_outcomes.beacons + EXCLUDED.beacons`,
+      `SELECT beacons AS n FROM traffic.sso_cookie_outcomes WHERE app_id = $1`,
+    ],
+  ])('nexus_app can upsert into and prune %s', async (table, upsert, read) => {
+    const hour = new Date('2026-10-01T04:30:00Z');
+    await db.appPool.query(upsert, [app.id, hour]);
+    await db.appPool.query(upsert, [app.id, hour]);
+    const { rows } = await db.appPool.query<{ n: number }>(read, [app.id]);
+    expect(rows).toEqual([{ n: 2 }]);
+    await db.appPool.query(`DELETE FROM traffic.${table} WHERE app_id = $1`, [app.id]);
   });
 
   // ─── partitions created later by the SECURITY DEFINER function ────────────

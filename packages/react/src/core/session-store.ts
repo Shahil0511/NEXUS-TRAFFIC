@@ -27,25 +27,46 @@ export class SessionStore {
     private readonly idleMs: number,
   ) {}
 
-  /** WHY: called once per event — rotates if needed, marks activity and hands out the next seq. */
-  nextEvent(email: string | undefined, now: number): SessionTick {
-    const record = this.current(email, now);
+  /**
+   * WHY: called once per event — rotates if needed, marks activity and hands out the next seq.
+   * `keepForUnknownUser`: an `undefined` email means "not known yet", not "signed out", so it does
+   * not rotate a session that carries an email. Used ONLY by the first `load` page view whose id
+   * the early entry already sent with the current session (auth usually resolves after the first
+   * render; rotating there would split the page view from its own API calls — ADR 0011).
+   */
+  nextEvent(email: string | undefined, now: number, keepForUnknownUser = false): SessionTick {
+    const record = this.current(email, now, keepForUnknownUser);
     this.write({ ...record, seq: record.seq + 1, lastActivityAt: now });
     return { sessionId: record.id, seq: record.seq };
   }
 
   /**
-   * WHY: the session id for propagated headers WITHOUT consuming a seq. Rotates (and persists the
-   * rotation) when the stored session is stale, so headers never carry a dead id.
+   * WHY: the session id for propagated headers (early entry and tracker) WITHOUT consuming a seq
+   * and WITHOUT marking activity — background polling must not keep a session alive.
+   * - It never rotates on an email change (only `nextEvent` knows the signed-in user).
+   * - It DOES rotate after `idleMs` without activity, so a header never carries a dead id; the
+   *   rotation is persisted (seq 0, activity = now, the stored email kept) so the next event
+   *   continues the same new session.
+   * - No record yet → one is created and persisted.
    */
-  peek(email: string | undefined, now: number): string {
-    return this.current(email, now).id;
+  peekCurrent(now: number): string {
+    const stored = this.read();
+    if (stored && now - stored.lastActivityAt <= this.idleMs) return stored.id;
+    const fresh: SessionRecord = {
+      id: createUuid(),
+      lastActivityAt: now,
+      seq: 0,
+      ...(stored?.email ? { email: stored.email } : {}),
+    };
+    this.write(fresh);
+    return fresh.id;
   }
 
   /** WHY: the single place that decides between "keep" and "rotate". */
-  private current(email: string | undefined, now: number): SessionRecord {
+  private current(email: string | undefined, now: number, keepForUnknownUser: boolean): SessionRecord {
     const stored = this.read();
-    if (stored && !shouldRotate(stored, email, now, this.idleMs)) {
+    const compared = keepForUnknownUser && email === undefined ? stored?.email : email;
+    if (stored && !shouldRotate(stored, compared, now, this.idleMs)) {
       // Anonymous → signed in keeps the session (auth often resolves after the first render).
       if (email && !stored.email) {
         const adopted = { ...stored, email };

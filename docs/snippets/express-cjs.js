@@ -19,6 +19,18 @@
  *   }));
  *   // in your existing shutdown handler:  await nexus.shutdown();
  *
+ * !!! getUser DEFAULTS TO ANONYMOUS. Without it EVERY event is stored with no user and the dashboard
+ * !!! shows no "who". Pass a function that returns your VERIFIED signed-in user's email (read when the
+ * !!! response ends, so values set later by auth middleware are visible). NEVER read it from a
+ * !!! client-controlled header or cookie you have not verified.
+ *
+ * Environment variables (server ONLY):
+ *   NEXUS_URL          https://nexus.libas.in/traffic (unset → no-op client)
+ *   NEXUS_SECRET_KEY   nx_sk_…
+ *   NEXUS_ENVIRONMENT  prod | staging | dev (optional; unset → the server stores prod; anything else
+ *                      is NOT sent). Set it on staging/dev so their traffic stays off prod dashboards.
+ *   NEXUS_RELEASE      your build label, e.g. a git sha (optional)
+ *
  * Contract: https://nexus.libas.in/traffic/api/docs/
  */
 const { randomUUID } = require('node:crypto');
@@ -31,6 +43,7 @@ const LIMITS = { path: 2048, routeTemplate: 256, email: 254, userAgent: 4096, re
 const MAX_DURATION_MS = 3600000;
 const ERROR_CODE_PATTERN = /^[A-Z0-9_]{1,64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ENVIRONMENT_VALUES = ['prod', 'staging', 'dev'];
 
 // ─── Batching / retry defaults ──────────────────────────────────────────────
 const FLUSH_EVERY_EVENTS = 100;
@@ -145,8 +158,9 @@ function createNexusClient(options) {
   const {
     url,
     key,
+    environment = process.env.NEXUS_ENVIRONMENT, // prod | staging | dev; sent ONLY when valid
     sdkName = 'nexus-snippet-express-cjs',
-    sdkVersion = '1.0.0',
+    sdkVersion = '1.1.0',
     logger = console,
   } = options || {};
   if (!url || !key) return createNoopClient();
@@ -163,6 +177,10 @@ function createNexusClient(options) {
       /* never throw */
     }
   };
+
+  // Unset → not sent (the server stores prod). An invalid value is left out, never sent.
+  const env = environment && ENVIRONMENT_VALUES.includes(environment) ? environment : undefined;
+  if (environment && !env) warn(`environment must be one of ${ENVIRONMENT_VALUES.join(', ')} — not sent`);
 
   function enqueue(events, atFront) {
     if (atFront) queue.unshift(...events);
@@ -181,6 +199,7 @@ function createNexusClient(options) {
       body: JSON.stringify({
         sentAt: new Date().toISOString(),
         sdk: { name: sdkName, version: sdkVersion },
+        ...(env ? { environment: env } : {}),
         events,
       }),
       redirect: 'manual',

@@ -2,6 +2,8 @@
  * ROUTES.overview.* — the Overview page (KPI cards + traffic chart) and the Applications page.
  */
 import {
+  breakdownOverviewQuerySchema,
+  devicesOverviewQuerySchema,
   overviewAppsQuerySchema,
   overviewSummaryQuerySchema,
   overviewTimeseriesQuerySchema,
@@ -36,6 +38,22 @@ export class OverviewController {
   apps: RequestHandler = async (_req, res) => {
     requireViewer(res);
     const body = await this.overview.apps(validQuery(res, overviewAppsQuerySchema));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/overview.service.ts OverviewService.breakdown */
+  breakdown: RequestHandler = async (_req, res) => {
+    requireViewer(res);
+    const body = await this.overview.breakdown(validQuery(res, breakdownOverviewQuerySchema));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/overview.service.ts OverviewService.devices */
+  devices: RequestHandler = async (_req, res) => {
+    requireViewer(res);
+    const body = await this.overview.devices(validQuery(res, devicesOverviewQuerySchema));
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

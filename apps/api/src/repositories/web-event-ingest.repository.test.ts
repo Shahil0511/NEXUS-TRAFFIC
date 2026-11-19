@@ -64,4 +64,18 @@ describe('WebEventIngestRepository', () => {
     const propsColumn = toWebEventColumnArrays([row, { ...row, props: null }])[columnList.indexOf('props')];
     expect(propsColumn).toEqual(['{"tab":"stores","count":2}', null]);
   });
+
+  it('writes environment, client_tz, client_lang and release (0007)', () => {
+    const columnList = (/INSERT INTO traffic\.web_events \(([^)]*)\)/.exec(INSERT_WEB_EVENTS_SQL)?.[1] ?? '')
+      .split(',')
+      .map((c) => c.trim());
+    const arrays = toWebEventColumnArrays([
+      { ...row, environment: 'dev', clientTz: 'Asia/Kolkata', clientLang: 'en-IN', release: '2026.11.18' },
+    ]);
+    const valueOf = (column: string) => arrays[columnList.indexOf(column)];
+    expect(valueOf('environment')).toEqual(['dev']);
+    expect(valueOf('client_tz')).toEqual(['Asia/Kolkata']);
+    expect(valueOf('client_lang')).toEqual(['en-IN']);
+    expect(valueOf('release')).toEqual(['2026.11.18']);
+  });
 });

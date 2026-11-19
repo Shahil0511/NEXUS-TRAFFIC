@@ -5,13 +5,17 @@
 import type {
   AuditAction,
   BrowserEventType,
+  Environment,
   HttpMethod,
   IdentitySource,
+  IngestRejectionCode,
   IngestSource,
   IpClass,
   KeyKind,
   NavType,
   PageTimeReason,
+  PiiField,
+  PiiKind,
   ServerEventKind,
   ToolAction,
 } from '@nexus/shared';
@@ -38,7 +42,10 @@ export interface ActorColumns {
   sdk: string | null;
 }
 
-/** @see ../../migrations/0004_api_requests.sql */
+/**
+ * @see ../../migrations/0004_api_requests.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql (environment)
+ */
 export interface ApiRequestInsert extends ActorColumns {
   occurredAt: Date;
   eventId: string;
@@ -58,9 +65,14 @@ export interface ApiRequestInsert extends ActorColumns {
   requestId: string | null;
   sessionId: string | null;
   pageViewId: string | null;
+  /** Resolved by domain/environment.ts (NOT an ActorColumn: one value per batch, not per actor). */
+  environment: Environment;
 }
 
-/** @see ../../migrations/0005_web_events.sql */
+/**
+ * @see ../../migrations/0005_web_events.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql (environment, client_tz, client_lang, release)
+ */
 export interface WebEventInsert extends ActorColumns {
   occurredAt: Date;
   eventId: string;
@@ -85,6 +97,13 @@ export interface WebEventInsert extends ActorColumns {
   value: number | null;
   name: string | null;
   props: Record<string, string | number | boolean> | null;
+  environment: Environment;
+  /** client.tz when it matches CLIENT_TZ_PATTERN, else null. */
+  clientTz: string | null;
+  /** client.lang when it matches CLIENT_LANG_PATTERN, else null. */
+  clientLang: string | null;
+  /** The envelope `release` (the frontend build), PII-scrubbed; null when absent. */
+  release: string | null;
 }
 
 export interface NewApp {
@@ -129,4 +148,23 @@ export interface IngestCounterIncrement {
   duplicates: number;
   rejected: number;
   rateLimited: number;
+}
+
+/**
+ * One (source, sdk, code, schema_path) rejection count of a batch. `''` = none (sdk / schema_path).
+ * @see ../../migrations/0010_ingest_rejections.sql
+ */
+export interface IngestRejectionIncrement {
+  source: IngestSource;
+  sdk: string;
+  code: IngestRejectionCode;
+  schemaPath: string;
+  rejected: number;
+}
+
+/** One (field, kind) PII detection count of a batch. @see ../../migrations/0011_pii_detections.sql */
+export interface PiiDetectionIncrement {
+  field: PiiField;
+  kind: PiiKind;
+  detections: number;
 }

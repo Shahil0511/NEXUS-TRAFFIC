@@ -1,4 +1,5 @@
-import type { MetricDto, TimeWindowDto, TimeseriesPointDto } from './common';
+import type { BreakdownDimension, IngestSource } from '../constants/traffic';
+import type { MetricDto, TimeWindowDto, TimeseriesPointDto, WindowedListDto } from './common';
 
 /** GET ROUTES.overview.summary */
 export interface OverviewSummaryDto {
@@ -34,9 +35,16 @@ export interface AppTrafficDto {
   toolUses: number;
   /** Newest API call or browser event in the window. */
   lastEventAt: string | null;
-  /** % of events (API calls + browser events) carrying a VERIFIED user; null without events. */
+  /**
+   * % of events carrying a VERIFIED user — both sources combined (API calls + browser events);
+   * null without events. Integration Health shows the same predicate PER SOURCE.
+   */
   identifiedPct: number | null;
-  /** % of API calls linked to a browser session (tracker header); null without API calls. */
+  /**
+   * % of linkable (browser-originated http) API calls linked to a browser session (tracker
+   * header); null without linkable API calls. SSR, server-to-server calls, bots and streams are
+   * not linkable and are left out of the denominator.
+   */
   linkedPct: number | null;
 }
 
@@ -44,4 +52,32 @@ export interface AppTrafficDto {
 export interface OverviewTimeseriesDto {
   window: TimeWindowDto;
   points: TimeseriesPointDto[];
+}
+
+/** One value of a breakdown. `value` null = the column was empty (e.g. no release sent). */
+export interface BreakdownItemDto {
+  value: string | null;
+  events: number;
+  /** Share 0..1 of `total`. */
+  share: number;
+}
+
+/** GET ROUTES.overview.breakdown — top values of one dimension, busiest first. */
+export interface BreakdownDto extends WindowedListDto<BreakdownItemDto> {
+  source: IngestSource;
+  dimension: BreakdownDimension;
+  /** Events in the window (all values, not just the listed top N). */
+  total: number;
+}
+
+/**
+ * GET ROUTES.overview.devices — devices (distinct anonymous_id on page views) in the window;
+ * `returningDevices` were also seen in [lookbackFrom, window.from), the rest are new.
+ */
+export interface DeviceReturnDto {
+  window: TimeWindowDto;
+  lookbackFrom: string;
+  devices: number;
+  newDevices: number;
+  returningDevices: number;
 }

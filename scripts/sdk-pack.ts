@@ -5,12 +5,13 @@
  * "file:vendor/nexus-express-1.0.0.tgz"`), served from docs/dist/files/sdk/. A tarball must be
  * self-contained, so this script FAILS when a packed package.json declares runtime
  * "dependencies", when a bundle still imports zod, or when a bundle / .d.ts still references a
- * workspace package (@nexus/*) instead of having it bundled in.
+ * workspace package (@nexus/*) instead of having it bundled in. It also enforces the size budget of
+ * the pre-hydration entry (@nexus/react/early: every page loads it before hydration — ADR 0011).
  *
  * Steps per package: npm run build -w <pkg> → bundle checks → npm pack → packed manifest check.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
@@ -28,6 +29,12 @@ const ZOD_IMPORT = /(?:require\(\s*|from\s*|import\(\s*|import\s+)["']zod(?:\/[^
 const WORKSPACE_IMPORT = /(?:require\(\s*|from\s*|import\(\s*|import\s+)["']@nexus\/[^"']+["']/;
 const BUNDLE_FILE = /\.(?:c|m)?js$/;
 const TYPES_FILE = /\.d\.(?:c|m)?ts$/;
+
+/** dist files with a byte budget (ADR 0011: the early entry is on every page's critical path). */
+const SIZE_BUDGETS: ReadonlyArray<{ file: string; maxBytes: number }> = [
+  { file: 'packages/react/dist/early.js', maxBytes: 8 * 1024 },
+  { file: 'packages/react/dist/early.cjs', maxBytes: 8 * 1024 },
+];
 
 class PackError extends Error {}
 
@@ -81,6 +88,15 @@ function assertSelfContainedBundles(pkgDir: string): void {
   }
 }
 
+/** Assert the budgeted bundles of `pkgDir` are within their byte budget. */
+function assertSizeBudgets(pkgDir: string): void {
+  for (const { file, maxBytes } of SIZE_BUDGETS) {
+    if (!file.startsWith(`${pkgDir}/`)) continue;
+    const size = statSync(path.join(ROOT, file)).size;
+    if (size > maxBytes) throw new PackError(`${file}: ${size} B is over its ${maxBytes} B budget (ADR 0011)`);
+  }
+}
+
 /** Read one file out of a .tgz (ustar) without external tools. */
 function readFromTarball(tarballPath: string, wanted: string): string {
   const tar = gunzipSync(readFileSync(tarballPath));
@@ -125,6 +141,7 @@ function main(): void {
     console.log(`\n▶ ${sdk.name}: build`);
     npm(['run', 'build', '-w', sdk.name]);
     assertSelfContainedBundles(sdk.dir);
+    assertSizeBudgets(sdk.dir);
     const tarball = pack(sdk.name, sdk.dir);
     assertNoDependencies(tarball);
     console.log(`✔ ${sdk.name} → ${path.relative(ROOT, tarball)}`);

@@ -5,7 +5,7 @@ import { halve } from './batch-splitter';
 import { backoffDelayMs, retryAfterMs, sleep } from './delays';
 import type { Diagnostics } from './diagnostics';
 import type { EventQueue } from './event-queue';
-import { classifyResponse, type IngestOutcome } from './response-classifier';
+import { classifyResponse, type IngestOutcome, type RejectCounts } from './response-classifier';
 import type { IngestTransport } from './transport';
 
 /** Counters the delivery loop updates; read by NexusClient.stats(). */
@@ -13,8 +13,17 @@ export interface DeliveryCounters {
   accepted: number;
   duplicates: number;
   rejected: number;
+  /** `rejected` per server reject code — see NexusClientStats.rejectedByCode. */
+  rejectedByCode: RejectCounts;
   attempts: number;
 }
+
+/**
+ * WHY a cap: codes come from the response, so a misbehaving endpoint could grow `rejectedByCode`
+ * (and a log line) without bound in a long-lived host process. Real servers send a handful of codes.
+ */
+const MAX_REJECT_CODES = 32;
+const MAX_LOGGED_CODES = 5;
 
 /** Pauses ALL sending (auth failure, intercepting proxy) without losing the queue. */
 export interface SendPause {
@@ -83,8 +92,12 @@ export class BatchDelivery {
         this.counters.accepted += outcome.accepted;
         this.counters.duplicates += outcome.duplicates;
         this.counters.rejected += outcome.rejected;
+        this.addRejectCounts(outcome.rejectedByCode);
         if (outcome.rejected > 0) {
-          this.diagnostics.warn('rejected', `${outcome.rejected} event(s) rejected by the server — fix the sender`);
+          this.diagnostics.warn(
+            'rejected',
+            `${outcome.rejected} event(s) rejected by the server${describeCodes(outcome.rejectedByCode)} — fix the sender`,
+          );
         }
         return [];
       case 'drop':
@@ -117,11 +130,29 @@ export class BatchDelivery {
     return [...keepFirst, ...keepSecond];
   }
 
+  /** Merge one response's per-code counts; a code beyond MAX_REJECT_CODES counts only in `rejected`. */
+  private addRejectCounts(counts: RejectCounts): void {
+    const totals = this.counters.rejectedByCode;
+    for (const [code, n] of Object.entries(counts)) {
+      const known = totals[code];
+      if (known !== undefined) totals[code] = known + n;
+      else if (Object.keys(totals).length < MAX_REJECT_CODES) totals[code] = n;
+    }
+  }
+
   private drop(events: readonly NexusServerEvent[], topic: string, message: string): NexusServerEvent[] {
     this.queue.countDropped(events.length);
     this.diagnostics.warn(topic, `${message}; ${events.length} event(s) dropped`);
     return [];
   }
+}
+
+/** ` (EVENT_TIME_OUT_OF_RANGE ×2, INVALID_EVENT ×1)` — names the codes, never a message. */
+function describeCodes(counts: RejectCounts): string {
+  const entries = Object.entries(counts);
+  const parts = entries.slice(0, MAX_LOGGED_CODES).map(([code, n]) => `${code} ×${n}`);
+  if (entries.length > MAX_LOGGED_CODES) parts.push('…');
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
 /** A short, secret-free description of a fetch failure. */

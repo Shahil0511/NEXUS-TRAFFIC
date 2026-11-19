@@ -26,8 +26,8 @@ export function resolveClientIp(
   return sharedResolveClientIp(xForwardedFor, remoteAddress, trustProxyHops);
 }
 
-/** Which ingest endpoint to address. */
-export type IngestEndpoint = 'server' | 'browser' | 'verify';
+/** Which ingest endpoint to address (`config` = the browser SDK's remote config, ADR 0009). */
+export type IngestEndpoint = 'server' | 'browser' | 'verify' | 'config';
 
 /**
  * Absolute URL of an ingest endpoint from NEXUS_URL (WITHOUT `/api`):

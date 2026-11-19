@@ -3,7 +3,7 @@
 | Term | Meaning | Where in code |
 |---|---|---|
 | **app** | One integrated application (e.g. `ebo-sales`). Identified publicly by its **slug**. | table `apps`, `ROUTES.apps.*` |
-| **slug** | Lower-case id of an app, e.g. `ebo-sales`. Staging uses its own slug (`ebo-sales-dev`). | `APP_SLUG_PATTERN` |
+| **slug** | Lower-case id of an app, e.g. `ebo-sales`. Staging is normally told apart by **environment**; a separate `-dev` slug (`ebo-sales-dev`) is still allowed. | `APP_SLUG_PATTERN` |
 | **base path** | The URL prefix an app lives under, e.g. `/ebo-sales`. Browser events must stay inside it. | `apps.base_path` |
 | **server event** | One backend API request reported by an app's middleware. Stored in `api_requests`. | `serverEventSchema` |
 | **browser event** | One frontend event: `page_view`, `page_time`, `tool_use` or `custom`. Stored in `web_events`. | `browserEventSchema` |
@@ -11,7 +11,7 @@
 | **page time** | A `page_time` event: a *delta* of visible milliseconds for one page view. Summed = time on page. | |
 | **tool** | A named UI feature, e.g. `audits.export-csv`, reported by `tool_use`. | `TOOL_NAME_PATTERN` |
 | **endpoint** | One (app, HTTP method, route template). Identified by an opaque **endpointId** (UUID v5). | `toEndpointId()` |
-| **route template** | The parameterised path, e.g. `/ebo-sales/api/stores/:id`. | |
+| **route template** | The parameterised path, e.g. `/ebo-sales/api/stores/:id` (`:name` = one segment, trailing `:name*` = catch-all). Browser templates are kept only when they fit the path. | `isPlausibleRouteTemplate()` |
 | **session** | One browser tab's visit: all browser events with the same (app, sessionId). Idle > 30 min → new session. | |
 | **journey** | The ordered list of a session's page views, tool uses and correlated API calls. | `ROUTES.journeys.*` |
 | **identity source** | How much we trust the user on an event: `sso_cookie` > `app_attested` > `client_claimed` > `anonymous`. | `IDENTITY_SOURCE_VALUES` |
@@ -24,5 +24,19 @@
 | **scope** | What a live subscription covers: `all` or `app:<slug>`. | `liveScopeKey()` |
 | **viewer / admin** | Dashboard roles. Admins manage apps/keys and see IPs. | `DASHBOARD_ADMIN_EMAILS` |
 | **dry run** | `?dryRun=1` on server ingest: validate everything, write nothing. | |
+| **environment** | Which deployment an event came from: `prod`, `staging` or `dev`. Sent per batch (lenient), loopback browser origins are always `dev`, absent = `prod`. Dashboards filter on it (`?env=`, default prod); Live is prod only. ADR 0008. | `ENVIRONMENT_VALUES`, `resolveEnvironment()` |
+| **release** | The sender's build label (git sha, version) on server events and, since Phase A, on browser batches. Feeds release coverage. | `release` columns |
+| **remote config** | Per-app module switches the browser SDK fetches from `POST /v1/ingest/config`; it can only DISABLE modules. ADR 0009. | `SdkRemoteConfig`, `SDK_CAPTURE_MODULE_VALUES` |
+| **kill switch** | `apps.browser_ingest_enabled = false`: browser ingest answers `403 BROWSER_INGEST_DISABLED`, and the SDK stops on any kill code. | `SDK_KILL_ERROR_CODES` |
+| **key scope** | The first 14 chars of a (trimmed) publishable key — how the browser SDK keys its caches, retry queue and kill state per app. | `keyScope()` (packages/react) |
+| **early install** | `installNexusEarly()` from `@nexus/react/early`: header propagation before the tracker mounts (Next `instrumentation-client.ts`, Vite first-import module). ADR 0011. | `packages/react/src/early.ts` |
+| **header propagation** | The tracker adding `X-Nexus-Session` / `X-Nexus-Page-View` to the app's own same-origin fetch / XHR calls (default on), so API calls link to page views. | `INGEST_HEADERS` |
+| **retry queue** | Failed browser batches kept in localStorage per key scope and replayed (`client.replay: true`) on the next page load; replays are stored anonymous. ADR 0012. | `SDK_DEFAULTS.browser.retryQueue*` |
+| **PII scrubber** | Ingest-time detector of email / phone / PAN / GSTIN / Aadhaar in free-text fields: replace or drop, `FIELD_REDACTED`, count in `pii_detections`. Never rejects. ADR 0010. | `PiiScrubber`, `constants/pii.ts` |
+| **linkable / linked** | Linkable = an `http` API call from a desktop / mobile / tablet browser (could carry the session header); linked = linkable with `session_id`. | `coverage-predicates.ts` |
+| **identified** | A row with a verified user (`user_key IS NOT NULL`). Applications: both sources combined; Integration Health: per source. | `IDENTIFIED_SQL` |
+| **integration level** | `not_connected` → `partial` → `connected` → `complete` (coverage targets met, no blocking warning). ADR 0013. | `INTEGRATION_LEVEL_VALUES`, `integrationLevelOf()` |
+| **rejection reason** | An hourly count of refused events by code, normalised SDK label and normalised schema path — never a message. | table `ingest_rejections` |
+| **SSO cookie outcome** | What happened to the `access_token` cookie on a browser batch (`ok`, `no-cookie`, `expired`, …) and the beacon origin. | table `sso_cookie_outcomes` |
 | **role mode** | `DB_APP_ROLE_MODE`: `owner` = the api uses the migrate login (production, external server); `separate` = the api runs as `nexus_app`, DML only (localdb). ADR 0002. | `apps/api/src/db/migrate-config.ts` |
 | **localdb** | The compose profile that starts a local `postgres:18-alpine` container (laptops, CI, rehearsals). Production uses the external server 10.150.0.5 instead. | `docker-compose.yml` |

@@ -7,6 +7,8 @@
  * (app, range, sort…) is a new cache entry and a new request.
  */
 import type {
+  BreakdownOverviewQuery,
+  DevicesOverviewQuery,
   EndpointDetailQuery,
   EndpointListQuery,
   ErrorListQuery,
@@ -53,6 +55,8 @@ export const qk = {
     summary: (q: OverviewSummaryQuery) => ['overview', 'summary', q] as const,
     timeseries: (q: OverviewTimeseriesQuery) => ['overview', 'timeseries', q] as const,
     apps: (q: OverviewAppsQuery) => ['overview', 'apps', q] as const,
+    breakdown: (q: BreakdownOverviewQuery) => ['overview', 'breakdown', q] as const,
+    devices: (q: DevicesOverviewQuery) => ['overview', 'devices', q] as const,
   },
   endpoints: {
     all: ['endpoints'] as const,

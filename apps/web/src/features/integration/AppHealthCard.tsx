@@ -26,14 +26,30 @@ import Link from 'next/link';
 import { CopyableText } from '@/components/CopyButton';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
+import { InfoTip } from '@/components/InfoTip';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatDateTime, formatInteger, formatPercent } from '@/lib/format';
+import { EMPTY_VALUE, formatDateTime, formatInteger, formatPercent } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
-import { formatAgo, formatSkew, STATUS_COPY, WARNING_COPY } from './integrationCopy';
+import { CoverageStats } from './CoverageStats';
+import { EnvironmentMix } from './EnvironmentMix';
+import { IntegrationLevelBadge } from './IntegrationLevelBadge';
+import {
+  formatAgo,
+  formatSkew,
+  LEVEL_COPY,
+  SOURCE_LABELS,
+  STATUS_COPY,
+  WARNING_COPY,
+} from './integrationCopy';
+import { PiiDetectionsTable } from './PiiDetectionsTable';
+import { RejectionsTable } from './RejectionsTable';
+import { ReleaseStatus } from './ReleaseStatus';
+import { SsoOutcomes } from './SsoOutcomes';
 
 const STATUS_ICONS: Record<IntegrationStatus, LucideIcon> = {
   healthy: CheckCircle2,
@@ -41,7 +57,6 @@ const STATUS_ICONS: Record<IntegrationStatus, LucideIcon> = {
   never: CircleDashed,
 };
 
-const SOURCE_LABELS: Record<IngestSource, string> = { server: 'Server', browser: 'Browser' };
 const SOURCE_ICONS: Record<IngestSource, LucideIcon> = { server: Server, browser: Monitor };
 
 const SDK_COLUMNS: DataTableColumn<SdkHealthDto>[] = [
@@ -49,8 +64,18 @@ const SDK_COLUMNS: DataTableColumn<SdkHealthDto>[] = [
     id: 'sdk',
     header: 'SDK',
     className: 'w-full max-w-0',
+    // The package name (split by the API at the last '@'); the raw label when unsplittable.
     cell: (row) => (
-      <span className="block truncate font-mono text-xs">{row.sdk ?? 'not announced'}</span>
+      <span className="block truncate font-mono text-xs" title={row.sdk ?? undefined}>
+        {row.name ?? row.sdk ?? 'not announced'}
+      </span>
+    ),
+  },
+  {
+    id: 'version',
+    header: 'Version',
+    cell: (row) => (
+      <span className="font-mono text-xs whitespace-nowrap">{row.version ?? EMPTY_VALUE}</span>
     ),
   },
   {
@@ -183,10 +208,25 @@ export interface AppHealthCardProps {
   nowMs: number;
 }
 
+/** The level's meaning and what the next level needs, with the (i) explaining levels. */
+function LevelLine({ health }: { health: AppIntegrationHealthDto }) {
+  return (
+    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+      <span>
+        <span className="font-medium text-foreground">{LEVEL_COPY[health.level].label}:</span>{' '}
+        {LEVEL_COPY[health.level].description}
+      </span>
+      <InfoTip label="Integration level" text={metricInfo('integrationLevel')} />
+    </p>
+  );
+}
+
 /**
- * WHY: everything a team needs to know about ONE app's wiring on one card — status, what to fix
- * (with the guide chapter), per-source last event and counters, SDKs with clock skew, the proxy-IP
- * share (and what it costs the dashboard) and exposed keys; the app slug is one click to copy.
+ * WHY: everything a team needs to know about ONE app's wiring on one card — status and
+ * integration level, what to fix (with the guide chapter), per-source last event and counters,
+ * coverage (identified per source, linked calls), environments, releases, SDKs with version and
+ * clock skew, redacted personal data, rejection reasons, SSO cookie outcomes, the proxy-IP share
+ * and exposed keys; the app slug is one click to copy.
  * Strings from the API render as text only, never as href/src.
  */
 export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
@@ -218,6 +258,7 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
             <ArrowRight className="size-3" aria-hidden="true" />
           </Link>
           {health.isActive ? null : <Badge variant="destructive">disabled</Badge>}
+          <IntegrationLevelBadge level={health.level} />
           <Badge variant={status.tone}>
             <StatusIcon aria-hidden="true" />
             {status.label}
@@ -225,6 +266,7 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <LevelLine health={health} />
         {health.warnings.length > 0 ? (
           <ul aria-label={`Warnings for ${health.displayName}`} className="space-y-2">
             {health.warnings.map((code) => (
@@ -243,6 +285,33 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
             />
           ))}
         </div>
+
+        <div className="grid gap-4 rounded-lg p-3 ring-1 ring-border/60 ring-inset sm:grid-cols-2">
+          <CoverageStats
+            identityCoverage={health.identityCoverage}
+            linkingCoverage={health.linkingCoverage}
+          />
+          <div className="space-y-4">
+            <EnvironmentMix environments={health.environments} />
+            <ReleaseStatus releases={health.releases} />
+          </div>
+        </div>
+
+        {health.piiDetections.length > 0 ? (
+          <div className="-mx-4">
+            <PiiDetectionsTable detections={health.piiDetections} appName={health.displayName} />
+          </div>
+        ) : null}
+
+        {health.rejections.length > 0 ? (
+          <div className="-mx-4">
+            <RejectionsTable rejections={health.rejections} appName={health.displayName} />
+          </div>
+        ) : null}
+
+        {health.ssoCookieOutcomes.length > 0 ? (
+          <SsoOutcomes outcomes={health.ssoCookieOutcomes} appName={health.displayName} />
+        ) : null}
 
         <div className="-mx-4">
           <DataTable

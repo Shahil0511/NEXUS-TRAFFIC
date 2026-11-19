@@ -1,5 +1,7 @@
+import { INGEST_LIMITS } from '@nexus/shared/constants';
+
 import { buildServerEvent, defaultClassify, type EventSettings, type RequestStart } from './build-event';
-import { safely } from './fields';
+import { boundedString, safely } from './fields';
 import { normalizeBasePath } from './path';
 import { defaultSkip, isContractMethod } from './skip';
 import type { NexusMiddleware, NexusMiddlewareOptions, NexusRequestLike, NexusResponseLike } from './types';
@@ -16,6 +18,11 @@ function defaultGetUser(req: NexusRequestLike): string | undefined {
 function defaultGetErrorCode(_req: NexusRequestLike, res: NexusResponseLike): string | undefined {
   const code = res.locals?.['errorCode'];
   return typeof code === 'string' ? code : undefined;
+}
+
+/** `NEXUS_RELEASE` from the process env (undefined outside Node, or where env access throws). */
+function releaseFromEnv(): string | undefined {
+  return typeof process === 'undefined' ? undefined : safely(() => process.env['NEXUS_RELEASE']);
 }
 
 function hopsOf(value: number | undefined): number {
@@ -38,7 +45,8 @@ function settingsOf<Req extends NexusRequestLike>(options: NexusMiddlewareOption
     getUser: options.getUser ?? defaultGetUser,
     classify: options.classify ?? defaultClassify,
     getErrorCode: options.getErrorCode ?? defaultGetErrorCode,
-    release: options.release,
+    // WHY the env default: deploys already export NEXUS_RELEASE; bounded so a long sha never costs the event.
+    release: boundedString(options.release ?? releaseFromEnv(), INGEST_LIMITS.maxReleaseLength),
   };
 }
 

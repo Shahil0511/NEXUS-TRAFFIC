@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ADMIN_APPS, apiKey, PUBLISHABLE_KEY } from '@/test/adminFixtures';
+import { ADMIN_APPS, apiKey, PUBLISHABLE_KEY, sdkConfig } from '@/test/adminFixtures';
 
 import {
   appFormOf,
@@ -9,8 +9,12 @@ import {
   expiresAtFor,
   keyStatusOf,
   parseOrigins,
+  sdkConfigFormOf,
+  sdkConfigSummary,
   toCreateKeyBody,
+  toKillSwitchBody,
   toUpdateAppBody,
+  toUpdateSdkConfigBody,
 } from './appForm';
 
 const NOW = Date.parse('2026-10-01T10:00:00.000Z');
@@ -83,6 +87,56 @@ describe('key status', () => {
   it('expiresAtFor adds the grace period', () => {
     expect(expiresAtFor('now', NOW)).toBe('2026-10-01T10:00:00.000Z');
     expect(expiresAtFor('24h', NOW)).toBe('2026-10-02T10:00:00.000Z');
+  });
+});
+
+describe('remote SDK config form', () => {
+  it('starts from the app: unchecked = disabled remotely, kill switch = browser ingest off', () => {
+    const values = sdkConfigFormOf(APP);
+    expect(values.killSwitch).toBe(false);
+    expect(values.enabledModules).not.toContain('auto_tools');
+    expect(values.enabledModules).toHaveLength(6);
+    expect(sdkConfigFormOf({ ...APP, browserIngestEnabled: false }).killSwitch).toBe(true);
+  });
+
+  it('sends the FULL disabled list (stable order) with the version the admin saw', () => {
+    const values = sdkConfigFormOf(APP);
+    const next = {
+      ...values,
+      enabledModules: values.enabledModules.filter((module) => module !== 'retry_queue'),
+    };
+    expect(toUpdateSdkConfigBody(next, APP)).toEqual({
+      ok: true,
+      body: { expectedVersion: 3, disabledModules: ['auto_tools', 'retry_queue'] },
+    });
+  });
+
+  it('returns a null body when the modules did not change', () => {
+    expect(toUpdateSdkConfigBody(sdkConfigFormOf(APP), APP)).toEqual({ ok: true, body: null });
+    // Order of the stored list does not matter.
+    const unordered = {
+      ...APP,
+      sdkConfig: sdkConfig({ version: 2, disabledModules: ['retry_queue', 'page_view'] }),
+    };
+    expect(toUpdateSdkConfigBody(sdkConfigFormOf(unordered), unordered).ok).toBe(true);
+    expect(toUpdateSdkConfigBody(sdkConfigFormOf(unordered), unordered)).toEqual({
+      ok: true,
+      body: null,
+    });
+  });
+
+  it('turns the kill switch into the browserIngestEnabled update (null when unchanged)', () => {
+    const values = sdkConfigFormOf(APP);
+    expect(toKillSwitchBody(values, APP)).toBeNull();
+    expect(toKillSwitchBody({ ...values, killSwitch: true }, APP)).toEqual({
+      browserIngestEnabled: false,
+    });
+  });
+
+  it('summarises the config for the Apps card', () => {
+    expect(sdkConfigSummary(APP)).toBe('1 off: Automatic tool clicks');
+    expect(sdkConfigSummary({ ...APP, sdkConfig: sdkConfig() })).toBe('All modules on');
+    expect(sdkConfigSummary({ ...APP, browserIngestEnabled: false })).toMatch(/^Kill switch on/);
   });
 });
 

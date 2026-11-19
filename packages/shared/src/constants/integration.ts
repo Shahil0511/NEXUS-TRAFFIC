@@ -39,6 +39,7 @@ export type IntegrationStatus = (typeof INTEGRATION_STATUS_VALUES)[number];
 /**
  * What the Integration page flags, most urgent first (the API returns them in this order).
  * - exposed_key:     an unrevoked, unexpired SECRET key was sent to the browser endpoint → rotate it
+ * - pii_detected:    the ingest PII scrubber redacted personal data in the window (ADR 0010) → fix the sender
  * - app_disabled:    the app is switched off; every event is refused (APP_DISABLED)
  * - never_received:  no event yet → follow the verify chapter
  * - stale:           nothing recent → is the middleware still mounted / NEXUS_URL set?
@@ -49,6 +50,7 @@ export type IntegrationStatus = (typeof INTEGRATION_STATUS_VALUES)[number];
  */
 export const INTEGRATION_WARNING_VALUES = [
   'exposed_key',
+  'pii_detected',
   'app_disabled',
   'never_received',
   'stale',
@@ -58,3 +60,35 @@ export const INTEGRATION_WARNING_VALUES = [
   'rate_limited',
 ] as const;
 export type IntegrationWarning = (typeof INTEGRATION_WARNING_VALUES)[number];
+
+// ─── Coverage KPIs and the integration level (ADR 0013) ─────────────────────
+
+/** WHY: below this many events a coverage ratio is null — too little data for a verdict. */
+export const COVERAGE_MIN_EVENTS = 20;
+
+/** WHY: linking and browser-identity ratios at or above this count towards `complete`. */
+export const COVERAGE_TARGET_RATIO = 0.8;
+
+/** WHY: share of events carrying `release` (per source) needed for `complete`. */
+export const RELEASE_COVERAGE_TARGET = 0.95;
+
+/**
+ * How far an app's integration has got, computed by the API from status, sources and coverage:
+ * - not_connected: status `never` (no event at all)
+ * - partial:       status `stale`, or only one source has events
+ * - connected:     both sources have events
+ * - complete:      connected AND linking ≥ COVERAGE_TARGET_RATIO AND browser identity ≥
+ *                  COVERAGE_TARGET_RATIO AND every source's release ratio ≥ RELEASE_COVERAGE_TARGET
+ *                  AND none of exposed_key / pii_detected / app_disabled (a null ratio is not complete)
+ */
+export const INTEGRATION_LEVEL_VALUES = ['not_connected', 'partial', 'connected', 'complete'] as const;
+export type IntegrationLevel = (typeof INTEGRATION_LEVEL_VALUES)[number];
+
+/**
+ * WHY: the hourly diagnostic tables (ingest_rejections, pii_detections, sso_cookie_outcomes) are
+ * pruned after this many days by the retention job; raw events keep their own retention.
+ */
+export const AGGREGATE_RETENTION_DAYS = 90;
+
+/** WHY: Integration Health lists at most this many rejection reasons per app (busiest first). */
+export const MAX_REJECTION_ROWS_PER_APP = 20;

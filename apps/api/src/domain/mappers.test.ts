@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ADMIN_VIEWER,
   apiRequestSampleRow,
+  appTrafficRow,
+  breakdownRow,
   ENDPOINT_ID,
   endpointStatsRow,
   EVENT_ID,
@@ -12,6 +14,8 @@ import {
   onlineUserRow,
   pageStatsRow,
   PLAIN_VIEWER,
+  rejectionReasonRow,
+  sdkHealthRow,
   SESSION_ID,
   sessionEventRow,
   sessionSummaryRow,
@@ -26,15 +30,22 @@ import {
   mapActor,
   mapApiKey,
   mapApp,
+  mapAppTraffic,
+  mapBreakdownItem,
   mapEndpointStats,
+  mapEnvironmentMix,
   mapGeoCity,
   mapGeoCountry,
   mapOnlineApp,
   mapOnlineUser,
   mapPageStats,
+  mapPiiDetection,
+  mapRejectionReason,
   mapRequestSample,
+  mapSdkHealth,
   mapSessionEvent,
   mapSessionSummary,
+  mapSsoCookieOutcome,
   mapStatusCount,
   mapTimelineItem,
   mapTimeseriesPoint,
@@ -42,6 +53,7 @@ import {
   mapTopPath,
   mapUserProfile,
   mapUserSummary,
+  splitSdkLabel,
 } from './mappers';
 
 describe('mapApiKey', () => {
@@ -98,10 +110,27 @@ describe('mapApp', () => {
       allowedOrigins: ['https://nexus.libas.in'],
       isActive: true,
       browserIngestEnabled: true,
+      sdkConfig: { version: 1, disabledModules: [], updatedAt: null },
       createdAt: CREATED_AT.toISOString(),
       keys: [mapApiKey(apiKeyRow())],
     });
     expect(dto).not.toHaveProperty('id');
+  });
+
+  it('maps the remote SDK config (copying the module list)', () => {
+    const row = appRow({
+      sdk_config_version: 3,
+      sdk_disabled_modules: ['header_propagation'],
+      sdk_config_updated_at: CREATED_AT,
+    });
+    const dto = mapApp(row, []);
+    expect(dto.sdkConfig).toEqual({
+      version: 3,
+      disabledModules: ['header_propagation'],
+      updatedAt: CREATED_AT.toISOString(),
+    });
+    dto.sdkConfig.disabledModules.push('custom');
+    expect(row.sdk_disabled_modules).toEqual(['header_propagation']);
   });
 
   it('copies allowed origins (no aliasing of the row array)', () => {
@@ -421,5 +450,91 @@ describe('mapOnlineUser / mapOnlineApp', () => {
       users: 2,
       anonymous: 5,
     });
+  });
+});
+
+// ─── Phase A: linking, breakdowns, Integration Health diagnostics ─────────
+
+describe('mapAppTraffic linkedPct', () => {
+  it('divides linked calls by LINKABLE calls (not all requests)', () => {
+    const app = appRow();
+    const sources = {
+      traffic: appTrafficRow({ requests: 200, linkable: 80, linked: 60 }),
+      previousTraffic: undefined,
+      activity: undefined,
+      previousActivity: undefined,
+    };
+    expect(mapAppTraffic(app, sources).linkedPct).toBe(75);
+    const none = { ...sources, traffic: appTrafficRow({ linkable: 0, linked: 0 }) };
+    expect(mapAppTraffic(app, none).linkedPct).toBeNull();
+  });
+});
+
+describe('mapBreakdownItem', () => {
+  it('share is over the whole window (0..1, 4 decimals); a null value stays null', () => {
+    expect(mapBreakdownItem(breakdownRow())).toEqual({ value: 'Chrome', events: 30, share: 0.25 });
+    expect(mapBreakdownItem(breakdownRow({ value: null, events: 1, total: 3 }))).toEqual({
+      value: null,
+      events: 1,
+      share: 0.3333,
+    });
+    expect(mapBreakdownItem(breakdownRow({ events: 0, total: 0 })).share).toBe(0);
+  });
+});
+
+describe('mapSdkHealth / splitSdkLabel', () => {
+  it('splits a scoped label at its LAST @ into name and version', () => {
+    expect(mapSdkHealth(sdkHealthRow())).toMatchObject({
+      sdk: '@nexus/express@1.1.0',
+      name: '@nexus/express',
+      version: '1.1.0',
+      medianClockSkewMs: 12,
+    });
+    expect(splitSdkLabel('python-requests@2.31')).toEqual({
+      name: 'python-requests',
+      version: '2.31',
+    });
+  });
+
+  it('is null / null when unsplittable (no @, leading @ only, trailing @, no sdk)', () => {
+    for (const sdk of ['@nexus/express', 'curl', 'curl@', null]) {
+      expect(splitSdkLabel(sdk)).toEqual({ name: null, version: null });
+    }
+  });
+});
+
+describe('Integration Health diagnostic mappers', () => {
+  it("rejections map '' (none / unknown) to null and never carry a message", () => {
+    expect(mapRejectionReason(rejectionReasonRow())).toEqual({
+      source: 'server',
+      sdk: '@nexus/express@1.1.0',
+      code: 'INVALID_EVENT',
+      schemaPath: 'events.*.path',
+      rejected: 3,
+    });
+    expect(
+      mapRejectionReason(
+        rejectionReasonRow({ sdk: '', code: 'ORIGIN_NOT_ALLOWED', schema_path: '' }),
+      ),
+    ).toMatchObject({ sdk: null, schemaPath: null });
+  });
+
+  it('environment mix, PII detections and SSO outcomes drop the internal app id', () => {
+    const appId = '11111111-1111-4111-8111-111111111111';
+    expect(
+      mapEnvironmentMix({ app_id: appId, source: 'browser', environment: 'dev', events: 4 }),
+    ).toEqual({ source: 'browser', environment: 'dev', events: 4 });
+    expect(
+      mapPiiDetection({
+        app_id: appId,
+        source: 'server',
+        field: 'path',
+        kind: 'email',
+        detections: 2,
+      }),
+    ).toEqual({ source: 'server', field: 'path', kind: 'email', detections: 2 });
+    expect(
+      mapSsoCookieOutcome({ app_id: appId, outcome: 'expired', beacon_origin: 'none', beacons: 9 }),
+    ).toEqual({ outcome: 'expired', beaconOrigin: 'none', beacons: 9 });
   });
 });

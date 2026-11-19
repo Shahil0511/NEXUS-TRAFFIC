@@ -1,7 +1,9 @@
 /**
  * Data access for `traffic.apps`.
  * @see ../../migrations/0002_apps_and_api_keys.sql
+ * @see ../../migrations/0009_app_sdk_config.sql (sdk_config_version, sdk_disabled_modules, sdk_config_updated_at)
  */
+import type { SdkCaptureModule } from '@nexus/shared';
 import type { Pool } from 'pg';
 
 import type { Executor } from '../db/executor';
@@ -11,7 +13,8 @@ import type { AppRow } from '../domain/rows';
 
 /** Every column of AppRow, in table order. */
 const APP_COLUMNS = `id, slug, display_name, base_path, allowed_origins, is_active,
-  browser_ingest_enabled, created_by, created_at, updated_at`;
+  browser_ingest_enabled, created_by, created_at, updated_at, sdk_config_version,
+  sdk_disabled_modules, sdk_config_updated_at`;
 
 /** AppPatch field → column. The ONLY identifiers an UPDATE may touch (whitelist). */
 const PATCH_COLUMNS = {
@@ -33,12 +36,18 @@ export class AppRepository {
   constructor(private readonly db: Pool) {}
 
   async findById(id: string, exec: Executor = this.db): Promise<AppRow | null> {
-    const { rows } = await exec.query<AppRow>(`SELECT ${APP_COLUMNS} FROM traffic.apps WHERE id = $1`, [id]);
+    const { rows } = await exec.query<AppRow>(
+      `SELECT ${APP_COLUMNS} FROM traffic.apps WHERE id = $1`,
+      [id],
+    );
     return rows[0] ?? null;
   }
 
   async findBySlug(slug: string, exec: Executor = this.db): Promise<AppRow | null> {
-    const { rows } = await exec.query<AppRow>(`SELECT ${APP_COLUMNS} FROM traffic.apps WHERE slug = $1`, [slug]);
+    const { rows } = await exec.query<AppRow>(
+      `SELECT ${APP_COLUMNS} FROM traffic.apps WHERE slug = $1`,
+      [slug],
+    );
     return rows[0] ?? null;
   }
 
@@ -58,9 +67,27 @@ export class AppRepository {
     return rows[0]?.allowed ?? false;
   }
 
+  /**
+   * True when ANY registered app lists `origin` in allowed_origins, whatever its is_active /
+   * browser_ingest_enabled. Used ONLY by the pre-auth early CORS (ADR 0009): a killed or disabled
+   * app's own origin must still be able to READ its 403 kill code. It only decides response headers.
+   */
+  async anyListsOrigin(origin: string, exec: Executor = this.db): Promise<boolean> {
+    const { rows } = await exec.query<{ listed: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM traffic.apps
+          WHERE lower($1) IN (SELECT lower(o) FROM unnest(allowed_origins) AS o)
+       ) AS listed`,
+      [origin],
+    );
+    return rows[0]?.listed ?? false;
+  }
+
   /** All apps ordered by slug. */
   async list(exec: Executor = this.db): Promise<AppRow[]> {
-    const { rows } = await exec.query<AppRow>(`SELECT ${APP_COLUMNS} FROM traffic.apps ORDER BY slug`);
+    const { rows } = await exec.query<AppRow>(
+      `SELECT ${APP_COLUMNS} FROM traffic.apps ORDER BY slug`,
+    );
     return rows;
   }
 
@@ -71,9 +98,40 @@ export class AppRepository {
          (slug, display_name, base_path, allowed_origins, browser_ingest_enabled, created_by)
        VALUES ($1, $2, $3, $4::text[], $5, $6)
        RETURNING ${APP_COLUMNS}`,
-      [app.slug, app.displayName, app.basePath, app.allowedOrigins, app.browserIngestEnabled, app.createdBy],
+      [
+        app.slug,
+        app.displayName,
+        app.basePath,
+        app.allowedOrigins,
+        app.browserIngestEnabled,
+        app.createdBy,
+      ],
     );
     return firstRow(rows);
+  }
+
+  /**
+   * Replaces the browser SDK's disabled modules and bumps the config version — ONLY when the
+   * stored version still equals `expectedVersion` (optimistic concurrency: two admins editing at
+   * once cannot overwrite each other). Null when the version moved on (→ 409) or the app is gone.
+   * `updated_at` is stamped by the trg_apps_set_updated_at trigger.
+   */
+  async updateSdkConfig(
+    appId: string,
+    disabledModules: readonly SdkCaptureModule[],
+    expectedVersion: number,
+    exec: Executor = this.db,
+  ): Promise<AppRow | null> {
+    const { rows } = await exec.query<AppRow>(
+      `UPDATE traffic.apps
+          SET sdk_disabled_modules = $2::text[],
+              sdk_config_version = sdk_config_version + 1,
+              sdk_config_updated_at = now()
+        WHERE id = $1 AND sdk_config_version = $3
+       RETURNING ${APP_COLUMNS}`,
+      [appId, [...disabledModules], expectedVersion],
+    );
+    return rows[0] ?? null;
   }
 
   /** Applies only the provided fields; returns null when the app does not exist. */

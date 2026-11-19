@@ -5,8 +5,9 @@
  * WHY one place: the wire/column naming differences (status → status_code, ISO strings → Date,
  * optional → null) live here and nowhere else, so a contract change has exactly one landing spot.
  * @see ../../migrations/0004_api_requests.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql
  */
-import type { ServerEvent } from '@nexus/shared';
+import type { Environment, ServerEvent } from '@nexus/shared';
 
 import type { ActorColumns, ApiRequestInsert } from './inserts';
 
@@ -19,6 +20,8 @@ export interface ServerEventEnrichment {
   routeTemplate: string;
   clockSkewMs: number | null;
   actor: ActorColumns;
+  /** The batch's resolved environment (domain/environment.ts). */
+  environment: Environment;
 }
 
 /** Postgres returns uuids lower-cased; normalize so in-batch dedupe and RETURNING ids compare equal. */
@@ -48,5 +51,6 @@ export function toApiRequestInsert(event: ServerEvent, enrichment: ServerEventEn
     requestId: event.requestId ?? null,
     sessionId: uuidOrNull(event.sessionId),
     pageViewId: uuidOrNull(event.pageViewId),
+    environment: enrichment.environment,
   };
 }

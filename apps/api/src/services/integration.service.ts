@@ -10,11 +10,23 @@ import {
 
 import {
   countersBySource,
+  identityCoverageOf,
+  integrationLevelOf,
   integrationStatusOf,
   integrationWarningsOf,
+  linkingCoverageOf,
   privateIpRatioOf,
+  releaseStatusOf,
 } from '../domain/integration-health';
-import { mapExposedKey, mapIngestCounter, mapSdkHealth } from '../domain/mappers';
+import {
+  mapEnvironmentMix,
+  mapExposedKey,
+  mapIngestCounter,
+  mapPiiDetection,
+  mapRejectionReason,
+  mapSdkHealth,
+  mapSsoCookieOutcome,
+} from '../domain/mappers';
 import type { AppHealthRow, IngestHealthRows } from '../domain/rows';
 import type { Clock } from '../lib/clock';
 import type { IngestHealthRepository } from '../repositories/ingest-health.repository';
@@ -25,13 +37,30 @@ function rowsOfApp<T extends { app_id: string }>(rows: readonly T[], appId: stri
 }
 
 /** WHY: one app's DTO from its rows — mapping + the pure rules of domain/integration-health.ts. */
-function toAppHealth(app: AppHealthRow, rows: IngestHealthRows, now: Date): AppIntegrationHealthDto {
+function toAppHealth(
+  app: AppHealthRow,
+  rows: IngestHealthRows,
+  now: Date,
+): AppIntegrationHealthDto {
   const sdkRows = rowsOfApp(rows.sdks, app.app_id).sort((a, b) => b.events - a.events);
   const sdks = sdkRows.map(mapSdkHealth);
   const counters = countersBySource(rowsOfApp(rows.counters, app.app_id).map(mapIngestCounter));
   const exposedKeys = rowsOfApp(rows.exposedKeys, app.app_id).map(mapExposedKey);
   const privateIpRatio = privateIpRatioOf(sdkRows);
   const status = integrationStatusOf(app.last_server_at, app.last_browser_at, now);
+  const piiDetections = rowsOfApp(rows.piiDetections, app.app_id).map(mapPiiDetection);
+  const warnings = integrationWarningsOf({
+    isActive: app.is_active,
+    status,
+    exposedKeys: exposedKeys.length,
+    piiDetections: piiDetections.reduce((total, row) => total + row.detections, 0),
+    privateIpRatio,
+    sdks,
+    counters,
+  });
+  const identityCoverage = identityCoverageOf(sdkRows);
+  const linkingCoverage = linkingCoverageOf(sdkRows);
+  const releases = releaseStatusOf(sdkRows);
   return {
     app: app.slug,
     displayName: app.display_name,
@@ -43,14 +72,15 @@ function toAppHealth(app: AppHealthRow, rows: IngestHealthRows, now: Date): AppI
     counters,
     exposedKeys,
     privateIpRatio,
-    warnings: integrationWarningsOf({
-      isActive: app.is_active,
-      status,
-      exposedKeys: exposedKeys.length,
-      privateIpRatio,
-      sdks,
-      counters,
-    }),
+    warnings,
+    identityCoverage,
+    linkingCoverage,
+    environments: rowsOfApp(rows.environmentMix, app.app_id).map(mapEnvironmentMix),
+    releases,
+    piiDetections,
+    rejections: rowsOfApp(rows.rejections, app.app_id).map(mapRejectionReason),
+    ssoCookieOutcomes: rowsOfApp(rows.ssoOutcomes, app.app_id).map(mapSsoCookieOutcome),
+    level: integrationLevelOf({ status, identityCoverage, linkingCoverage, releases, warnings }),
   };
 }
 

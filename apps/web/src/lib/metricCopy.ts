@@ -7,6 +7,13 @@
  * comments in packages/shared/src/dto/*). Change the API meaning → change the copy here.
  */
 
+import {
+  COVERAGE_MIN_EVENTS,
+  COVERAGE_TARGET_RATIO,
+  RELEASE_COVERAGE_TARGET,
+  RETURNING_DEVICE_LOOKBACK_MS,
+} from '@nexus/shared';
+
 /** One metric's explanation: a name, a one-line gist and the detail a curious user wants. */
 export interface MetricCopy {
   /** The metric's name in words, e.g. "p95 latency". */
@@ -17,8 +24,16 @@ export interface MetricCopy {
   long: string;
 }
 
-/** Below this share (%) an integration-quality metric (identified / linked) is flagged amber. */
-export const COVERAGE_WARN_PCT = 80;
+/**
+ * Below this share (%) an integration-quality metric (identified / linked) is flagged amber — the
+ * SAME threshold the API's integration level uses (COVERAGE_TARGET_RATIO, ADR 0013).
+ */
+export const COVERAGE_WARN_PCT = COVERAGE_TARGET_RATIO * 100;
+
+const DAY_MS = 86_400_000;
+const RELEASE_TARGET_PCT = RELEASE_COVERAGE_TARGET * 100;
+/** The new-vs-returning look-back in days (RETURNING_DEVICE_LOOKBACK_MS), for every device copy. */
+export const RETURNING_LOOKBACK_DAYS = Math.round(RETURNING_DEVICE_LOOKBACK_MS / DAY_MS);
 
 export const METRIC_COPY = {
   // ─── API traffic ───────────────────────────────────────────────────────────
@@ -135,11 +150,55 @@ export const METRIC_COPY = {
     short: 'Distinct verified users in the 30 days ending where the selected range ends.',
     long: 'Compare with weekly active users: close values mean most people use the apps every week.',
   },
+  // ─── Devices (browser) ──────────────────────────────────────────────────────
+  devices: {
+    label: 'Devices',
+    short: 'Distinct browsers (device + browser profile) that opened a page in this time range.',
+    long: 'Counted by the tracker’s anonymous device id: one person on a laptop and a phone counts twice, and a private window counts as a new device.',
+  },
+  newDevices: {
+    label: 'New devices',
+    short: `Devices in this time range that had not opened a page in the ${RETURNING_LOOKBACK_DAYS} days before it.`,
+    long: `The look-back is bounded: a device last seen more than ${RETURNING_LOOKBACK_DAYS} days earlier counts as new again.`,
+  },
+  returningDevices: {
+    label: 'Returning devices',
+    short: `Devices that also opened a page in the ${RETURNING_LOOKBACK_DAYS} days before this time range.`,
+    long: 'A high share means people come back; a low one means mostly first visits (or cleared browsers).',
+  },
+  breakdownShare: {
+    label: 'Share',
+    short: 'This value’s share of all counted events in the time range.',
+    long: 'The share is of every event, not only the listed top values, so the list can add up to less than 100 %. “Not sent” means the event had no value.',
+  },
   // ─── Integration quality ───────────────────────────────────────────────────
   identifiedPct: {
     label: 'Identified %',
-    short: 'The share of events (API calls and browser events) that carry a verified user.',
-    long: `Low means people are missing from the Users pages — the app does not send the signed-in user yet. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
+    short:
+      'The share of events (API calls and browser events combined) that carry a verified user.',
+    long: `Low means people are missing from the Users pages. The Integration page shows it per source. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
+  },
+  identityCoverage: {
+    label: 'Identified (per source)',
+    short: 'The share of this source’s events that carry a verified user.',
+    long: `Per source here; the Applications page combines both sources. Below ${COVERAGE_WARN_PCT} % is highlighted; under ${COVERAGE_MIN_EVENTS} events there is no verdict.`,
+  },
+  linkingCoverage: {
+    label: 'Linked API calls',
+    short:
+      'The share of linkable API calls (http calls from desktop, mobile and tablet browsers) that carry the tracker’s session header.',
+    long: `“Page view” counts the calls that also name their page view. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
+  },
+  releaseCoverage: {
+    label: 'Release tagged',
+    short: 'The share of events that carry a release (build or version) tag.',
+    long: `At ${RELEASE_TARGET_PCT} % or more per source, a deploy shows up in the numbers. Under ${COVERAGE_MIN_EVENTS} events there is no verdict.`,
+  },
+  integrationLevel: {
+    label: 'Integration level',
+    short:
+      'How far an app’s wiring has got: not connected, partial, connected or fully integrated.',
+    long: `Fully integrated = both sources send, ${COVERAGE_WARN_PCT} % of API calls linked and of browser events identified, ${RELEASE_TARGET_PCT} % release-tagged per source, no key, PII or disabled-app warning.`,
   },
   sendingData: {
     label: 'Apps sending data',
@@ -148,8 +207,9 @@ export const METRIC_COPY = {
   },
   linkedPct: {
     label: 'Linked %',
-    short: 'The share of API calls we can tie to the browser page that made them.',
-    long: `Low means the “which page called this API” drill-downs are incomplete (the tracker header is missing). Below ${COVERAGE_WARN_PCT} % is highlighted.`,
+    short:
+      'The share of browser API calls (http from desktop, mobile and tablet) we can tie to the browser session that made them.',
+    long: `SSR, server-to-server calls, bots and downloads cannot link and are left out. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
   },
 } as const satisfies Record<string, MetricCopy>;
 

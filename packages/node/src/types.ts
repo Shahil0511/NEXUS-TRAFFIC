@@ -31,10 +31,18 @@ export interface NexusServerEvent {
   pageViewId?: string;
 }
 
+/**
+ * Where the events come from (ADR 0008). Mirrors ENVIRONMENT_VALUES in @nexus/shared — a test asserts
+ * both directions. Dashboards show `prod` by default, so staging and dev traffic never pollutes them.
+ */
+export type NexusEnvironment = 'prod' | 'staging' | 'dev';
+
 /** The batch body POSTed to ROUTES.ingest.server. */
 export interface NexusServerBatch {
   sentAt: string;
   sdk: { name: string; version: string };
+  /** Sent ONLY when configured (option or NEXUS_ENVIRONMENT); the server stores `prod` otherwise. */
+  environment?: NexusEnvironment;
   events: NexusServerEvent[];
 }
 
@@ -68,6 +76,11 @@ export interface NexusClientOptions {
   disabled?: boolean;
   /** Overrides the SDK identity — set by adapters such as @nexus/express. */
   sdk?: { name: string; version: string };
+  /**
+   * `prod` | `staging` | `dev`. Default: `process.env.NEXUS_ENVIRONMENT`; unset → not sent (the
+   * server stores `prod`). An invalid value is NOT sent and logs one throttled warning.
+   */
+  environment?: NexusEnvironment;
 }
 
 /** Delivery counters — cheap to read, meant for a health endpoint or a debug log. */
@@ -80,6 +93,8 @@ export interface NexusClientStats {
   duplicates: number;
   /** Events refused per event inside a 202 (`rejected[]`) — fix the sender. */
   rejected: number;
+  /** `rejected` split by the server's reject CODE (e.g. `{ EVENT_TIME_OUT_OF_RANGE: 3 }`). Codes only. */
+  rejectedByCode: Partial<Record<string, number>>;
   /** Events lost: queue overflow, refused batches, oversize events or retries exhausted. */
   dropped: number;
   /** HTTP attempts made (retries included). */

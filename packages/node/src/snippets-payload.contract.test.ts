@@ -4,7 +4,7 @@
  * WHY: docs/snippets/ is the code other teams copy. The Express snippets are RUN here against a
  * capturing fetch and their real POST is validated with the PUBLIC zod contract; the curl batch is
  * parsed and validated; the Python and React snippets are checked statically (constants, field
- * names, tool ids, imported names). A contract change in @nexus/shared that a snippet does not
+ * names, tool ids, imported names, the early-install entry and its first-import rule). A contract change in @nexus/shared that a snippet does not
  * follow fails this suite instead of failing in another team's production.
  *
  * Snippets live outside this package's rootDir, so they are loaded at runtime by path (typed by
@@ -17,6 +17,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import {
+  ENVIRONMENT_VALUES,
   ERROR_CODE_PATTERN,
   INGEST_HEADERS,
   INGEST_LIMITS,
@@ -27,7 +28,9 @@ import {
   TOOL_ACTION_VALUES,
   TOOL_NAME_PATTERN,
 } from '@nexus/shared';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SDK_VERSION } from './version';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const SNIPPETS_DIR = path.join(REPO_ROOT, 'docs', 'snippets');
@@ -54,7 +57,12 @@ interface SnippetClient {
 type SnippetMiddleware = (req: FakeRequest, res: FakeResponse, next: () => void) => void;
 
 interface ExpressSnippet {
-  createNexusClient(options: { url?: string; key?: string; logger?: { warn: (m: string) => void } }): SnippetClient;
+  createNexusClient(options: {
+    url?: string;
+    key?: string;
+    environment?: string;
+    logger?: { warn: (m: string) => void };
+  }): SnippetClient;
   nexusMiddleware(options: {
     client: SnippetClient;
     basePath?: string;
@@ -143,12 +151,18 @@ function captureFetch(): CapturedPost[] {
 }
 
 /** One request through the snippet middleware → the POST it sends on shutdown. */
-async function runRequest(snippet: ExpressSnippet, req: FakeRequest, prepare?: (res: FakeResponse) => void) {
+async function runRequest(
+  snippet: ExpressSnippet,
+  req: FakeRequest,
+  prepare?: (res: FakeResponse) => void,
+  clientOptions: { environment?: string; logger?: { warn: (m: string) => void } } = {},
+) {
   const posts = captureFetch();
   const client = snippet.createNexusClient({
     url: NEXUS_URL,
     key: 'nx_sk_contract',
     logger: { warn: () => undefined },
+    ...clientOptions,
   });
   const middleware = snippet.nexusMiddleware({
     client,
@@ -176,8 +190,13 @@ async function loadExpressSnippets(): Promise<Array<[string, ExpressSnippet]>> {
   ];
 }
 
+beforeEach(() => {
+  vi.stubEnv('NEXUS_ENVIRONMENT', ''); // hermetic: the developer's shell must not change envelopes
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('Express snippets send batches that validate against the public contract', () => {
@@ -237,6 +256,39 @@ describe('Express snippets send batches that validate against the public contrac
     }
   });
 
+  it.each(ENVIRONMENT_VALUES)('environment %s (option) is sent in a valid envelope', async (environment) => {
+    for (const [name, snippet] of await loadExpressSnippets()) {
+      const { posts } = await runRequest(snippet, fakeRequest(), undefined, { environment });
+      const parsed = serverIngestBatchSchema.safeParse(posts[0]!.body);
+      expect(parsed.success, `${name}: ${JSON.stringify(parsed.error?.issues)}`).toBe(true);
+      expect(parsed.data?.environment, name).toBe(environment);
+    }
+  });
+
+  it('environment falls back to NEXUS_ENVIRONMENT; unset → no environment key', async () => {
+    for (const [name, snippet] of await loadExpressSnippets()) {
+      const unset = await runRequest(snippet, fakeRequest());
+      expect(Object.keys(unset.posts[0]!.body as object), name).not.toContain('environment');
+      vi.stubEnv('NEXUS_ENVIRONMENT', 'staging');
+      const fromEnv = await runRequest(snippet, fakeRequest());
+      expect((fromEnv.posts[0]!.body as { environment?: string }).environment, name).toBe('staging');
+      vi.stubEnv('NEXUS_ENVIRONMENT', '');
+    }
+  });
+
+  it('an invalid environment is NOT sent (one warning) and the batch stays valid', async () => {
+    for (const [name, snippet] of await loadExpressSnippets()) {
+      const warnings: string[] = [];
+      const { posts } = await runRequest(snippet, fakeRequest(), undefined, {
+        environment: 'production',
+        logger: { warn: (m) => warnings.push(m) },
+      });
+      expect(Object.keys(posts[0]!.body as object), name).not.toContain('environment');
+      expect(serverIngestBatchSchema.safeParse(posts[0]!.body).success, name).toBe(true);
+      expect(warnings.filter((m) => m.includes('environment')), name).toHaveLength(1);
+    }
+  });
+
   it('health checks are skipped (nothing is sent)', async () => {
     for (const [name, snippet] of await loadExpressSnippets()) {
       const { posts } = await runRequest(snippet, fakeRequest({ method: 'GET', originalUrl: '/health' }));
@@ -288,6 +340,16 @@ describe.each(['express-cjs.js', 'express-esm.ts'])('%s contract constants', (na
   it('the error-code pattern equals ERROR_CODE_PATTERN', () => {
     expect(source).toContain(`ERROR_CODE_PATTERN = ${ERROR_CODE_PATTERN.toString()}`);
   });
+
+  it('ENVIRONMENT_VALUES equal the shared enum and the sdk version equals SDK_VERSION', () => {
+    expect(source).toContain(`ENVIRONMENT_VALUES = [${ENVIRONMENT_VALUES.map((v) => `'${v}'`).join(', ')}]`);
+    expect(stringConstant(source, 'sdkVersion')).toBe(SDK_VERSION);
+  });
+
+  it('the header comment says LOUDLY that getUser defaults to anonymous', () => {
+    expect(source).toContain('getUser DEFAULTS TO ANONYMOUS');
+    expect(source).toContain('NEXUS_ENVIRONMENT');
+  });
 });
 
 describe('fastapi_nexus_asgi.py contract', () => {
@@ -318,10 +380,26 @@ describe('fastapi_nexus_asgi.py contract', () => {
     expect(required.filter((key) => !keys.includes(key))).toEqual([]);
   });
 
-  it('the batch body uses exactly the envelope fields', () => {
+  it('the batch body uses exactly the envelope fields (environment included) and strips None', () => {
     const body = /body = \{([^}]*)\}/.exec(source)?.[1] ?? '';
     const keys = [...body.matchAll(/"([A-Za-z]+)":/g)].map((m) => m[1]!);
+    expect(keys).toContain('environment');
     expect(keys.sort()).toEqual([...ENVELOPE_KEYS].sort());
+    expect(source).toContain('body = {k: v for k, v in body.items() if v is not None}');
+  });
+
+  it('NexusClient(url, key, *, environment=None, …) defaults to NEXUS_ENVIRONMENT and reports SDK_VERSION', () => {
+    const init = /class NexusClient:[\s\S]*?def __init__\(([\s\S]*?)\) -> None:/.exec(source)?.[1] ?? '';
+    const params = init.split(',').map((p) => p.trim()).filter(Boolean);
+    expect(params.slice(0, 4)).toEqual(['self', 'url: Optional[str]', 'key: Optional[str]', '*']);
+    expect(params).toContain('environment: Optional[str] = None');
+    expect(params).toContain(`sdk_version: str = "${SDK_VERSION}"`);
+    expect(source).toContain('os.getenv("NEXUS_ENVIRONMENT")');
+    expect(source).toContain(`ENVIRONMENT_VALUES = (${ENVIRONMENT_VALUES.map((v) => `"${v}"`).join(', ')})`);
+  });
+
+  it('the header docstring says LOUDLY that get_user defaults to anonymous', () => {
+    expect(source).toContain('get_user DEFAULTS TO ANONYMOUS');
   });
 });
 
@@ -341,6 +419,11 @@ describe('curl.sh contract', () => {
     expect(json).not.toMatch(/\$[({]/);
     const parsed = serverIngestBatchSchema.safeParse(JSON.parse(json));
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('its batch sends a valid environment', () => {
+    const environment = /"environment":\s*"([^"]+)"/.exec(source)?.[1];
+    expect(ENVIRONMENT_VALUES as readonly string[]).toContain(environment);
   });
 
   it('every request sends the key in the contract header', () => {
@@ -425,5 +508,42 @@ describe.each([
   it('labels stay within the contract limit', () => {
     const labels = [...source.matchAll(/data-nexus-label="([^"]+)"/g)].map((m) => m[1]!);
     for (const label of labels) expect(label.length).toBeLessThanOrEqual(INGEST_LIMITS.maxLabelLength);
+  });
+});
+
+// ─── Early install (ADR 0011): NOT rows of the table above — they have no tools ─
+
+const EARLY_ENTRY = '@nexus/react/early';
+
+/**
+ * The early snippets import ONLY names @nexus/react/early (src/early.ts) exports, installNexusEarly
+ * among them. Files are read inside the test, so a missing file fails only these tests.
+ */
+function expectEarlyImport(snippetName: string): void {
+  const source = readSnippet(snippetName);
+  const names = importedNames(source, EARLY_ENTRY);
+  expect(names.length).toBeGreaterThan(0);
+  expect(names).toContain('installNexusEarly');
+  const exported = exportedNames(readFileSync(path.join(REACT_SRC, 'early.ts'), 'utf8'));
+  expect(names.filter((n) => !exported.has(n))).toEqual([]);
+  // WHY: without a key scope the kill switch could never turn the early patch off.
+  expect(source).toMatch(/installNexusEarly\(\{[\s\S]*\bpublishableKey\b/); // `publishableKey: …` or shorthand
+}
+
+describe('next-instrumentation-client.ts', () => {
+  it(`imports only names ${EARLY_ENTRY} exports, and passes a publishableKey`, () => {
+    expectEarlyImport('next-instrumentation-client.ts');
+  });
+});
+
+describe('vite-nexus-early.ts', () => {
+  it(`imports only names ${EARLY_ENTRY} exports, and passes a publishableKey`, () => {
+    expectEarlyImport('vite-nexus-early.ts');
+  });
+});
+
+describe('vite-react-tracker.tsx early install', () => {
+  it("shows main.tsx with `import './nexus-early';` (ESM hoisting: it must be the FIRST import)", () => {
+    expect(readSnippet('vite-react-tracker.tsx')).toContain("import './nexus-early';");
   });
 });

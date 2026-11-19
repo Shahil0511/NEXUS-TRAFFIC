@@ -7,7 +7,9 @@ import type {
   ApiKeyDto,
   AppDto,
   AppTrafficDto,
+  BreakdownItemDto,
   EndpointStatsDto,
+  EnvironmentMixDto,
   ErrorCodeCountDto,
   ExposedKeyDto,
   GeoCityDto,
@@ -19,10 +21,14 @@ import type {
   OnlineAppDto,
   OnlineUserDto,
   PageStatsDto,
+  PiiDetectionDto,
+  RejectionReasonDto,
   RequestSampleDto,
+  SdkConfigDto,
   SdkHealthDto,
   SessionEventDto,
   SessionSummaryDto,
+  SsoCookieOutcomeDto,
   StatusCountDto,
   TimelineItemDto,
   TimeseriesPointDto,
@@ -47,7 +53,9 @@ import type {
   AppActivityRow,
   AppRow,
   AppTrafficRow,
+  BreakdownRow,
   EndpointStatsRow,
+  EnvironmentMixRow,
   ErrorCodeCountRow,
   ExposedKeyRow,
   GeoCityRow,
@@ -57,9 +65,12 @@ import type {
   OnlineAppRow,
   OnlineUserRow,
   PageStatsRow,
+  PiiDetectionRow,
+  RejectionReasonRow,
   SdkHealthRow,
   SessionEventRow,
   SessionSummaryRow,
+  SsoCookieOutcomeRow,
   StatusCountRow,
   TimelineEventRow,
   ToolTrendRow,
@@ -78,6 +89,17 @@ import type { Viewer } from './viewer';
 function isoOrNull(value: Date | null): string | null {
   return value === null ? null : value.toISOString();
 }
+
+/**
+ * WHY: the hourly diagnostic tables store '' for "none / unknown" (a NULL cannot be part of their
+ * primary key); the DTOs say null, so the dashboard has one "unknown" to render.
+ */
+function nullIfEmpty(value: string): string | null {
+  return value === '' ? null : value;
+}
+
+/** Decimals of 0..1 shares and ratios (0.12345 → 0.1235). */
+const SHARE_DECIMALS = 4;
 
 /**
  * WHY: the Apps page lists keys without ever exposing a secret. `key_hash` is NEVER copied; the
@@ -114,8 +136,22 @@ export function mapApp(row: AppRow, keys: ApiKeyRow[]): AppDto {
     allowedOrigins: [...row.allowed_origins],
     isActive: row.is_active,
     browserIngestEnabled: row.browser_ingest_enabled,
+    sdkConfig: mapSdkConfig(row),
     createdAt: row.created_at.toISOString(),
     keys: keys.map(mapApiKey),
+  };
+}
+
+/**
+ * WHY: the browser SDK's remote config as the admin sees it (ADR 0009); `version` is what
+ * ROUTES.apps.updateSdkConfig expects back as `expectedVersion`.
+ * @see ../../migrations/0009_app_sdk_config.sql
+ */
+export function mapSdkConfig(row: AppRow): SdkConfigDto {
+  return {
+    version: row.sdk_config_version,
+    disabledModules: [...row.sdk_disabled_modules],
+    updatedAt: isoOrNull(row.sdk_config_updated_at),
   };
 }
 
@@ -264,7 +300,20 @@ export function mapAppTraffic(app: AppRow, sources: AppTrafficSources): AppTraff
     toolUses: activity?.tool_uses ?? 0,
     lastEventAt: latestOf(traffic?.last_event_at, activity?.last_event_at)?.toISOString() ?? null,
     identifiedPct: activity ? percentOf(activity.identified, activity.events) : null,
-    linkedPct: traffic ? percentOf(traffic.linked, traffic.requests) : null,
+    // Denominator = LINKABLE calls only (ADR 0013): SSR, bots and streams can never link.
+    linkedPct: traffic ? percentOf(traffic.linked, traffic.linkable) : null,
+  };
+}
+
+/**
+ * WHY: one value of a breakdown; `share` (0..1) is over ALL events of the window (`total`), not
+ * just the listed top values, so the shares of a truncated list add up to less than 1.
+ */
+export function mapBreakdownItem(row: BreakdownRow): BreakdownItemDto {
+  return {
+    value: row.value,
+    events: row.events,
+    share: row.total === 0 ? 0 : roundTo(row.events / row.total, SHARE_DECIMALS),
   };
 }
 
@@ -615,11 +664,22 @@ export function mapIngestCounter(row: IngestCounterSumRow): IngestCounterDto {
   };
 }
 
+/**
+ * `@nexus/express@1.1.0` → name `@nexus/express`, version `1.1.0`: split at the LAST '@' when it
+ * is not the first character (scoped names start with '@'). Anything else is unsplittable.
+ */
+export function splitSdkLabel(sdk: string | null): { name: string | null; version: string | null } {
+  const at = sdk === null ? -1 : sdk.lastIndexOf('@');
+  if (sdk === null || at <= 0 || at === sdk.length - 1) return { name: null, version: null };
+  return { name: sdk.slice(0, at), version: sdk.slice(at + 1) };
+}
+
 /** WHY: one SDK seen on one source; skew in whole ms (sub-ms precision is noise). */
 export function mapSdkHealth(row: SdkHealthRow): SdkHealthDto {
   return {
     source: row.source,
     sdk: row.sdk,
+    ...splitSdkLabel(row.sdk),
     events: row.events,
     lastSeenAt: row.last_seen_at.toISOString(),
     medianClockSkewMs: roundOrNull(row.median_skew_ms, 0),
@@ -635,4 +695,33 @@ export function mapExposedKey(row: ExposedKeyRow): ExposedKeyDto {
     label: row.label,
     exposedAt: row.exposed_at.toISOString(),
   };
+}
+
+/** WHY: Integration Health is NOT env-filtered — it shows the mix so staging wiring is visible. */
+export function mapEnvironmentMix(row: EnvironmentMixRow): EnvironmentMixDto {
+  return { source: row.source, environment: row.environment, events: row.events };
+}
+
+/**
+ * WHY: a rejection reason is a CODE and a normalised schema path — never a zod message or a value.
+ * @see ../../migrations/0010_ingest_rejections.sql
+ */
+export function mapRejectionReason(row: RejectionReasonRow): RejectionReasonDto {
+  return {
+    source: row.source,
+    sdk: nullIfEmpty(row.sdk),
+    code: row.code,
+    schemaPath: nullIfEmpty(row.schema_path),
+    rejected: row.rejected,
+  };
+}
+
+/** WHY: counts only — the redacted value was never stored. @see ../../migrations/0011_pii_detections.sql */
+export function mapPiiDetection(row: PiiDetectionRow): PiiDetectionDto {
+  return { source: row.source, field: row.field, kind: row.kind, detections: row.detections };
+}
+
+/** @see ../../migrations/0012_sso_cookie_outcomes.sql */
+export function mapSsoCookieOutcome(row: SsoCookieOutcomeRow): SsoCookieOutcomeDto {
+  return { outcome: row.outcome, beaconOrigin: row.beacon_origin, beacons: row.beacons };
 }

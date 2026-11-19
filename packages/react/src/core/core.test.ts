@@ -1,3 +1,4 @@
+import { SDK_MODULE_SWITCH_MIN_VERSION } from '@nexus/shared/constants';
 import { buildIngestUrl } from '@nexus/shared/ingest/build-ingest-url';
 import { ROUTES } from '@nexus/shared/routes';
 import { readFileSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import { EventBatcher, byteLength } from './event-batcher';
 import { externalReferrerHost, joinBasePath, toWirePath } from './paths';
-import { resolveIngestUrl } from './registry';
+import { ingestExcludeUrls, resolveConfigUrl, resolveIngestUrl } from './ingest-urls';
 import { SafeStorage } from './safe-storage';
 import { cleanProps, cleanTrackOptions, isValidName } from './sanitize';
 import { SDK_VERSION } from './sdk-info';
@@ -42,6 +43,15 @@ describe('paths', () => {
     const expected = buildIngestUrl('https://nexus.libas.in/traffic', ROUTES.ingest.browser);
     expect(resolveIngestUrl('https://nexus.libas.in/traffic/')).toBe(expected);
     expect(resolveIngestUrl(expected)).toBe(expected);
+  });
+
+  it('derives the config URL from the same base (and from a full ingest URL)', () => {
+    const ingest = buildIngestUrl('https://nexus.libas.in/traffic', ROUTES.ingest.browser);
+    const config = buildIngestUrl('https://nexus.libas.in/traffic', ROUTES.ingest.config);
+    expect(resolveConfigUrl('https://nexus.libas.in/traffic/')).toBe(config);
+    expect(resolveConfigUrl(ingest)).toBe(config);
+    expect(resolveIngestUrl(config)).toBe(ingest);
+    expect(ingestExcludeUrls('https://nexus.libas.in/traffic')).toEqual([ingest, config]);
   });
 });
 
@@ -140,6 +150,26 @@ describe('SessionStore', () => {
     expect(shouldRotate({ lastActivityAt: 0, email: 'a@x.in' }, 'a@x.in', 1, idle)).toBe(false);
   });
 
+  it('peekCurrent: never rotates on email, rotates once on idle and keeps the stored email', () => {
+    const store = new SessionStore(new SafeStorage(() => undefined), idle);
+    const a = store.nextEvent('a@x.in', 0);
+    expect(store.peekCurrent(100)).toBe(a.sessionId);
+    // A header peek does not mark activity: the idle clock still runs from t=0.
+    const rotated = store.peekCurrent(idle + 1);
+    expect(rotated).not.toBe(a.sessionId);
+    expect(store.peekCurrent(idle + 2)).toBe(rotated);
+    // The next event (same user) continues the rotated session at seq 0.
+    expect(store.nextEvent('a@x.in', idle + 3)).toEqual({ sessionId: rotated, seq: 0 });
+  });
+
+  it('peekCurrent creates and persists a record when there is none', () => {
+    const backing = new SafeStorage(() => undefined);
+    const store = new SessionStore(backing, idle);
+    const id = store.peekCurrent(0);
+    expect(isUuid(id)).toBe(true);
+    expect(store.nextEvent(undefined, 1).sessionId).toBe(id);
+  });
+
   it('ignores corrupt stored records', () => {
     const backing = new SafeStorage(() => undefined);
     backing.set('nexus.session', '{"id":"bad","seq":-1}');
@@ -214,5 +244,13 @@ describe('package metadata', () => {
     };
     expect(SDK_VERSION).toBe(pkg.version);
     expect(Object.keys(pkg.dependencies ?? {})).toEqual([]);
+  });
+
+  it('honours remote module switches: SDK_VERSION is not older than SDK_MODULE_SWITCH_MIN_VERSION', () => {
+    const parts = (version: string) => version.split('.').map(Number);
+    const [major, minor, patch] = parts(SDK_VERSION);
+    const [minMajor, minMinor, minPatch] = parts(SDK_MODULE_SWITCH_MIN_VERSION);
+    const cmp = major! - minMajor! || minor! - minMinor! || patch! - minPatch!;
+    expect(cmp).toBeGreaterThanOrEqual(0);
   });
 });

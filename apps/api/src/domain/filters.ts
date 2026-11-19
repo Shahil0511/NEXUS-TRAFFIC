@@ -6,7 +6,15 @@
  * `occurred_at >= from AND occurred_at < to` (partition pruning on the monthly partitions), so the
  * window is REQUIRED here, not optional.
  */
-import type { EndpointSort, SortDirection, StatusClass, UserSort } from '@nexus/shared';
+import {
+  DEFAULT_ENVIRONMENT,
+  type EndpointSort,
+  type Environment,
+  type EnvironmentFilter,
+  type SortDirection,
+  type StatusClass,
+  type UserSort,
+} from '@nexus/shared';
 
 /** The window + scope every analytics query runs over. */
 export interface TrafficFilter {
@@ -24,6 +32,22 @@ export interface TrafficFilter {
    * countOnlineByApp) on BOTH tables; the other web-event queries take the key as an argument.
    */
   userKey?: Buffer;
+  /**
+   * Stored `environment` values to keep (ADR 0008); null = every environment (`env=all`).
+   * REQUIRED on purpose: a hand-built filter that forgets it does not compile, so no read can
+   * silently mix staging/dev traffic into prod numbers. Built by `environmentsOf`.
+   */
+  environments: readonly Environment[] | null;
+}
+
+/**
+ * The dashboard `env` query → TrafficFilter.environments. Absent means DEFAULT_ENVIRONMENT
+ * (`prod`, the schema keeps `env` optional so query literals compile); `all` disables the filter.
+ */
+export function environmentsOf(env?: EnvironmentFilter): readonly Environment[] | null {
+  if (env === undefined) return [DEFAULT_ENVIRONMENT];
+  if (env === 'all') return null;
+  return [env];
 }
 
 /**

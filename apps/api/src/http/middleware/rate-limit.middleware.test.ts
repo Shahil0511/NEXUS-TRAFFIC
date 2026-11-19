@@ -4,10 +4,12 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 
 import { apiKeyRow, appRow, silentLogger } from '../../../test/ingest-fixtures';
+import { BadRequestError, ForbiddenError, UnauthorizedError } from '../../errors/app-error';
 import { errorHandlerMiddleware } from './error-handler.middleware';
 import {
   clientIpKey,
   ipFailureLimitMiddleware,
+  isCountedIpFailure,
   keyRateLimitMiddleware,
   retryAfterSeconds,
   sessionRateLimitMiddleware,
@@ -32,12 +34,21 @@ function keyLimitedApp(perMinute: number, onLimited = vi.fn()) {
   return { app, onLimited };
 }
 
+/** FAIL_HEADER = `<status>:<ERROR_CODE>`; thrown as the AppError the real middleware would throw. */
+function failure(value: string): Error {
+  const [status, code] = value.split(':') as [string, (typeof ERROR_CODES)[keyof typeof ERROR_CODES]];
+  if (status === '401') return new UnauthorizedError('auth', code);
+  if (status === '403') return new ForbiddenError('denied', code);
+  if (status === '400') return new BadRequestError('bad', code);
+  return new Error('boom');
+}
+
 function ipLimitedApp(perMinute: number) {
   const app = express();
   app.get('/ingest', ipFailureLimitMiddleware(perMinute), (req, res) => {
     const fail = req.get(FAIL_HEADER);
-    if (fail) res.status(Number(fail)).json({ error: 'auth' });
-    else res.status(202).json({ ok: true });
+    if (fail) throw failure(fail);
+    res.status(202).json({ ok: true });
   });
   app.use(errorHandlerMiddleware(silentLogger()));
   return app;
@@ -74,10 +85,10 @@ describe('ipFailureLimitMiddleware', () => {
     }
   });
 
-  it('counts 401 and 403 responses and then blocks the client IP', async () => {
+  it('counts key-guess 401/403 responses and then blocks the client IP', async () => {
     const app = ipLimitedApp(2);
-    expect((await request(app).get('/ingest').set(FAIL_HEADER, '401')).status).toBe(401);
-    expect((await request(app).get('/ingest').set(FAIL_HEADER, '403')).status).toBe(403);
+    expect((await request(app).get('/ingest').set(FAIL_HEADER, '401:INVALID_API_KEY')).status).toBe(401);
+    expect((await request(app).get('/ingest').set(FAIL_HEADER, '403:WRONG_KEY_TYPE')).status).toBe(403);
     const blocked = await request(app).get('/ingest');
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.code).toBe(ERROR_CODES.RATE_LIMITED);
@@ -86,9 +97,43 @@ describe('ipFailureLimitMiddleware', () => {
 
   it('other failures (400, 500) are not counted', async () => {
     const app = ipLimitedApp(1);
-    expect((await request(app).get('/ingest').set(FAIL_HEADER, '400')).status).toBe(400);
+    expect((await request(app).get('/ingest').set(FAIL_HEADER, '400:INVALID_ENVELOPE')).status).toBe(400);
     expect((await request(app).get('/ingest').set(FAIL_HEADER, '500')).status).toBe(500);
     expect((await request(app).get('/ingest')).status).toBe(202);
+  });
+
+  it('ORIGIN_NOT_ALLOWED floods (public key, forged Origin) are counted and then blocked', async () => {
+    const app = ipLimitedApp(2);
+    for (let i = 0; i < 2; i += 1) {
+      expect((await request(app).get('/ingest').set(FAIL_HEADER, '403:ORIGIN_NOT_ALLOWED')).status).toBe(403);
+    }
+    expect((await request(app).get('/ingest').set(FAIL_HEADER, '403:ORIGIN_NOT_ALLOWED')).status).toBe(429);
+  });
+
+  it('kill codes (kill switch, disabled app, exposed key) are NEVER counted (ADR 0009)', async () => {
+    const app = ipLimitedApp(1);
+    for (let i = 0; i < 5; i += 1) {
+      for (const code of ['BROWSER_INGEST_DISABLED', 'APP_DISABLED', 'SECRET_KEY_EXPOSED']) {
+        expect((await request(app).get('/ingest').set(FAIL_HEADER, `403:${code}`)).status).toBe(403);
+      }
+    }
+    expect((await request(app).get('/ingest')).status).toBe(202);
+  });
+});
+
+describe('isCountedIpFailure', () => {
+  it.each([
+    [401, 'MISSING_API_KEY', true],
+    [401, 'INVALID_API_KEY', true],
+    [403, 'WRONG_KEY_TYPE', true],
+    [403, 'ORIGIN_NOT_ALLOWED', true],
+    [403, 'BROWSER_INGEST_DISABLED', false],
+    [403, 'APP_DISABLED', false],
+    [403, 'SECRET_KEY_EXPOSED', false],
+    [400, 'INVALID_API_KEY', false],
+    [401, undefined, false],
+  ] as const)('%s %s → %s', (status, code, expected) => {
+    expect(isCountedIpFailure(status, code)).toBe(expected);
   });
 });
 

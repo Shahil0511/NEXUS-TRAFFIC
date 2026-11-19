@@ -7,8 +7,9 @@
  * reason → time_reason, routeTemplate → path_template, ISO strings → Date, optional → null) live
  * here and nowhere else, so a contract change has exactly one landing spot.
  * @see ../../migrations/0005_web_events.sql
+ * @see ../../migrations/0007_event_environment_and_client_context.sql
  */
-import type { BrowserEvent } from '@nexus/shared';
+import type { BrowserEvent, Environment } from '@nexus/shared';
 
 import type { ActorColumns, WebEventInsert } from './inserts';
 
@@ -24,6 +25,16 @@ export interface BrowserEventEnrichment {
   referrerPath: string | null;
   clockSkewMs: number | null;
   actor: ActorColumns;
+  /** Batch-level columns (the same on every row of a beacon). */
+  envelope: BrowserEnvelopeColumns;
+}
+
+/** The envelope's columns after validation: tz/lang already checked against CLIENT_*_PATTERN. */
+export interface BrowserEnvelopeColumns {
+  environment: Environment;
+  clientTz: string | null;
+  clientLang: string | null;
+  release: string | null;
 }
 
 /** The per-type columns; every column not set by the event's type stays null. */
@@ -107,5 +118,9 @@ export function toWebEventInsert(event: BrowserEvent, enrichment: BrowserEventEn
     path: enrichment.path,
     pathTemplate: enrichment.pathTemplate,
     referrerPath: enrichment.referrerPath,
+    environment: enrichment.envelope.environment,
+    clientTz: enrichment.envelope.clientTz,
+    clientLang: enrichment.envelope.clientLang,
+    release: enrichment.envelope.release,
   };
 }

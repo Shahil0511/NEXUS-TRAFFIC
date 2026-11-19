@@ -5,11 +5,13 @@
  * emitted to docs/dist/examples/*.json for other teams, used by the OpenAPI document, by the
  * DB parity test ("every example inserts") and by the api tests.
  */
-import type { BrowserIngestBatchInput, ServerIngestBatchInput } from './schemas';
+import { INGEST_CONTRACT_VERSION, SDK_DEFAULTS } from '../constants/ingest';
+import type { BrowserIngestBatchInput, SdkRemoteConfig, ServerIngestBatchInput } from './schemas';
 
 export const SERVER_BATCH_EXAMPLE = {
   sentAt: '2026-10-01T09:30:05.120+05:30',
-  sdk: { name: '@nexus/express', version: '1.0.0' },
+  sdk: { name: '@nexus/express', version: '1.1.0' },
+  environment: 'prod',
   events: [
     {
       eventId: '0b8f6c1e-5a2d-4c4f-9a51-2f0f3d7f6a11',
@@ -47,7 +49,9 @@ export const BROWSER_BATCH_EXAMPLE = {
   sentAt: '2026-10-01T04:01:10.002Z',
   sessionId: '5b0d6f7e-2a3c-4d1e-9f8a-7b6c5d4e3f21',
   anonymousId: '2c9a8b7d-6e5f-4a3b-9c1d-0e2f3a4b5c6d',
-  client: { sdk: '@nexus/react', version: '1.0.0', tz: 'Asia/Kolkata', lang: 'en-IN' },
+  environment: 'prod',
+  release: '2026.11.18-a1b2c3d',
+  client: { sdk: '@nexus/react', version: '1.1.0', tz: 'Asia/Kolkata', lang: 'en-IN' },
   events: [
     {
       eventId: 'a3f1c2d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
@@ -55,6 +59,7 @@ export const BROWSER_BATCH_EXAMPLE = {
       occurredAt: '2026-10-01T04:00:12.000Z',
       seq: 0,
       path: '/ebo-audit/audits',
+      routeTemplate: '/ebo-audit/audits',
       nav: 'load',
     },
     {
@@ -80,3 +85,12 @@ export const BROWSER_BATCH_EXAMPLE = {
     },
   ],
 } satisfies BrowserIngestBatchInput;
+
+/** 200 body of POST ROUTES.ingest.config: one module switched off by an admin. */
+export const SDK_CONFIG_RESPONSE_EXAMPLE = {
+  contract: INGEST_CONTRACT_VERSION,
+  version: 3,
+  enabled: true,
+  disabledModules: ['auto_tools'],
+  maxAgeMs: SDK_DEFAULTS.browser.configMaxAgeMs,
+} satisfies SdkRemoteConfig;

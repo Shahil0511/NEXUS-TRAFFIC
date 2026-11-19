@@ -6,6 +6,7 @@ import { fake } from '../../test/ingest-fixtures';
 import type { Executor } from '../db/executor';
 import { ADVISORY_LOCKS } from '../db/schema';
 import { FixedClock } from '../lib/clock';
+import type { AggregateRetentionService } from '../services/aggregate-retention.service';
 import type { PartitionService } from '../services/partition.service';
 import { RetentionJob } from './retention.job';
 
@@ -30,20 +31,28 @@ function setup(options: { locked?: boolean; fail?: number } = {}) {
       return ['api_requests_y2026m03'];
     },
   });
-  const job = new RetentionJob(lockPool.pool, service, clock, logger);
-  return { lockPool, clock, logs, calls, job };
+  const aggregateCalls: Array<Executor | undefined> = [];
+  const aggregates = fake<AggregateRetentionService>({
+    deleteExpired: async (exec?: Executor) => {
+      aggregateCalls.push(exec);
+      return 7;
+    },
+  });
+  const job = new RetentionJob(lockPool.pool, service, aggregates, clock, logger);
+  return { lockPool, clock, logs, calls, aggregateCalls, job };
 }
 
 describe('RetentionJob', () => {
-  it('takes the retention advisory lock and drops on THAT client', async () => {
-    const { lockPool, calls, logs, job } = setup();
+  it('takes the retention advisory lock and drops partitions + aggregates on THAT client', async () => {
+    const { lockPool, calls, aggregateCalls, logs, job } = setup();
     await job.run();
 
     expect(calls).toEqual([lockPool.client]);
+    expect(aggregateCalls).toEqual([lockPool.client]);
     const lock = lockPool.queries.find((q) => q.sql.includes('pg_try_advisory_xact_lock'));
     expect(lock?.params).toEqual([ADVISORY_LOCKS.retention]);
     expect(lockPool.queries.map((q) => q.sql).at(-1)).toBe('COMMIT');
-    expect(logs).toContainEqual({ level: 'info', msg: 'retention run', meta: { droppedCount: 1 } });
+    expect(logs).toContainEqual({ level: 'info', msg: 'retention run', meta: { droppedCount: 1, deletedAggregates: 7 } });
   });
 
   it('runs at most once per IST day', async () => {

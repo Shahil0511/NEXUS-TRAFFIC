@@ -6,7 +6,15 @@
 > matches your code, your judgement wins (and please tell {{DOCS_CONTACT}} so we update it).
 
 Common settings: `NEXUS_URL={{PUBLIC_URL}}` and `NEXUS_SECRET_KEY` in the backend environment;
-the publishable key in the frontend build (chapter 9).
+the publishable key in the frontend build (chapter 9). For every app also:
+
+- set `NEXUS_ENVIRONMENT` (backend) and the tracker's `environment` (frontend) per deployment, and a
+  `release` (git sha) in both — [chapter 9](09-environments.md);
+- add the **early install** next to the tracker: Next.js apps → `src/instrumentation-client.ts`
+  ([next-instrumentation-client.ts](files/snippets/next-instrumentation-client.ts)); Vite apps →
+  `src/nexus-early.ts` imported first in `main.tsx` ([vite-nexus-early.ts](files/snippets/vite-nexus-early.ts));
+- check `getUser` on the Integration page (**Identified (server)**) after the first deploy — it
+  defaults to anonymous ([chapter 7](07-user-email.md)).
 
 ## AgreementVault
 

@@ -1,4 +1,9 @@
-import { ACTIVE_USER_WINDOW_MS, ERROR_CODES } from '@nexus/shared';
+import {
+  ACTIVE_USER_WINDOW_MS,
+  ERROR_CODES,
+  RETURNING_DEVICE_LOOKBACK_MS,
+  breakdownOverviewQuerySchema,
+} from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import { trafficBucketRow, trafficSummaryRow } from '../../test/fixtures/analytics-rows';
@@ -81,18 +86,38 @@ describe('OverviewService.summary', () => {
       from: new Date('2026-10-01T09:00:00Z'),
       to: NOW,
       appId: KNOWN_APP_ID,
+      environments: ['prod'],
     });
     expect(previous).toEqual({
       from: new Date('2026-10-01T08:00:00Z'),
       to: new Date('2026-10-01T09:00:00Z'),
       appId: KNOWN_APP_ID,
+      environments: ['prod'],
     });
     const active = webEvents.calls.find((c) => c.method === 'countActiveUsers')?.args[0];
     expect(active).toEqual({
       from: new Date(NOW.getTime() - ACTIVE_USER_WINDOW_MS),
       to: NOW,
       appId: KNOWN_APP_ID,
+      environments: ['prod'],
     });
+  });
+
+  it('applies the env filter to EVERY query (default prod, `all` = no filter)', async () => {
+    const staging = build();
+    await staging.service.summary({ range: '1h', env: 'staging' });
+    const all = build();
+    await all.service.summary({ range: '1h', env: 'all' });
+    for (const [t, expected] of [
+      [staging, ['staging']],
+      [all, null],
+    ] as const) {
+      const filters = [...t.requests.calls, ...t.webEvents.calls].map(
+        (c) => (c.args[0] as { environments: unknown }).environments,
+      );
+      expect(filters.length).toBeGreaterThan(0);
+      for (const environments of filters) expect(environments).toEqual(expected);
+    }
   });
 
   it('has a null error rate (not 0 %, not NaN) when there were no requests', async () => {
@@ -135,6 +160,7 @@ describe('OverviewService.apps', () => {
           p95_ms: 120.123,
           last_event_at: seenAt,
           identified: 40,
+          linkable: 50,
           linked: 25,
         },
       ],
@@ -146,6 +172,7 @@ describe('OverviewService.apps', () => {
           p95_ms: 90,
           last_event_at: seenAt,
           identified: 25,
+          linkable: 25,
           linked: 25,
         },
       ],
@@ -224,5 +251,89 @@ describe('OverviewService.timeseries', () => {
       pageViews: 7,
     });
     expect(requests.argsOf('timeseries')[0]?.[1]).toBe('minute');
+  });
+});
+
+describe('OverviewService.breakdown', () => {
+  it('counts browser page views by the dimension, with shares of the whole window', async () => {
+    const { service, webEvents, requests } = build();
+    webEvents.breakdown = [
+      { value: 'Chrome', events: 75, total: 100 },
+      { value: null, events: 5, total: 100 },
+    ];
+    const query = breakdownOverviewQuerySchema.parse({ dimension: 'browser', app: 'ebo-sales' });
+
+    const dto = await service.breakdown(query);
+
+    expect(dto).toEqual({
+      window: { from: '2026-09-30T10:00:00.000Z', to: NOW.toISOString(), grain: 'hour' },
+      source: 'browser',
+      dimension: 'browser',
+      total: 100,
+      items: [
+        { value: 'Chrome', events: 75, share: 0.75 },
+        { value: null, events: 5, share: 0.05 },
+      ],
+    });
+    expect(webEvents.argsOf('countByDimension')).toEqual([
+      [
+        'browser',
+        {
+          from: new Date('2026-09-30T10:00:00Z'),
+          to: NOW,
+          appId: KNOWN_APP_ID,
+          environments: ['prod'],
+        },
+        10,
+      ],
+    ]);
+    expect(requests.calls).toEqual([]);
+  });
+
+  it('routes source=server to api_requests and honours env + limit', async () => {
+    const { service, webEvents, requests } = build();
+    const query = breakdownOverviewQuerySchema.parse({
+      source: 'server',
+      dimension: 'release',
+      env: 'all',
+      limit: '5',
+    });
+    const dto = await service.breakdown(query);
+    expect(dto).toMatchObject({ source: 'server', dimension: 'release', total: 0, items: [] });
+    const [[dimension, filter, limit]] = requests.argsOf('countByDimension') as [
+      [string, { environments: unknown }, number],
+    ];
+    expect([dimension, filter.environments, limit]).toEqual(['release', null, 5]);
+    expect(webEvents.argsOf('countByDimension')).toEqual([]);
+  });
+
+  it('allows count ranges (90d) — breakdowns are counts, not percentiles', async () => {
+    const { service } = build();
+    const dto = await service.breakdown(
+      breakdownOverviewQuerySchema.parse({ dimension: 'os', range: '90d' }),
+    );
+    expect(dto.window.from).toBe('2026-07-03T10:00:00.000Z');
+  });
+});
+
+describe('OverviewService.devices', () => {
+  it('splits devices into new and returning over the bounded lookback', async () => {
+    const { service, webEvents } = build();
+    webEvents.deviceReturn = { devices: 40, returning_devices: 15 };
+
+    const dto = await service.devices({ range: '24h', env: 'dev' });
+
+    const windowFrom = new Date('2026-09-30T10:00:00Z');
+    const lookbackFrom = new Date(windowFrom.getTime() - RETURNING_DEVICE_LOOKBACK_MS);
+    expect(dto).toEqual({
+      window: { from: windowFrom.toISOString(), to: NOW.toISOString(), grain: 'hour' },
+      lookbackFrom: lookbackFrom.toISOString(),
+      devices: 40,
+      newDevices: 25,
+      returningDevices: 15,
+    });
+    expect(webEvents.argsOf('countDeviceReturn')).toEqual([
+      [{ from: windowFrom, to: NOW, appId: undefined, environments: ['dev'] }, lookbackFrom],
+    ]);
   });
 });
