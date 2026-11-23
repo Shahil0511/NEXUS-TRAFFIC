@@ -56,7 +56,7 @@ export function EndpointDetailView({ endpointId }: { endpointId: string }) {
     <Breadcrumbs
       items={[
         ...(endpoint ? applicationCrumbs(endpoint.app, linkQuery) : []),
-        { label: 'API Routes', href: withQuery(PAGES.endpoints(), linkQuery) },
+        { label: 'Request types', href: withQuery(PAGES.endpoints(), linkQuery) },
         { label: endpoint ? `${endpoint.method} ${endpoint.routeTemplate}` : 'Route' },
       ]}
     />

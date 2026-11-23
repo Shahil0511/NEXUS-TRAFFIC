@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { formatInteger } from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
@@ -33,8 +34,13 @@ const PAGE_SIZE = 50;
  * The table columns; `sortKey` values are the API whitelist (USER_SORT_VALUES). Each user opens
  * its profile through the OPAQUE userKey (PAGES); each app chip opens that app's page — so "who
  * uses which app" is one click either way. "Failed" opens the user's failures on Errors.
+ * Both person links are admin-only (the API refuses everyone else), so with `canOpenPerson` false
+ * the email and the failed count are plain text.
  */
-export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSummaryDto, UserSort>[] {
+export function userColumns(
+  filters: TimeWindowQuery,
+  canOpenPerson: boolean,
+): DataTableColumn<UserSummaryDto, UserSort>[] {
   const linkQuery = filterLinkQuery(filters);
   return [
     {
@@ -50,12 +56,16 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
             {row.email.slice(0, 2)}
           </span>
           <span className="min-w-0 space-y-1">
-            <Link
-              href={withQuery(PAGES.userDetail(row.userKey), linkQuery)}
-              className="block truncate rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              {row.email}
-            </Link>
+            {canOpenPerson ? (
+              <Link
+                href={withQuery(PAGES.userDetail(row.userKey), linkQuery)}
+                className="block truncate rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                {row.email}
+              </Link>
+            ) : (
+              <span className="block truncate">{row.email}</span>
+            )}
             <AppChipList apps={row.apps} linkQuery={linkQuery} />
           </span>
         </span>
@@ -76,7 +86,9 @@ export function userColumns(filters: TimeWindowQuery): DataTableColumn<UserSumma
       sortKey: 'failed',
       align: 'right',
       cell: (row) =>
-        row.failedRequests > 0 ? (
+        row.failedRequests > 0 && !canOpenPerson ? (
+          <span className="font-medium text-destructive">{formatInteger(row.failedRequests)}</span>
+        ) : row.failedRequests > 0 ? (
           <Link
             href={withQuery(PAGES.errors(), { ...linkQuery, userKey: row.userKey })}
             className="rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
@@ -144,12 +156,13 @@ export function UsersView() {
   const query = searching ? found : listed;
 
   const rows = useMemo(() => query.data?.pages.flatMap((page) => page.items), [query.data]);
-  const columns = useMemo(() => userColumns(filters), [filters]);
+  const canOpenPerson = useCanOpenPersonPages();
+  const columns = useMemo(() => userColumns(filters, canOpenPerson), [filters, canOpenPerson]);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Users"
+        title="People"
         description={
           <span className="inline-flex items-center gap-1.5">
             <ShieldCheck className="size-3.5" aria-hidden="true" />

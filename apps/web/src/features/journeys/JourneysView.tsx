@@ -38,7 +38,7 @@ export function JourneysView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Journeys"
+        title="Visits"
         description={
           topPaths.data
             ? formatWindowCaption(topPaths.data.window)

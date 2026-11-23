@@ -5,11 +5,13 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { guideHref } from '@/lib/guide';
+import { PAGES } from '@/lib/pages';
 import { GEO_CITIES, GEO_COUNTRIES, WINDOW } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
-import { countryBars, GeographyView, isAllUnlocated, metricWithData } from './GeographyView';
+import { countryBars, isAllUnlocated, metricWithData } from './GeoPlacesSection';
+import { GeographyView } from './GeographyView';
 
 /** An API-only app: located traffic, but no page views anywhere. */
 const API_ONLY = {
@@ -58,16 +60,20 @@ describe('GeographyView', () => {
     );
     renderWithProviders(<GeographyView />, { searchParams: '?range=7d' });
 
-    expect(await screen.findByText('None of this traffic could be located')).toBeInTheDocument();
+    expect(await screen.findByText('We cannot tell where people are yet')).toBeInTheDocument();
     // Plain words first (for managers), the technical cause second.
-    const description = screen.getByText(/came from inside the company network/);
+    const description = screen.getByText(/reached Nexus from the gateway's internal address/);
     expect(description).toHaveTextContent('1,500 requests');
-    expect(description.textContent?.indexOf('company network')).toBeLessThan(
+    expect(description.textContent?.indexOf('internal address')).toBeLessThan(
       description.textContent?.indexOf('X-Forwarded-For') ?? -1,
     );
     expect(screen.getByRole('link', { name: /forward the client IP/ })).toHaveAttribute(
       'href',
       guideHref('clientIp'),
+    );
+    expect(screen.getByRole('link', { name: /Open Data health/ })).toHaveAttribute(
+      'href',
+      PAGES.integration(),
     );
     expect(screen.queryByRole('table', { name: 'Countries' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Rank countries by' })).toBeNull();
@@ -86,7 +92,7 @@ describe('GeographyView', () => {
       screen.getAllByText('Nothing was recorded for the selected app and range.'),
     ).toHaveLength(2);
     expect(screen.queryByText('No located traffic')).toBeNull();
-    expect(screen.queryByText('None of this traffic could be located')).toBeNull();
+    expect(screen.queryByText('We cannot tell where people are yet')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Show the last 7 days' }).length).toBeGreaterThan(
       0,
     );
@@ -104,7 +110,7 @@ describe('GeographyView', () => {
     });
     expect(await screen.findByText('No page views in this window')).toBeInTheDocument();
     expect(screen.queryByText(/public IP/)).toBeNull();
-    expect(screen.queryByText('None of this traffic could be located')).toBeNull();
+    expect(screen.queryByText('We cannot tell where people are yet')).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Show requests' }));
     // Requests is the default, so the param is cleared from the URL.
     expect(urls.at(-1)).not.toContain('metric=');
@@ -120,6 +126,11 @@ describe('GeographyView', () => {
     expect(
       metricWithData([{ country: 'IN', requests: 3, pageViews: 0, users: 0 }], 'requests'),
     ).toBeNull();
+  });
+
+  it('switches only among the given candidates (the Places tab offers no users metric)', () => {
+    expect(metricWithData(API_ONLY.items, 'requests', ['pageViews', 'requests'])).toBeNull();
+    expect(metricWithData(API_ONLY.items, 'pageViews', ['pageViews', 'requests'])).toBe('requests');
   });
 
   it('keeps the chart metric in the URL (?metric=)', async () => {

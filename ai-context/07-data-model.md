@@ -16,7 +16,7 @@ INSERT, camelCase — the repositories map one to the other).
 | Role | Used by | Can do |
 |---|---|---|
 | owner (the `MIGRATION_DATABASE_URL` login: `POSTGRES_USER` locally, the shared login on 10.150.0.5) | the `migrate` service; **also the api in `owner` mode** | everything in our database: runs the bootstrap and the migrations |
-| `nexus_app` (`separate` mode only) | the api container | read/write rows only. No `CREATE`, `ALTER`, `DROP` or `TRUNCATE`. The audit log is append-only. Partitions are created/dropped only through three whitelisted functions. Grants: `apps/api/src/db/migration-runner/grants.ts`, re-applied by every migrate run. |
+| `nexus_app` (`separate` mode only) | the api container | read/write rows only. No `CREATE`, `ALTER`, `DROP` or `TRUNCATE`. The audit log and the person access log are append-only. Partitions are created/dropped only through three whitelisted functions. Grants: `apps/api/src/db/migration-runner/grants.ts`, re-applied by every migrate run. |
 
 Why `separate` exists: if the api ever had an SQL-injection bug, it still could not drop or alter
 tables. Why `owner` exists: the shared server's login has no `CREATEROLE`, so production cannot have
@@ -37,6 +37,7 @@ through the whitelisted functions.
 | `ingest_rejections` | app × source × SDK × code × schema path × hour | small | no |
 | `pii_detections` | app × source × field × PII kind × hour | small | no |
 | `sso_cookie_outcomes` | app × cookie outcome × beacon origin × hour | small | no |
+| `person_access_log` | admin opening one part of one person's page, or a list narrowed to one person (coalesced) | small | no |
 | `schema_migrations` | applied migration file | tiny | no |
 
 There is **no sessions table**: a session is all `web_events` rows with the same
@@ -136,7 +137,7 @@ IP, geo and client columns as `api_requests`, plus:
 | `referrer_path` | previous in-app path; `referrer_host` the external site's host only (never a full URL). |
 | `nav` | `load` (full page load) or `route` (client-side navigation). |
 | `page_view_id` | for `page_time`: the `event_id` of the page view it belongs to. **Required** for `page_time`. |
-| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. |
+| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. Summed per IST day for one person = the person page's "Active time (tab visible)" (`listUserDailyActivity`). |
 | `is_final`, `time_reason` | for `page_time`: whether this was the last delta of the view, and why it was sent (`hidden`, `route`, `pagehide`, `idle`). Required for `page_time`. |
 | `tool` | for `tool_use`: the UI tool, e.g. `audits.export-csv` (`^[a-z0-9][a-z0-9_.:-]{0,63}$`). Required for `tool_use`. |
 | `action` | optional verb: `click`, `open`, `submit`, `export`, `toggle`, `search`, `other`. |
@@ -181,6 +182,36 @@ The three tables share the `bucket_hour` alignment of `ingest_counters`, an inde
 (`idx_<table>_bucket_hour`, for the retention delete), explicit DML grants for `nexus_app` in
 `apps/api/src/db/migration-runner/grants.ts`, and a `''`-means-none convention (a NULL cannot be in
 the primary key; the API maps `''` to `null`).
+
+## `person_access_log` — who opened whose person page (0013)
+
+Append-only: `nexus_app` may insert and read only (`grants.ts`, which also REVOKEs UPDATE, DELETE and
+TRUNCATE), and triggers (`traffic.reject_person_access_log_change`) refuse UPDATE, DELETE and
+TRUNCATE for **every** role, the owner included. Written by `PersonAccessRecorder`
+(`apps/api/src/services/person-access.recorder.ts`) after a successful person-level read
+(`users.profile`, `users.timeline`, `users.devices`, `users.daily`, and `journeys.sessions` /
+`errors.summary` / `errors.list` narrowed by `?userKey=`; all admin-only, ADR 0015); read by
+`ROUTES.privacy.accessLog` (admin-only, the Privacy & access page).
+
+| Column | Meaning |
+|---|---|
+| `id` | increasing number (identity). |
+| `viewed_at` | when (default `now()`). |
+| `viewer_email` | the admin who opened the page (1–254 chars). |
+| `subject_user_key` | the person's `user_key` (32 bytes, same as on the event tables). |
+| `subject_email_masked` | the person's email MASKED by the API (`s***@libas.in`); a CHECK refuses anything else. The full address is never stored here. |
+| `surface` | which part: `PERSON_ACCESS_SURFACE_VALUES` (`person_profile`, `person_timeline`, `person_devices`, `person_daily`, and `person_visits` / `person_failures` for the Journeys / Errors lists narrowed by `?userKey=`, ADR 0015). |
+
+Coalescing: the same viewer + person + surface is recorded at most once per
+`PERSON_ACCESS_COALESCE_MS` (10 min), decided **in memory** per api process
+(`apps/api/src/services/person-access.coalescer.ts`): no database round trip for repeats; a restart
+or a second replica can only add a duplicate row, never lose one; a concurrent request with the same key
+waits for the running attempt and records itself if that one wrote nothing. The dashboard never refetches
+person-level queries because of live traffic, so a page left open adds no rows. No row when the person has no event
+in the read's window (nothing about them was shown). A failed write does not fail the read: the api
+logs a warning with the surface and the pg error code only. Indexes: `idx_person_access_log_viewed_at`
+`(viewed_at DESC, id DESC)` for the newest-first list, `idx_person_access_log_subject_user_key_viewed_at`
+for the per-person filter. Not pruned by any job.
 
 ## `schema_migrations` — the migration ledger
 
@@ -249,6 +280,7 @@ key, never the email, so emails do not end up in gateway logs.
 | URLs | path only | query strings, fragments, request/response bodies, headers, tokens and error messages are **never stored** |
 | phone, PAN, GSTIN, Aadhaar, emails in free text | replaced by `:phone`, `:pan`, … (paths, labels, prop values), `redacted` (tool / name), or the field dropped | the ingest PII scrubber, two passes ([ADR 0010](decisions/0010-ingest-pii-detector.md)); only counts are kept (`pii_detections`) |
 | rejected events | code + normalised field path only | zod messages and values are never stored (`ingest_rejections`) |
+| person page opens | admin email + person `user_key` + masked person email + part | admin-only reads, append-only table (`person_access_log`) |
 
 All raw events disappear with their monthly partition after `RAW_RETENTION_MONTHS`; the hourly
 diagnostic aggregates after `AGGREGATE_RETENTION_DAYS`.

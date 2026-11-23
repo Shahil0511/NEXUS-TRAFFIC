@@ -2,6 +2,7 @@ import type { RangePreset } from '@nexus/shared';
 
 /** Short button label + accessible name of every RANGE_VALUES preset. */
 export const RANGE_LABELS: Record<RangePreset, { label: string; ariaLabel: string }> = {
+  today: { label: 'Today', ariaLabel: 'Today (00:00 to 23:59 IST)' },
   '15m': { label: '15m', ariaLabel: 'Last 15 minutes' },
   '1h': { label: '1h', ariaLabel: 'Last hour' },
   '6h': { label: '6h', ariaLabel: 'Last 6 hours' },

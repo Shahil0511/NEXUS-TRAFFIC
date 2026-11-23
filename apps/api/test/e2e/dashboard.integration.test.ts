@@ -27,6 +27,7 @@ import {
   type OverviewSummaryDto,
   type OverviewTimeseriesDto,
   type PageStatsDto,
+  type PersonAccessEntryDto,
   type RouteDescriptor,
   type TimelineItemDto,
   type UserSummaryDto,
@@ -58,6 +59,15 @@ import { signAccessToken } from '../fixtures/sign-access-token';
 import { silentLogger } from '../ingest-fixtures';
 
 const JWT_SECRET = 'e2e-dashboard-jwt-secret-'.padEnd(48, 'x');
+
+/** The admin-only person leaves (PERSON_ROUTE_LEAVES). */
+const PERSON_ROUTES = [
+  ROUTES.users.profile,
+  ROUTES.users.timeline,
+  ROUTES.users.devices,
+  ROUTES.users.daily,
+] as const;
+
 const ADMIN_EMAIL = 'admin@libas.in';
 const VIEWER_EMAIL = 'viewer@libas.in';
 
@@ -276,25 +286,66 @@ describe.skipIf(!RUN_DB_TESTS)('S2 e2e: dashboard analytics over HTTP (db)', () 
     ]);
   });
 
-  it('users.profile / users.timeline: malformed key → 400, unknown user → 404', async () => {
-    const malformed = buildPath(ROUTES.users.profile, { userKey: 'not-a-key' });
-    expect((await get(ROUTES.users.profile, VIEWER_EMAIL, {}, malformed)).status).toBe(400);
-    const unknown = buildPath(ROUTES.users.profile, { userKey: '0'.repeat(64) });
-    expect((await get(ROUTES.users.profile, VIEWER_EMAIL, {}, unknown)).status).toBe(404);
+  it('person leaves are admin-only: a non-admin gets the 403 envelope, an admin gets 200', async () => {
+    const path = (route: (typeof PERSON_ROUTES)[number]) =>
+      buildPath(route, { userKey: userKeyHex(USER_A) });
+    for (const route of PERSON_ROUTES) {
+      const viewer = await get(route, VIEWER_EMAIL, {}, path(route));
+      expect(viewer.status, route.path).toBe(403);
+      expect(viewer.body).toMatchObject({ error: { code: ERROR_CODES.FORBIDDEN } });
+      expect(JSON.stringify(viewer.body)).not.toContain(USER_A);
+      expect((await get(route, ADMIN_EMAIL, {}, path(route))).status, route.path).toBe(200);
+    }
+    // The lists stay open to every viewer.
+    expect((await get(ROUTES.users.list, VIEWER_EMAIL)).status).toBe(200);
+    expect((await get(ROUTES.users.activity, VIEWER_EMAIL)).status).toBe(200);
   });
 
-  it('users.timeline: admins see the IP, a non-admin NEVER does', async () => {
-    const path = buildPath(ROUTES.users.timeline, { userKey: userKeyHex(USER_B) });
-    const viewer = await get(ROUTES.users.timeline, VIEWER_EMAIL, { limit: '50' }, path);
-    expect(viewer.status).toBe(200);
-    const items = (viewer.body as CursorPage<TimelineItemDto>).items;
-    expect(items).toHaveLength(EXPECTED.calls.reportExport);
-    expect(items.every((item) => item.kind === 'api' && item.ip === null)).toBe(true);
-    expect(JSON.stringify(viewer.body)).not.toContain(SEEDED_IP);
+  it('users.profile / users.timeline: malformed key → 400, unknown user → 404', async () => {
+    const malformed = buildPath(ROUTES.users.profile, { userKey: 'not-a-key' });
+    expect((await get(ROUTES.users.profile, ADMIN_EMAIL, {}, malformed)).status).toBe(400);
+    const unknown = buildPath(ROUTES.users.profile, { userKey: '0'.repeat(64) });
+    expect((await get(ROUTES.users.profile, ADMIN_EMAIL, {}, unknown)).status).toBe(404);
+  });
 
+  it('users.devices / users.daily: malformed key → 400, unknown user → 200 with no rows', async () => {
+    for (const route of [ROUTES.users.devices, ROUTES.users.daily]) {
+      const malformed = buildPath(route, { userKey: 'not-a-key' });
+      expect((await get(route, ADMIN_EMAIL, {}, malformed)).status).toBe(400);
+      const unknown = buildPath(route, { userKey: '0'.repeat(64) });
+      const res = await get(route, ADMIN_EMAIL, {}, unknown);
+      expect(res.status).toBe(200);
+      expect((res.body as { items: unknown[] }).items).toEqual([]);
+    }
+  });
+
+  it('users.timeline: admins see the IP', async () => {
+    const path = buildPath(ROUTES.users.timeline, { userKey: userKeyHex(USER_B) });
     const admin = await get(ROUTES.users.timeline, ADMIN_EMAIL, { limit: '50' }, path);
-    const adminIps = (admin.body as CursorPage<TimelineItemDto>).items.map((item) => item.ip);
-    expect(adminIps).toContain(SEEDED_IP);
+    expect(admin.status).toBe(200);
+    const items = (admin.body as CursorPage<TimelineItemDto>).items;
+    expect(items).toHaveLength(EXPECTED.calls.reportExport);
+    expect(items.map((item) => item.ip)).toContain(SEEDED_IP);
+  });
+
+  it('privacy.accessLog: admin-only; lists the person opens above, masked, newest first', async () => {
+    expect((await get(ROUTES.privacy.accessLog, VIEWER_EMAIL)).status).toBe(403);
+    const res = await get(ROUTES.privacy.accessLog, ADMIN_EMAIL, {
+      userKey: userKeyHex(USER_A),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers[CACHE_CONTROL_HEADER.toLowerCase()]).toBe('no-store');
+    const items = (res.body as CursorPage<PersonAccessEntryDto>).items;
+    expect(items.map((item) => item.surface).sort()).toEqual([
+      'person_daily',
+      'person_devices',
+      'person_profile',
+      'person_timeline',
+    ]);
+    expect(items.every((item) => item.viewerEmail === ADMIN_EMAIL)).toBe(true);
+    expect(items.every((item) => item.subjectEmailMasked === 'a***@libas.in')).toBe(true);
+    expect(JSON.stringify(res.body)).not.toContain(USER_A);
+    expect((await get(ROUTES.privacy.accessLog, ADMIN_EMAIL, { cursor: 'bad' })).status).toBe(400);
   });
 
   it('journeys: sessions list for a viewer; malformed session id → 400, unknown → 404', async () => {

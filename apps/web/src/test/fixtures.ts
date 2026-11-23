@@ -28,6 +28,8 @@ import type {
   TimeWindowDto,
   ToolUsageDto,
   TopPathDto,
+  UserDailyActivityDto,
+  UserDevicesDto,
   UserProfileDto,
   UserSummaryDto,
   WindowedListDto,
@@ -304,6 +306,87 @@ export const USER_PROFILE: UserProfileDto = {
     },
   ],
   countries: ['IN'],
+  latest: {
+    seenAt: '2026-10-01T07:45:00.000Z',
+    app: 'ebo-sales',
+    device: 'desktop',
+    browser: 'Chrome 126',
+    os: 'Windows 10',
+    timeZone: 'Asia/Kolkata',
+    language: 'en-IN',
+    appVersion: '2026.11.3',
+  },
+};
+
+/** The window every person-page fixture echoes (the last 7 days ending 1 Oct 08:00 UTC). */
+const PERSON_WINDOW = {
+  from: '2026-09-24T08:00:00.000Z',
+  to: '2026-10-01T08:00:00.000Z',
+  grain: 'hour',
+} as const;
+
+export const USER_DEVICES: UserDevicesDto = {
+  window: PERSON_WINDOW,
+  items: [
+    {
+      device: 'desktop',
+      browser: 'Chrome 126',
+      os: 'Windows 10',
+      firstSeenAt: '2026-09-30T09:00:00.000Z',
+      lastSeenAt: '2026-10-01T07:45:00.000Z',
+      pageViews: 50,
+      requests: 1_200,
+      visits: 6,
+      apps: ['ebo-sales'],
+    },
+    {
+      device: null,
+      browser: null,
+      os: null,
+      firstSeenAt: '2026-09-30T10:00:00.000Z',
+      lastSeenAt: '2026-09-30T11:00:00.000Z',
+      pageViews: 0,
+      requests: 34,
+      visits: 0,
+      apps: ['ebo-sales'],
+    },
+  ],
+};
+
+/**
+ * Two IST days, newest first. 1 Oct: 09:10 → 18:40 IST, 3 h 12 min visible. 30 Sep: 10:00 →
+ * 13:20 IST, 48 min visible. Averages: first 09:35, last 16:00; total 4 h.
+ */
+export const USER_DAILY: UserDailyActivityDto = {
+  window: PERSON_WINDOW,
+  items: [
+    {
+      day: '2026-09-30T18:30:00.000Z',
+      firstActivityAt: '2026-10-01T03:40:00.000Z',
+      lastActivityAt: '2026-10-01T13:10:00.000Z',
+      activeMs: 11_520_000,
+      pageViews: 40,
+      requests: 900,
+      failedRequests: 3,
+      toolUses: 5,
+      visits: 4,
+      apps: ['ebo-sales'],
+      inProgress: false,
+    },
+    {
+      day: '2026-09-29T18:30:00.000Z',
+      firstActivityAt: '2026-09-30T04:30:00.000Z',
+      lastActivityAt: '2026-09-30T07:50:00.000Z',
+      activeMs: 2_880_000,
+      pageViews: 16,
+      requests: 334,
+      failedRequests: 0,
+      toolUses: 4,
+      visits: 3,
+      apps: ['ebo-sales'],
+      inProgress: false,
+    },
+  ],
 };
 
 export function timelineItem(

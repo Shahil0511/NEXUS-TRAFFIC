@@ -21,6 +21,7 @@ import {
   KEY_KIND_VALUES,
   NAV_TYPE_VALUES,
   PAGE_TIME_REASON_VALUES,
+  PERSON_ACCESS_SURFACE_VALUES,
   PII_FIELD_VALUES,
   PII_KIND_VALUES,
   SDK_CAPTURE_MODULE_VALUES,
@@ -70,6 +71,8 @@ const ENUM_CHECKS: EnumCheck[] = [
     constraint: 'sso_cookie_outcomes_beacon_origin_check',
     values: BEACON_ORIGIN_VALUES,
   },
+  // ─── Phase B (0013) ───
+  { table: 'person_access_log', constraint: 'person_access_log_surface_check', values: PERSON_ACCESS_SURFACE_VALUES },
 ];
 
 /** Literal fragments that must appear in a constraint's definition. */

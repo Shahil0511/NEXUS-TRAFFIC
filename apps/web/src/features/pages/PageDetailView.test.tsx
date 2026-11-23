@@ -77,9 +77,9 @@ describe('PageDetailView', () => {
     // The URL carries the app slug + opaque id only — never the template.
     expect(requested).toBe(`/traffic/api/v1/pages/ebo-sales/${PAGE_ID}`);
     const viewers = screen.getByRole('list', { name: 'Who views this page' });
-    expect(within(viewers).getByRole('link', { name: 'buyer@libas.in' }).getAttribute('href')).toBe(
-      `/users/${USER_KEY}?app=ebo-sales&range=7d`,
-    );
+    expect(
+      (await within(viewers).findByRole('link', { name: 'buyer@libas.in' })).getAttribute('href'),
+    ).toBe(`/users/${USER_KEY}?app=ebo-sales&range=7d`);
     expect(screen.getByRole('link', { name: 'export-csv' }).getAttribute('href')).toBe(
       `/tools/ebo-sales/${TOOL_ID}?app=ebo-sales&range=7d`,
     );
@@ -95,7 +95,7 @@ describe('PageDetailView', () => {
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     const links = within(trail).getAllByRole('link');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['Applications', '/applications?range=7d'],
+      ['Apps', '/applications?range=7d'],
       ['ebo-sales', '/applications/ebo-sales?range=7d'],
       ['Pages', '/pages?app=ebo-sales&range=7d'],
     ]);

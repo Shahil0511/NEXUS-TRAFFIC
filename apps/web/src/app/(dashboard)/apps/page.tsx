@@ -4,7 +4,7 @@ import type { Metadata } from 'next';
 import { loadWebEnv } from '@/env.schema';
 import { AppsView } from '@/features/apps/AppsView';
 
-export const metadata: Metadata = { title: 'Apps' };
+export const metadata: Metadata = { title: 'App keys' };
 
 /**
  * What teams set as NEXUS_URL (`https://nexus.libas.in/traffic`), from the SERVER env — only the

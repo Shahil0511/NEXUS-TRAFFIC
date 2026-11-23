@@ -47,6 +47,7 @@ const ALL_MIGRATIONS = [
   '0010_ingest_rejections',
   '0011_pii_detections',
   '0012_sso_cookie_outcomes',
+  '0013_person_access_log',
 ];
 
 /** The first version no real migration uses — temp test files take it, so they never collide. */

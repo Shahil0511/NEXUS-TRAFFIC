@@ -1,15 +1,24 @@
-import { ERROR_CODES, ROUTES, type OnlineNowDto } from '@nexus/shared';
+import { ERROR_CODES, ROUTES, type MeDto, type OnlineNowDto } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type HttpHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 
 import { ApiError } from '@/lib/apiError';
-import { APPS, SESSION_ID, timelineItem, USER_KEY, USER_PROFILE } from '@/test/fixtures';
+import {
+  APPS,
+  ME,
+  SESSION_ID,
+  timelineItem,
+  USER_DAILY,
+  USER_DEVICES,
+  USER_KEY,
+  USER_PROFILE,
+} from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
-import { isNoActivity, UserDetailView } from './UserDetailView';
+import { isForbidden, isNoActivity, UserDetailView } from './UserDetailView';
 
 const NOBODY_ONLINE: OnlineNowDto = {
   asOf: '2026-10-01T08:00:00.000Z',
@@ -18,8 +27,11 @@ const NOBODY_ONLINE: OnlineNowDto = {
   users: [],
 };
 
+const NOT_ADMIN: MeDto = { email: 'viewer@libas.in', isAdmin: false };
+
 function useProfileHandlers(profileStatus = 200, online: OnlineNowDto = NOBODY_ONLINE): void {
   server.use(
+    http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json(ME)),
     http.get(routeUrl(ROUTES.apps.list), () => HttpResponse.json(APPS)),
     http.get(routeUrl(ROUTES.live.online), () => HttpResponse.json(online)),
     http.get(routeUrl(ROUTES.users.profile), () =>
@@ -36,6 +48,8 @@ function useProfileHandlers(profileStatus = 200, online: OnlineNowDto = NOBODY_O
             { status: profileStatus },
           ),
     ),
+    http.get(routeUrl(ROUTES.users.devices), () => HttpResponse.json(USER_DEVICES)),
+    http.get(routeUrl(ROUTES.users.daily), () => HttpResponse.json(USER_DAILY)),
     http.get(routeUrl(ROUTES.users.timeline), () =>
       HttpResponse.json({
         items: [
@@ -60,7 +74,7 @@ describe('UserDetailView', () => {
     expect(screen.getByRole('list', { name: 'Top pages' })).toHaveTextContent('/orders/:id');
     expect(screen.getByRole('list', { name: 'Top tools' })).toHaveTextContent('export-csv');
     expect(screen.getByText('India')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /view sessions/i }).getAttribute('href')).toBe(
+    expect(screen.getByRole('link', { name: /view visits/i }).getAttribute('href')).toBe(
       `/journeys?userKey=${USER_KEY}`,
     );
   });
@@ -98,7 +112,7 @@ describe('UserDetailView', () => {
 
   it('shows no badge when the user is not online', async () => {
     useProfileHandlers();
-    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=activity' });
     await screen.findByRole('heading', { name: 'buyer@libas.in' });
     await screen.findByRole('table', { name: 'User activity' });
     expect(screen.queryByText(/Online now/)).toBeNull();
@@ -106,7 +120,7 @@ describe('UserDetailView', () => {
 
   it('merges API calls, pages and tools in one timeline (IP only when sent, replay by id)', async () => {
     useProfileHandlers();
-    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=activity' });
     const table = await screen.findByRole('table', { name: 'User activity' });
     expect(await within(table).findByText('/api/orders/123')).toBeInTheDocument();
     expect(within(table).getByText('API call')).toBeInTheDocument();
@@ -172,7 +186,7 @@ describe('UserDetailView', () => {
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?range=7d' });
     await screen.findByRole('heading', { name: 'buyer@libas.in' });
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(within(trail).getByRole('link', { name: 'Users' })).toHaveAttribute(
+    expect(within(trail).getByRole('link', { name: 'People' })).toHaveAttribute(
       'href',
       '/users?range=7d',
     );
@@ -193,5 +207,179 @@ describe('UserDetailView', () => {
     expect(screen.getByRole('link', { name: /View failures/ }).getAttribute('href')).toBe(
       `/errors?range=7d&userKey=${USER_KEY}`,
     );
+  });
+
+  it('keeps the identity card with the latest known facts next to every tab', async () => {
+    useProfileHandlers();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=devices' });
+    const card = await screen.findByRole('complementary', { name: 'About this person' });
+    const latest = await within(card).findByRole('region', { name: 'Latest known' });
+    expect(within(latest).getByText('Desktop')).toBeInTheDocument();
+    expect(within(latest).getByText('Chrome 126')).toBeInTheDocument();
+    expect(within(latest).getByText('Asia/Kolkata')).toBeInTheDocument();
+    expect(within(latest).getByText('en-IN')).toBeInTheDocument();
+    expect(within(latest).getByText('2026.11.3')).toBeInTheDocument();
+    expect(within(card).getByText('buyer@libas.in')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Copy email' })).toBeInTheDocument();
+  });
+
+  it('says so when the range holds no browser activity (server events only)', async () => {
+    useProfileHandlers();
+    server.use(
+      http.get(routeUrl(ROUTES.users.profile), () =>
+        HttpResponse.json({ ...USER_PROFILE, latest: null }),
+      ),
+    );
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    expect(await screen.findByText(/No browser activity in this range/)).toBeInTheDocument();
+  });
+
+  it('opens the tab named in ?tab= and writes a tab change back to the URL', async () => {
+    useProfileHandlers();
+    const urls: string[] = [];
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, {
+      searchParams: '?range=7d',
+      onUrlUpdate: (event) => urls.push(event.queryString),
+    });
+    await screen.findByRole('region', { name: 'User metrics' });
+    expect(screen.getByRole('tab', { name: /Summary/ })).toHaveAttribute('aria-selected', 'true');
+    await userEvent.setup().click(screen.getByRole('tab', { name: /Daily activity/ }));
+    expect(urls.at(-1)).toContain('tab=daily');
+    expect(await screen.findByRole('table', { name: 'Daily activity' })).toBeInTheDocument();
+  });
+
+  it('daily activity: one row per day with times, the day strip and the window totals', async () => {
+    useProfileHandlers();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=daily' });
+    const table = await screen.findByRole('table', { name: 'Daily activity' });
+    await within(table).findByText('3 h 12 min');
+    const rows = within(table).getAllByRole('row');
+    // header + two days, newest first
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toHaveTextContent(/1 Oct/);
+    expect(rows[1]).toHaveTextContent('09:10');
+    expect(rows[1]).toHaveTextContent('18:40');
+    expect(rows[1]).toHaveTextContent('3 h 12 min');
+    expect(rows[2]).toHaveTextContent('48 min');
+    expect(
+      within(table).getByRole('img', { name: 'Active from 09:10 to 18:40 IST' }),
+    ).toBeInTheDocument();
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent ?? '');
+    for (const header of [
+      'First activity',
+      'Last activity',
+      'Active time (tab visible)',
+      'Visits',
+    ]) {
+      expect(
+        headers.some((text) => text.includes(header)),
+        header,
+      ).toBe(true);
+    }
+
+    const totals = screen.getByRole('region', { name: 'Daily activity totals' });
+    expect(within(totals).getByText('2')).toBeInTheDocument();
+    expect(within(totals).getByText('09:35 IST')).toBeInTheDocument();
+    expect(within(totals).getByText('16:00 IST')).toBeInTheDocument();
+    expect(within(totals).getByText('4 h')).toBeInTheDocument();
+  });
+
+  it('devices: one row per device type, browser and OS, unknown parts named', async () => {
+    useProfileHandlers();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=devices' });
+    const table = await screen.findByRole('table', { name: 'Devices' });
+    await within(table).findByText('Chrome 126');
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toHaveTextContent('Desktop');
+    expect(rows[1]).toHaveTextContent('Chrome 126');
+    expect(rows[1]).toHaveTextContent('Windows 10');
+    expect(rows[1]).toHaveTextContent('1,200');
+    expect(within(rows[2] as HTMLElement).getAllByText('Unknown')).toHaveLength(3);
+  });
+
+  it('keeps the identity card on screen when the range holds no activity', async () => {
+    useProfileHandlers(404);
+    server.use(
+      http.get(routeUrl(ROUTES.users.devices), () =>
+        HttpResponse.json({ ...USER_DEVICES, items: [], latest: null }),
+      ),
+    );
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    expect(await screen.findByText('No activity for this user in this range')).toBeInTheDocument();
+    const card = screen.getByRole('complementary', { name: 'About this person' });
+    expect(within(card).getByText('No activity in this range')).toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).toBeNull();
+  });
+});
+
+describe('UserDetailView — admins only', () => {
+  /** Counts every person-level request (none may be sent for a non-admin). */
+  function countPersonReads(): { reads: number } {
+    const counter = { reads: 0 };
+    const count = (route: (typeof PERSON_ROUTES)[number]): HttpHandler =>
+      http.get(routeUrl(route), () => {
+        counter.reads += 1;
+        return HttpResponse.json({}, { status: 500 });
+      });
+    server.use(...PERSON_ROUTES.map(count));
+    return counter;
+  }
+
+  const PERSON_ROUTES = [
+    ROUTES.users.profile,
+    ROUTES.users.timeline,
+    ROUTES.users.devices,
+    ROUTES.users.daily,
+  ] as const;
+
+  it('a non-admin sees the admins-only state and NO person read is sent', async () => {
+    server.use(http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json(NOT_ADMIN)));
+    const counter = countPersonReads();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    const state = await screen.findByRole('status');
+    expect(
+      within(state).getByRole('heading', { name: "Only admins can open a person's page" }),
+    ).toBeInTheDocument();
+    expect(within(state).getByRole('link', { name: 'Back to People' })).toHaveAttribute(
+      'href',
+      '/users',
+    );
+    expect(screen.queryByRole('tablist')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(counter.reads).toBe(0);
+  });
+
+  it('a 403 from the API shows the same state, not a generic error', async () => {
+    useProfileHandlers();
+    server.use(
+      http.get(routeUrl(ROUTES.users.profile), () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: ERROR_CODES.FORBIDDEN,
+              message: 'Admin access required',
+              requestId: 'r',
+            },
+          },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />);
+    expect(
+      await screen.findByRole('heading', { name: "Only admins can open a person's page" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Admin access required')).toBeNull();
+  });
+
+  it('isForbidden: only a 403 FORBIDDEN envelope counts', () => {
+    expect(isForbidden(new ApiError(403, ERROR_CODES.FORBIDDEN, 'no', 'r'))).toBe(true);
+    expect(isForbidden(new ApiError(403, ERROR_CODES.CSRF_HEADER_MISSING, 'no', 'r'))).toBe(false);
+    expect(isForbidden(new ApiError(404, ERROR_CODES.NOT_FOUND, 'no', 'r'))).toBe(false);
+    expect(isForbidden(new Error('boom'))).toBe(false);
   });
 });

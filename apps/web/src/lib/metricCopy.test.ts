@@ -38,6 +38,10 @@ const REQUIRED: readonly MetricKey[] = [
   'linkingCoverage',
   'releaseCoverage',
   'integrationLevel',
+  'activeTime',
+  'firstActivity',
+  'lastActivity',
+  'daysActive',
 ];
 
 describe('METRIC_COPY', () => {

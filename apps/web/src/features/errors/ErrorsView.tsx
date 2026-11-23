@@ -59,7 +59,7 @@ export function ErrorsView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Errors"
+        title="Problems"
         description={
           summary.data
             ? formatWindowCaption(summary.data.window)

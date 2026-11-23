@@ -81,6 +81,9 @@ Known trade-offs:
   hashed storage. IPs are visible to **dashboard admins only**.
 - **Emails** are shown only to signed-in Libas staff allowed to use the dashboard, and are **masked
   in our logs** (`s***@libas.in`). Dashboard URLs use an opaque user key, never an email.
+- **One person's activity** (their person page, or a visit / failure list narrowed to them) can be
+  opened by **dashboard admins only**, and every such open is recorded in an append-only access
+  log that names the person by a masked email only.
 - **Query strings** are removed from paths even if you send them; bodies are never accepted.
 - **Retention:** raw events are kept for **6 months**, then deleted month by month. The hourly
   diagnostic counts (PII detections, rejection reasons, SSO cookie outcomes) are kept for

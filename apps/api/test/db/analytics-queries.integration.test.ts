@@ -28,6 +28,7 @@ import { FixedClock } from '../../src/lib/clock';
 import { ApiRequestIngestRepository } from '../../src/repositories/api-request-ingest.repository';
 import { ApiRequestQueryRepository } from '../../src/repositories/api-request-query.repository';
 import { AppRepository } from '../../src/repositories/app.repository';
+import { PersonAccessLogRepository } from '../../src/repositories/person-access-log.repository';
 import { WebEventQueryRepository } from '../../src/repositories/web-event-query.repository';
 import { AppSlugResolver } from '../../src/services/app-slug.resolver';
 import { EndpointService } from '../../src/services/endpoint.service';
@@ -37,6 +38,8 @@ import { JourneyService } from '../../src/services/journey.service';
 import { LiveService } from '../../src/services/live.service';
 import { OverviewService } from '../../src/services/overview.service';
 import { PageService } from '../../src/services/page.service';
+import { PersonAccessRecorder } from '../../src/services/person-access.recorder';
+import { PrivacyService } from '../../src/services/privacy.service';
 import { ToolService } from '../../src/services/tool.service';
 import { UserService } from '../../src/services/user.service';
 import {
@@ -63,6 +66,7 @@ import {
   type AnalyticsSeed,
   type JourneySeed,
 } from './analytics-seed';
+import { FakePersonAccess } from '../fixtures/fake-query-repositories';
 import { apiRequestRow, sha256 } from './fixtures';
 import { createTestDatabase, quietLogger, RUN_DB_TESTS, type TestDatabase } from './test-database';
 
@@ -102,7 +106,12 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
       clock,
     );
     endpoints = new EndpointService(requests, appSlugs, clock);
-    errors = new ErrorService(requests, appSlugs, clock);
+    errors = new ErrorService(
+      requests,
+      appSlugs,
+      clock,
+      new FakePersonAccess() as unknown as PersonAccessRecorder,
+    );
   });
 
   afterAll(async () => {
@@ -484,7 +493,7 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
 
   describe('ErrorService.summary', () => {
     it('totals failures by class and status, and lists the failing endpoints only', async () => {
-      const dto = await errors.summary({ range: '24h' });
+      const dto = await errors.summary({ range: '24h' }, VIEWER);
       expect(dto).toMatchObject({
         total: EXPECTED.failures,
         errors4xx: EXPECTED.errors4xx,
@@ -503,20 +512,23 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     });
 
     it('counts the users hit by failures, and scopes to one user', async () => {
-      const all = await errors.summary({ range: '24h' });
+      const all = await errors.summary({ range: '24h' }, VIEWER);
       expect(all.usersAffected).toBe(all.topAffectedUsers.length);
       const top = all.topAffectedUsers[0];
       if (top) {
-        const one = await errors.summary({ range: '24h', userKey: top.userKey });
+        const one = await errors.summary({ range: '24h', userKey: top.userKey }, ADMIN);
         expect(one.total).toBe(top.count);
         expect(one.usersAffected).toBe(1);
       }
     });
 
     it('scopes every number to one route when endpointId is given', async () => {
-      const all = await errors.summary({ range: '24h' });
+      const all = await errors.summary({ range: '24h' }, VIEWER);
       const route = all.topEndpoints.find((e) => e.endpointId === ENDPOINT_IDS.leaveList)!;
-      const dto = await errors.summary({ range: '24h', endpointId: ENDPOINT_IDS.leaveList });
+      const dto = await errors.summary(
+        { range: '24h', endpointId: ENDPOINT_IDS.leaveList },
+        VIEWER,
+      );
       expect(dto.total).toBe(route.errors4xx + route.errors5xx);
       expect(dto.topEndpoints.map((e) => e.endpointId)).toEqual([ENDPOINT_IDS.leaveList]);
     });
@@ -544,7 +556,7 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     });
 
     it('groups the failures by code (most first, NULL last on ties) with distinct routes', async () => {
-      const dto = await errors.summary({ range: '24h' });
+      const dto = await errors.summary({ range: '24h' }, VIEWER);
       expect(dto.byErrorCode).toEqual([
         { errorCode: 'UPSTREAM_TIMEOUT', count: 3, routes: 2 },
         { errorCode: 'AUTH_EXPIRED', count: 2, routes: 1 },
@@ -553,7 +565,7 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     });
 
     it('scopes the summary and the list to one code', async () => {
-      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' });
+      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' }, VIEWER);
       expect(dto).toMatchObject({ total: 3, errors4xx: 0, errors5xx: 3 });
       expect(dto.byErrorCode).toEqual([{ errorCode: 'UPSTREAM_TIMEOUT', count: 3, routes: 2 }]);
 
@@ -573,7 +585,7 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
     });
 
     it("keeps each top failing route's calls over ALL its requests: errorRate = coded failures / calls", async () => {
-      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' });
+      const dto = await errors.summary({ range: '24h', errorCode: 'UPSTREAM_TIMEOUT' }, VIEWER);
       const byId = new Map(dto.topEndpoints.map((e) => [e.endpointId, e]));
       expect(new Set(byId.keys())).toEqual(
         new Set([ENDPOINT_IDS.reportExport, ENDPOINT_IDS.leaveList]),
@@ -590,7 +602,7 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
       expect(leave.errorRate).toBeCloseTo((1 / EXPECTED.calls.leaveList) * 100, 2);
 
       // onlyFailing honours the code: reportExport has no AUTH_EXPIRED failure → not listed.
-      const auth = await errors.summary({ range: '24h', errorCode: 'AUTH_EXPIRED' });
+      const auth = await errors.summary({ range: '24h', errorCode: 'AUTH_EXPIRED' }, VIEWER);
       expect(auth.topEndpoints.map((e) => [e.endpointId, e.calls, e.errors4xx])).toEqual([
         [ENDPOINT_IDS.leaveList, EXPECTED.calls.leaveList, 2],
       ]);
@@ -665,6 +677,10 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
   let queryPool: Pool;
   let seed: JourneySeed;
   let users: UserService;
+  let webEvents: WebEventQueryRepository;
+  let requests: ApiRequestQueryRepository;
+  let appSlugs: AppSlugResolver;
+  let clock: FixedClock;
   let journeys: JourneyService;
   let pages: PageService;
   let tools: ToolService;
@@ -674,12 +690,19 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     db = await createTestDatabase('journeys');
     seed = await seedJourneys(db);
     queryPool = createQueryPool(db.appUrl, 4, quietLogger);
-    const webEvents = new WebEventQueryRepository(queryPool);
-    const appSlugs = new AppSlugResolver(new AppRepository(queryPool));
-    const clock = new FixedClock(seed.now);
-    const requests = new ApiRequestQueryRepository(queryPool);
-    users = new UserService(webEvents, requests, appSlugs, clock);
-    journeys = new JourneyService(webEvents, appSlugs, clock);
+    webEvents = new WebEventQueryRepository(queryPool);
+    appSlugs = new AppSlugResolver(new AppRepository(queryPool));
+    clock = new FixedClock(seed.now);
+    requests = new ApiRequestQueryRepository(queryPool);
+    // The access log is written on the WRITE pool (appPool), like in the container.
+    const recorder = new PersonAccessRecorder(
+      new PersonAccessLogRepository(db.appPool),
+      webEvents,
+      clock,
+      quietLogger,
+    );
+    users = new UserService(webEvents, requests, appSlugs, clock, recorder);
+    journeys = new JourneyService(webEvents, appSlugs, clock, recorder);
     pages = new PageService(webEvents, requests, appSlugs, clock);
     tools = new ToolService(webEvents, appSlugs, clock);
     geo = new GeoService(webEvents, appSlugs, clock);
@@ -713,7 +736,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     });
 
     it('profile: header numbers, top tools/pages and countries; unknown user → 404', async () => {
-      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' });
+      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' }, ADMIN);
       expect(dto).toMatchObject({
         summary: { email: USER_A, requests: 1, pageViews: 3 },
         firstSeenAt: new Date(seed.now.getTime() - 60 * 60_000).toISOString(),
@@ -726,7 +749,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
         ],
         countries: [MUMBAI.country],
       });
-      await expect(users.profile('0'.repeat(64), { range: '24h' })).rejects.toMatchObject({
+      await expect(users.profile('0'.repeat(64), { range: '24h' }, ADMIN)).rejects.toMatchObject({
         statusCode: 404,
       });
     });
@@ -759,10 +782,154 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
       expect(items[0]?.ip).toBe(SEEDED_IP);
     });
 
+    it('devices: one row per (device, browser, OS) over both tables, newest first; latest browser facts', async () => {
+      const ago = (minutes: number) =>
+        new Date(seed.now.getTime() - minutes * 60_000).toISOString();
+      const dto = await users.devices(userKeyHex(USER_A), { range: '24h' }, ADMIN);
+      // J1's browser events carry no User-Agent fields; its API call is Chrome 120 / Windows 10.
+      expect(dto.items).toEqual([
+        {
+          device: null,
+          browser: null,
+          os: null,
+          firstSeenAt: ago(60),
+          lastSeenAt: ago(54),
+          pageViews: 3,
+          requests: 0,
+          visits: 1,
+          apps: [SALES_SLUG],
+        },
+        {
+          device: 'desktop',
+          browser: 'Chrome 120',
+          os: 'Windows 10',
+          firstSeenAt: ago(57.5),
+          lastSeenAt: ago(57.5),
+          pageViews: 0,
+          requests: 1,
+          visits: 0,
+          apps: [SALES_SLUG],
+        },
+      ]);
+      expect(dto).not.toHaveProperty('latest');
+      // The latest browser facts come with the profile (the identity card), not with devices.
+      const profile = await users.profile(userKeyHex(USER_A), { range: '24h' }, ADMIN);
+      expect(profile.latest).toEqual({
+        seenAt: ago(54),
+        app: SALES_SLUG,
+        device: null,
+        browser: null,
+        os: null,
+        timeZone: null,
+        language: null,
+        appVersion: null,
+      });
+      expect(await users.devices('0'.repeat(64), { range: '24h' }, ADMIN)).toMatchObject({
+        items: [],
+      });
+    });
+
+    it('daily: one IST day with first/last activity over both tables and the tab-visible time', async () => {
+      const ago = (minutes: number) =>
+        new Date(seed.now.getTime() - minutes * 60_000).toISOString();
+      const dto = await users.daily(userKeyHex(USER_A), { range: '24h' }, ADMIN);
+      // seed.now is 12:00 IST, so that IST day began 12 hours earlier.
+      expect(dto.items).toEqual([
+        {
+          day: ago(12 * 60),
+          firstActivityAt: ago(60),
+          lastActivityAt: ago(54),
+          activeMs: 4000 + 3000 + 3000,
+          pageViews: 3,
+          requests: 1,
+          failedRequests: 0,
+          toolUses: 1,
+          visits: 1,
+          apps: [SALES_SLUG],
+          inProgress: true,
+        },
+      ]);
+      // 24h ending 12:00 IST is widened to whole IST days: yesterday 00:00 up to tomorrow 00:00.
+      expect(dto.window).toMatchObject({ from: ago(36 * 60), to: ago(-12 * 60) });
+      expect((await users.daily('0'.repeat(64), { range: '24h' }, ADMIN)).items).toEqual([]);
+    });
+
     it('timeline: non-admins never receive an IP', async () => {
       const page = await users.timeline(userKeyHex(USER_A), { range: '24h', limit: 50 }, VIEWER);
       expect(page.items).toHaveLength(5);
       expect(JSON.stringify(page)).not.toContain(SEEDED_IP);
+    });
+  });
+
+  // ─── Person access log (0013): written on the write pool, append-only ─────
+
+  describe('PersonAccessRecorder + PrivacyService.accessLog', () => {
+    const AUDITOR: Viewer = { email: 'auditor@libas.in', isAdmin: true };
+
+    it('one row per viewer + person + surface (coalesced), masked email, newest first', async () => {
+      const log = new PersonAccessLogRepository(db.appPool);
+      const audited = new UserService(
+        webEvents,
+        requests,
+        appSlugs,
+        clock,
+        new PersonAccessRecorder(log, webEvents, clock, quietLogger),
+      );
+      await audited.profile(userKeyHex(USER_A), { range: '24h' }, AUDITOR);
+      await audited.profile(userKeyHex(USER_A), { range: '24h' }, AUDITOR);
+      await audited.daily(userKeyHex(USER_A), { range: '24h' }, AUDITOR);
+      // Nobody in the window → nothing about them was shown → no row.
+      await audited.devices('0'.repeat(64), { range: '24h' }, AUDITOR);
+
+      const { rows } = await db.ownerPool.query<{ surface: string; subject_email_masked: string }>(
+        `SELECT surface, subject_email_masked FROM traffic.person_access_log
+          WHERE viewer_email = $1 ORDER BY id`,
+        [AUDITOR.email],
+      );
+      expect(rows).toEqual([
+        { surface: 'person_profile', subject_email_masked: 'a***@libas.in' },
+        { surface: 'person_daily', subject_email_masked: 'a***@libas.in' },
+      ]);
+
+      const privacy = new PrivacyService(log);
+      const first = await privacy.accessLog({ limit: 1, userKey: userKeyHex(USER_A) });
+      expect(first.items[0]).toMatchObject({ subjectUserKey: userKeyHex(USER_A) });
+      expect(first.nextCursor).not.toBeNull();
+      const all = await privacy.accessLog({ limit: 200, userKey: userKeyHex(USER_A) });
+      const auditorRows = all.items.filter((item) => item.viewerEmail === AUDITOR.email);
+      expect(auditorRows.map((item) => item.surface)).toEqual(['person_daily', 'person_profile']);
+      expect(JSON.stringify(all)).not.toContain(USER_A);
+      const second = await privacy.accessLog({
+        limit: 200,
+        userKey: userKeyHex(USER_A),
+        cursor: first.nextCursor ?? undefined,
+      });
+      expect(second.items.map((item) => item.id)).toEqual(
+        all.items.slice(1).map((item) => item.id),
+      );
+    });
+
+    it('is append-only for every role: UPDATE, DELETE and TRUNCATE are refused', async () => {
+      for (const pool of [db.appPool, db.ownerPool]) {
+        for (const sql of [
+          `UPDATE traffic.person_access_log SET viewer_email = 'x@libas.in'`,
+          'DELETE FROM traffic.person_access_log',
+          'TRUNCATE traffic.person_access_log',
+        ]) {
+          await expect(pool.query(sql)).rejects.toMatchObject({ code: '42501' });
+        }
+      }
+    });
+
+    it('refuses a full email in the masked column', async () => {
+      await expect(
+        db.appPool.query(
+          `INSERT INTO traffic.person_access_log
+             (viewer_email, subject_user_key, subject_email_masked, surface)
+           VALUES ($1, $2, $3, 'person_profile')`,
+          ['boss@libas.in', Buffer.alloc(32, 1), USER_A],
+        ),
+      ).rejects.toMatchObject({ code: '23514' });
     });
   });
 
@@ -906,7 +1073,7 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     });
 
     it('UserService.profile: per-app activity and top routes', async () => {
-      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' });
+      const dto = await users.profile(userKeyHex(USER_A), { range: '24h' }, ADMIN);
       expect(dto.perApp).toMatchObject([{ app: SALES_SLUG, requests: 1, pageViews: 3 }]);
       expect(dto.topEndpoints.reduce((sum, e) => sum + e.calls, 0)).toBe(1);
     });

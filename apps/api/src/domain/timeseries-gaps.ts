@@ -1,7 +1,9 @@
 /**
  * Continuous chart series: SQL `GROUP BY bucket` returns only buckets that HAVE rows, so a quiet
  * hour would vanish from the line chart and the x-axis would lie. These pure helpers produce every
- * bucket of the window and fill the missing ones with zeros.
+ * bucket of the window and fill the missing ones with zeros — but only buckets that have begun: a
+ * window still running (`today`) ends in the future, and an hour that has not happened yet is not
+ * a zero (it would read as an outage). Those buckets are left out.
  *
  * WHY HERE: pure, unit-tested once, shared by the Overview, Routes and Errors charts. Bucket starts
  * MUST match the SQL bucket expression (`bucketExpr` in src/db/sql.ts): IST-aligned `date_bin` for
@@ -23,6 +25,11 @@ export interface SeriesWindow {
   from: Date;
   to: Date;
   grain: Grain;
+  /**
+   * Where the data can end (ResolvedTimeWindow.elapsedTo: `now` while the window is running).
+   * Buckets starting after it are not filled. Omitted = `to`.
+   */
+  elapsedTo?: Date;
 }
 
 /** Start of the bucket containing `at` (same result as the SQL bucket expression). */
@@ -32,15 +39,15 @@ export function bucketStartOf(at: Date, grain: Grain): Date {
   return new Date(BUCKET_ORIGIN_MS + index * stride);
 }
 
-/** Every bucket start of the window, oldest first: from the bucket containing `from` up to `to`. */
+/**
+ * Every bucket start of the window, oldest first: from the bucket containing `from` up to `to`,
+ * and never past the bucket containing `elapsedTo` (the current one, while the window runs).
+ */
 export function bucketStarts(window: SeriesWindow): Date[] {
   const stride = GRAIN_MS[window.grain];
+  const end = Math.min(window.to.getTime(), (window.elapsedTo ?? window.to).getTime() + 1);
   const starts: Date[] = [];
-  for (
-    let at = bucketStartOf(window.from, window.grain).getTime();
-    at < window.to.getTime();
-    at += stride
-  ) {
+  for (let at = bucketStartOf(window.from, window.grain).getTime(); at < end; at += stride) {
     starts.push(new Date(at));
   }
   return starts;

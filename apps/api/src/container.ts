@@ -40,11 +40,13 @@ import { LiveController } from './http/controllers/live.controller';
 import { MeController } from './http/controllers/me.controller';
 import { OverviewController } from './http/controllers/overview.controller';
 import { PageController } from './http/controllers/page.controller';
+import { PrivacyController } from './http/controllers/privacy.controller';
 import { ToolController } from './http/controllers/tool.controller';
 import { UserController } from './http/controllers/user.controller';
 import {
   dashboardCsrfMiddleware,
   requireAdminMiddleware,
+  requireAdminForUserKeyMiddleware,
 } from './http/middleware/dashboard-guards.middleware';
 import { beaconBodyMiddleware } from './http/middleware/beacon-body.middleware';
 import {
@@ -88,6 +90,7 @@ import { IngestCounterRepository } from './repositories/ingest-counter.repositor
 import { IngestHealthRepository } from './repositories/ingest-health.repository';
 import { IngestRejectionRepository } from './repositories/ingest-rejection.repository';
 import { PartitionRepository } from './repositories/partition.repository';
+import { PersonAccessLogRepository } from './repositories/person-access-log.repository';
 import { PiiDetectionRepository } from './repositories/pii-detection.repository';
 import { SsoCookieOutcomeRepository } from './repositories/sso-cookie-outcome.repository';
 import { WebEventIngestRepository } from './repositories/web-event-ingest.repository';
@@ -107,6 +110,8 @@ import { LiveService } from './services/live.service';
 import { OverviewService } from './services/overview.service';
 import { PageService } from './services/page.service';
 import { PartitionService } from './services/partition.service';
+import { PersonAccessRecorder } from './services/person-access.recorder';
+import { PrivacyService } from './services/privacy.service';
 import { ToolService } from './services/tool.service';
 import { UserService } from './services/user.service';
 
@@ -131,6 +136,8 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     apps: new AppRepository(pools.write),
     apiKeys: new ApiKeyRepository(pools.write),
     audit: new AdminAuditRepository(pools.write),
+    // Append-only person access log: WRITE pool (the query pool is read-only), like the audit log.
+    personAccessLog: new PersonAccessLogRepository(pools.write),
     apiRequestIngest: new ApiRequestIngestRepository(pools.write),
     webEventIngest: new WebEventIngestRepository(pools.write),
     ingestCounters: new IngestCounterRepository(pools.write),
@@ -207,6 +214,12 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
 
   // ─── Services ─────────────────────────────────────────────────────────────
   const appSlugs = new AppSlugResolver(repositories.apps);
+  const personAccess = new PersonAccessRecorder(
+    repositories.personAccessLog,
+    repositories.webEventQuery,
+    clock,
+    logger,
+  );
   const services = {
     health: new HealthService(repositories.health, repositories.partitions, schemaGuard),
     partitions: new PartitionService(repositories.partitions, env.RAW_RETENTION_MONTHS, logger),
@@ -225,7 +238,11 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
       logger,
       new URL(env.PUBLIC_ORIGIN).origin,
     ),
-    aggregateRetention: new AggregateRetentionService(repositories.aggregateRetention, clock, logger),
+    aggregateRetention: new AggregateRetentionService(
+      repositories.aggregateRetention,
+      clock,
+      logger,
+    ),
     appQuery: new AppQueryService(repositories.apps, repositories.apiKeys),
     appAdmin: new AppAdminService(
       pools.write,
@@ -245,14 +262,16 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
       clock,
     ),
     endpoints: new EndpointService(repositories.apiRequestQuery, appSlugs, clock),
-    errors: new ErrorService(repositories.apiRequestQuery, appSlugs, clock),
+    errors: new ErrorService(repositories.apiRequestQuery, appSlugs, clock, personAccess),
+    personAccess,
     users: new UserService(
       repositories.webEventQuery,
       repositories.apiRequestQuery,
       appSlugs,
       clock,
+      personAccess,
     ),
-    journeys: new JourneyService(repositories.webEventQuery, appSlugs, clock),
+    journeys: new JourneyService(repositories.webEventQuery, appSlugs, clock, personAccess),
     pages: new PageService(
       repositories.webEventQuery,
       repositories.apiRequestQuery,
@@ -268,6 +287,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
       clock,
     ),
     integration: new IntegrationService(repositories.ingestHealth, clock),
+    privacy: new PrivacyService(repositories.personAccessLog),
   };
   const realtime = {
     window: liveWindow,
@@ -295,6 +315,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     geo: new GeoController(services.geo),
     live: new LiveController(services.live),
     integration: new IntegrationController(services.integration),
+    privacy: new PrivacyController(services.privacy),
   };
 
   // ─── HTTP middleware instances ────────────────────────────────────────────
@@ -310,6 +331,7 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ssoAuth: ssoAuthMiddleware(ssoReader, accessPolicy),
     dashboardCsrf: dashboardCsrfMiddleware(),
     requireAdmin: requireAdminMiddleware(),
+    requireAdminForUserKey: requireAdminForUserKeyMiddleware(),
     dashboardJsonBody: dashboardJsonBody(),
     serverIngestJsonBody: serverIngestJsonBody(),
     serverKeyAuth: serverKeyAuthMiddleware(keyAuthenticator),
@@ -321,12 +343,22 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ),
     ipFailureLimit: ipFailureLimitMiddleware(env.INGEST_IP_FAILURE_PER_MIN),
     // Envelope-level refusals of an authenticated app (A9); NEVER on the config route.
-    serverRejectionRecorder: rejectionRecorderMiddleware(repositories.ingestRejections, 'server', clock, logger),
+    serverRejectionRecorder: rejectionRecorderMiddleware(
+      repositories.ingestRejections,
+      'server',
+      clock,
+      logger,
+    ),
     // ─── Browser ingest (POST ROUTES.ingest.browser) + SDK config (POST ROUTES.ingest.config) ───
     browserIngestPreflight: browserIngestPreflightMiddleware(allowedOrigins),
     // FIRST on both browser POST chains: pre-auth errors readable by registered origins (ADR 0009).
     browserIngestEarlyCors: browserIngestEarlyCorsMiddleware(registeredOrigins),
-    browserRejectionRecorder: rejectionRecorderMiddleware(repositories.ingestRejections, 'browser', clock, logger),
+    browserRejectionRecorder: rejectionRecorderMiddleware(
+      repositories.ingestRejections,
+      'browser',
+      clock,
+      logger,
+    ),
     // Own instance: rejected beacons from a shared office IP never throttle server ingest.
     browserIpFailureLimit: ipFailureLimitMiddleware(env.INGEST_IP_FAILURE_PER_MIN),
     beaconBody: beaconBodyMiddleware(),
@@ -345,13 +377,23 @@ export function createContainer(config: AppConfig, overrides: ContainerOverrides
     ),
     // Own instance (same per-minute budget) with a NO-OP onLimited: config polls never eat the
     // ingest budget nor inflate ingest_counters.rate_limited.
-    browserConfigRateLimit: keyRateLimitMiddleware(env.INGEST_RATE_LIMIT_BROWSER_PER_MIN, () => {}, 'browser'),
+    browserConfigRateLimit: keyRateLimitMiddleware(
+      env.INGEST_RATE_LIMIT_BROWSER_PER_MIN,
+      () => {},
+      'browser',
+    ),
   };
 
   // ─── Jobs ─────────────────────────────────────────────────────────────────
   const jobs = {
     partitionMaintenance: new PartitionMaintenanceJob(pools.write, services.partitions),
-    retention: new RetentionJob(pools.write, services.partitions, services.aggregateRetention, clock, logger),
+    retention: new RetentionJob(
+      pools.write,
+      services.partitions,
+      services.aggregateRetention,
+      clock,
+      logger,
+    ),
   };
 
   return {

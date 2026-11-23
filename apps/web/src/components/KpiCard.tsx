@@ -130,7 +130,7 @@ export function KpiCard({
         </div>
       ) : (
         <div className="space-y-1.5">
-          <p className="text-2xl leading-none font-semibold tracking-tight tabular">{value}</p>
+          <p className="font-heading text-3xl leading-none font-bold tracking-tight tabular">{value}</p>
           <div className="flex min-h-5 items-center gap-2">
             {deltaPct !== undefined ? <DeltaPill deltaPct={deltaPct} polarity={polarity} /> : null}
             {hint ? <span className="text-2xs text-muted-foreground">{hint}</span> : null}

@@ -18,6 +18,273 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-23 — Phase B polish: Libas logo, light by default, light sidebar, cursor spotlight, new names in trails
+
+**Done**
+- **Libas logo** in the sidebar and the mobile menu: `components/LibasLogo.tsx` draws
+  `public/brand/libas-logo.png` (the Libas wordmark, white on transparent, the same file the Libas Leaderboard
+  uses) as a CSS mask filled with `currentColor` (`text-sidebar-title`), so one file is plum on the light sidebar
+  and white on the dark one. The URL carries `PUBLIC_BASE_PATH`.
+- **Light theme by default:** `AppProviders` sets `defaultTheme="light"`; dark and "system" stay in the theme
+  toggle.
+- **Light sidebar in the light theme:** `--sidebar*` tokens in `:root` are now white / plum; the plum rail stays
+  in `.dark`. New tokens `--sidebar-hover-foreground`, `--sidebar-title`, `--sidebar-indicator`,
+  `--sidebar-glow` replace the hard-coded `text-white` / `#e58ad9` / glow colour in `AppShell` and `MobileNav`.
+- **Cursor spotlight:** `components/CursorSpotlight.tsx` (mounted once in `AppProviders`) lights every Card
+  (`[data-slot="card"]`) and the page hero (`data-spotlight`) with a soft purple radial light under the mouse;
+  the light is an `::after` in `globals.css` (`--spot-inner` / `--spot-outer` per theme). One passive
+  `pointermove` listener, one write per frame; fine pointers only, off under prefers-reduced-motion.
+- **New names everywhere:** breadcrumbs (Apps, Request types, People, Visits) and browser-tab titles of every page
+  now match the nav (People, Visits, Devices & places, Apps, Pages & features, Request types, Problems,
+  Data health, App keys). The `person-access.recorder.ts` header now names all three callers.
+- **Local dev note:** a stale `apps/web/.next/dev` Turbopack cache made `next dev` fail with
+  "Can't resolve '@vercel/turbopack-next/internal/font/google/font'" (`next build` was fine). Deleting
+  `apps/web/.next/dev` fixed it.
+
+**Next**
+- Look at the light sidebar, logo and spotlight with real data once the local api is up (it needs the dev DB).
+
+## 2026-11-23 — Phase B steps 2-4: Devices & places, Person 360 with daily activity, admin-only person pages and access log
+
+Closing entry for Phase B steps 2–5 (the per-step entries below hold the details). Records the two ADRs,
+the docs that were brought back in line, and a completeness check of the tree against what the steps set out
+to deliver.
+
+**Done**
+- **ADRs:** new [ADR 0014](decisions/0014-object-first-navigation-and-person-page.md) (object-first nav groups,
+  page hero + page end, the `today` preset with `elapsedTo`, Devices & places, Person 360 tabs on the global
+  range, neutral labels). The step 5 ADR is renumbered to
+  [ADR 0015](decisions/0015-admin-only-person-pages-and-access-log.md) and widened: which leaves are admin-only
+  (`PERSON_ROUTE_LEAVES`, `PERSON_FILTERED_ROUTE_LEAVES`, `privacy.accessLog`), the `traffic.person_access_log`
+  table, recording, in-memory coalescing (10 min per admin + person + surface) and masking (`maskEmail`, CHECK on
+  the stored form). Every link to the old file name now points to 0015.
+- **Docs made true again:** `02-architecture.md` (auto-refresh skips `privacy` and person-level keys; Phase B ADR
+  list), `03-code-navigation.md` (People link admins only, Visits `?userKey=` from "View visits", the page frame:
+  `NAV_SECTIONS`, `PageHeader`, `PageEndProvider` / `PageEnd`, the `today` window helpers), `04-how-to-recipes.md`
+  (how to add a person-level read; nav `question` / `questionHi`; `LoadMoreButton` for paged lists),
+  `07-data-model.md` (the narrowed lists also write access-log rows; active time = Σ `visible_ms` per IST day),
+  `GLOSSARY.md` (visit, person page, daily activity, active time, access log, surface, today, page end).
+- **Completeness check** (tree vs. the plan): Devices & places page (`/devices`, two tabs, share switch,
+  `ProportionBar`) — present. Person 360 (identity card; Summary, Daily activity with first / last activity and
+  active time (tab visible), Devices, Activity tabs; global range incl. Today) — present. Person leaves admin-only on
+  the server, plus `?userKey=` narrowing — present, with route tests. Access log table (0013), endpoint
+  (`privacy.accessLog`) and Privacy & access page (`/privacy`) — present. `today` preset — present.
+- **Gates:** `npm run typecheck` green; `npm test` green (auth 10, express 59, node 119, react 140, shared 71,
+  api 1122 passed / 266 skipped (DB suites), web 450).
+
+**Next**
+- Run `RUN_DB_TESTS=1 npm run test:db` and `npm run test:smoke` where Docker is available: **neither was run for
+  steps 1–5** (no Docker on this laptop). The new DB blocks (daily activity, devices, latest context, access-log
+  coalescing / masking / paging / append-only, privileges, schema parity, migration list) and the e2e checks are
+  written but unproven against Postgres.
+- Review the person page and Devices & places on the deployed stack with real data.
+
+**Notes / known issues**
+- A viewer who opens `/journeys?userKey=` or `/errors?userKey=` directly sees the API's 403 as a generic error state.
+- Devices & places loads all bars together (not the first three first); the access log is not pruned by any job.
+- The identity card's first / last seen are within the selected range (no lifetime read); devices are grouped by
+  User-Agent facts, not by the tracker's device id.
+- No ESLint config in the repo, so lint was not run.
+
+## 2026-11-23 — Phase B step 5: review fixes (today window, whole days, person-level reads, page end)
+
+Fixes from the review of steps 1–4. New [ADR 0015](decisions/0015-admin-only-person-pages-and-access-log.md)
+(person-level reads are admin-only and access-logged; supersedes the ADR 0001 role split).
+
+**Done**
+- **`today` compares like with like:** `resolveTimeWindow` returns `elapsedTo` (now, clamped into the
+  window). A running window is compared with the same elapsed span before it (today 00:00–10:00 vs
+  yesterday 00:00–10:00), so KPI deltas no longer read as a drop. `bucketStarts` (and with it
+  `fillTimeseriesGaps` / `fillCountGaps` / `fillToolTrendGaps`) stops at the current bucket: hours
+  that have not happened yet are no longer drawn as zeros.
+- **Daily activity over whole IST days:** `wholeReportingDays` (`packages/shared/src/time-window.ts`);
+  `UserService.daily` widens the window (and echoes it widened), so a rolling range no longer cuts its
+  oldest day. `UserDayActivityDto.inProgress` flags today; the tab shows its last activity as "so far"
+  and leaves it out of the average last activity.
+- **Person-level reads:** `PERSON_FILTERED_ROUTE_LEAVES` (`journeys.sessions`, `errors.summary`,
+  `errors.list`, `live.online`) are admin-only with `?userKey=` (`requireAdminForUserKey`); the
+  sessions / failure reads record `person_visits` / `person_failures` (new surfaces, 0013 CHECK
+  updated — 0013 was never deployed). The identity card's `latest` facts moved from `users.devices`
+  to `users.profile`, and the Devices tab sends its read only while open, so opening the page no longer
+  records a Devices view. Person-level and access-log queries are no longer refetched by live traffic.
+  `PersonAccessRecorder` waits for a running attempt with the same key and records itself when that one
+  wrote nothing (no lost rows on a race or a failed INSERT).
+- **Web:** person links (People rows and their failed count, command palette user results, session
+  replay "User profile", `UserLink`) show for admins only (`useCanOpenPersonPages`); the People purpose
+  line no longer promises a person page. `PageEnd` says "Still loading…" during a first load and points
+  to "Load more" while a list has more rows (`PageEndProvider`, `LoadMoreButton`).
+- **Docs:** ADR 0015; ADR 0001 row, `01-project-overview.md`, `GLOSSARY.md`, `03-code-navigation.md`,
+  `07-data-model.md`, `docs/integration/05-pii.md`.
+- **Tests:** shared window cases (mid-day today, whole days), gap filling of a running window, recorder
+  races, guard middleware, narrowed routes 403/200, service recording, mappers, web non-admin cases,
+  auto-refresh policy, PageEnd. DB blocks updated (daily window, profile `latest`), not run here.
+
+**Next / known issues**
+- Run `RUN_DB_TESTS=1 npm run test:db` where Docker is available.
+- A viewer who opens `/journeys?userKey=` or `/errors?userKey=` directly gets the API's 403 as an error
+  state (no dedicated page state yet).
+
+## 2026-11-23 — Phase B step 4: person pages admin-only + person access log + Privacy & access page
+
+Contract → migration → api → web → docs. The person page and its four reads become admin-only, every
+admin open is recorded (coalesced) in a new append-only table, and admins can read that log on a new
+page.
+
+**Done**
+- **Contract:** `PERSON_ROUTE_LEAVES` (`users.profile`, `users.timeline`, `users.devices`,
+  `users.daily`) in `packages/shared/src/routes.ts`; `ROUTES.privacy.accessLog` (GET
+  `/v1/privacy/access-log`); `privacyAccessLogQuerySchema` (cursor + limit + optional `userKey`,
+  `packages/shared/src/schemas/privacy.ts`); `PersonAccessEntryDto` (`packages/shared/src/dto/privacy.ts`);
+  `PERSON_ACCESS_SURFACE_VALUES` + `PERSON_ACCESS_COALESCE_MS` (10 min) in `constants/traffic.ts`.
+- **Migration [0013](../apps/api/migrations/0013_person_access_log.sql):** `traffic.person_access_log`
+  (id identity, `viewed_at`, `viewer_email`, `subject_user_key` bytea(32), `subject_email_masked` with a
+  masked-form CHECK, `surface` CHECK mirroring the shared enum), indexes on `(viewed_at, id)` and
+  `(subject_user_key, viewed_at, id)`, triggers refusing UPDATE / DELETE / TRUNCATE for every role.
+  `grants.ts`: `SELECT, INSERT` only, plus an explicit REVOKE of UPDATE / DELETE / TRUNCATE.
+- **API:** the four person leaves use `...admin` (403 `FORBIDDEN` envelope for non-admins, before any
+  read). `UserService.profile / timeline / devices / daily` take the viewer and, after a successful
+  read, call `PersonAccessRecorder.record`. Coalescing is an in-memory TTL map
+  (`PersonAccessCoalescer`): repeats cost no database round trip; a restart or a second replica can only
+  add a duplicate row, never lose one. The person is named by `maskEmail` of their newest email in the
+  read's window (`WebEventQueryRepository.findUserEmail`); no event there → no row. A failed write logs
+  `person access log write failed` with the surface and pg code only, and the read still answers.
+  `PrivacyController.accessLog` → `PrivacyService.accessLog` → `PersonAccessLogRepository.list`
+  (WRITE pool, newest first, keyset `(viewed_at, id)`, `no-store`).
+- **Web:** the person page checks `useMe` first: a non-admin (or a 403 from the API) sees "Only admins can
+  open a person's page" with a link back to People, and no person read is sent. `components/AdminOnly.tsx`
+  gained optional `heading`, `hint`, `eyebrow`, `action`. New page `/privacy` (`PAGES.privacy()`, nav
+  Setup → "Privacy & access", "Who opened whose person page, and when." / "Kisne kiska page kab khola."):
+  access-log table (when, admin, person masked, part of the page linking to that tab), "Load more",
+  "Only this person" (`?userKey=`), and the "What this dashboard records" list. Non-admins see the
+  admins-only state and the log is never requested.
+- **Tests:** `apps/api/test/person-access.routes.test.ts` (403 vs 200 per person leaf with the real guards,
+  access log admin-only, lists open), recorder / coalescer / privacy service / repository SQL-shape unit
+  tests, READS entry for `findUserEmail`, UserService access tests, shared contract checks, web view tests
+  (person page non-admin state and 403, PrivacyView) and nav tests. Written, not run here (no Docker):
+  DB blocks in `analytics-queries.integration.test.ts` (coalescing, masking, paging, append-only for both
+  roles, masked CHECK), privileges, schema parity, migration list, e2e (403 / 200 per leaf, access log).
+
+**Next / known issues**
+- Run `RUN_DB_TESTS=1 npm run test:db` where Docker is available.
+- Links to a person page (e.g. `UserLink`) still show for non-admins; they lead to the admins-only state.
+- The access log is not pruned by any job; it is small (coalesced, admins only).
+
+## 2026-11-23 — Phase B step 3: Person 360 (identity card, tabs, daily activity, devices)
+
+The user detail page `/users/[userKey]` becomes a person page over the GLOBAL range (Today
+included). Contract → api → web; no migration (all columns exist since 0004 / 0005 / 0007).
+
+**Done**
+- **Contract:** `ROUTES.users.devices` (GET `/v1/users/:userKey/devices`) and `ROUTES.users.daily`
+  (GET `/v1/users/:userKey/daily`), query schemas `userDevicesQuerySchema` / `userDailyQuerySchema`
+  (= `timeWindowQuerySchema`: window + app + env), `USER_DEVICES_LIMIT` (50), DTOs
+  `UserDevicesDto` (`UserDeviceDto[]` + `latest: UserLatestContextDto | null`) and
+  `UserDailyActivityDto` (`WindowedListDto<UserDayActivityDto>`) in `packages/shared/src/dto/users.ts`.
+- **SQL** (`WebEventQueryRepository`, filtered by `user_key` like the profile, window + env on every
+  table): `listUserDevices` (both tables grouped by `ua_device, ua_browser, ua_os`, newest first;
+  visits = distinct BROWSER sessions), `getUserLatestContext` (the single newest browser event:
+  device, browser, OS, `client_tz`, `client_lang`, `release`), `listUserDailyActivity` (IST day
+  bucket = `bucketExpr('day')`, same as DAU; first / last activity = min / max over both tables;
+  active time = Σ `visible_ms` of the day's `page_time` rows; failed = status >= 400; newest first,
+  idle days absent). Both leaves are bounded by `MAX_COUNT_RANGE_MS` and answer an empty list (not
+  a 404) when the person did nothing; the profile keeps the 404.
+- **Service / controller / route:** `UserService.devices` / `.daily`, `UserController.devices` /
+  `.daily`, wired in `http/routes/index.ts`; mappers `mapUserDevice`, `mapUserLatestContext`,
+  `mapUserDayActivity`.
+- **Web:** `api.users.devices` / `api.users.daily`, keys `qk.users.devices` / `qk.users.daily`,
+  hooks `useUserDevices` / `useUserDaily`. `UserDetailView` = header (breadcrumb, "View failures",
+  "View visits") + a left identity card that stays on screen (`PersonIdentityCard.tsx`: email with
+  copy, Online now, apps, first / last seen in the range, latest known device with icon, browser,
+  OS, time zone, language, app version) + tabs in the URL (`?tab=`, `userDetailParams.ts`):
+  Summary (`UserSummaryTab.tsx`, the former KPIs and lists), Daily activity
+  (`UserDailyActivityTab.tsx`: totals for the range, one row per day with a 00:00-24:00 IST strip),
+  Devices (`UserDevicesTab.tsx`), Activity (`UserActivityTab.tsx`, the timeline). Pure helpers
+  `dailyActivity.ts` (strip position, averages, totals) and `personFacts.ts` (device label / icon,
+  initials); `formatHoursMinutes` ("3 h 12 min"), `formatClockTime`, `formatClockOffset`,
+  `formatDay` in `lib/format.ts`; metric copy `activeTime`, `firstActivity`, `lastActivity`,
+  `daysActive`.
+- **Tests:** `user.service.test.ts`, `mappers.test.ts`, repository SQL shape + READS table,
+  `routes-contract.test.ts` (literal `/v1/users/<word>` leaves before `/:userKey`; person leaves
+  validated), DB blocks in `test/db/analytics-queries.integration.test.ts` and
+  `test/e2e/dashboard.integration.test.ts`, web view tests (tabs, card, daily, devices) and helper
+  tests.
+
+**Next**: owner review of the person page.
+
+**Notes / known issues**
+- The DB / e2e suites were written but not run (no Docker on this laptop).
+- The identity card's "first / last seen" are in the selected range (the profile); there is no
+  range-free lifetime read.
+- Devices are grouped by User-Agent facts, not by the tracker's device id.
+
+## 2026-11-23 — Phase B step 2 (B1c): Devices & places page
+
+New page `/devices` (`PAGES.devices`) on the existing read endpoints; no contract, migration or API change.
+
+**Done**
+- **Page:** `app/(dashboard)/devices/page.tsx` → `features/devices/DevicesView.tsx`. Two tabs kept in
+  the URL (`?tab=`, nuqs, `features/devices/devicesParams.ts`): "Devices & browsers" (device type,
+  browser, operating system, app version, first-time vs returning devices via `DeviceReturnPanel`)
+  and "Places" (time zone and language bars, then the countries / cities content).
+- **"Show share of" switch** (`?share=`): Page views (browser events, the default) or Requests
+  (`source=server` on `overview.breakdown`). Dimensions the server source lacks (time zone,
+  language) are greyed out with no request and offer "Show share of page views"
+  (`features/devices/shareOf.ts`, from `SERVER_BREAKDOWN_DIMENSION_VALUES`). On the Places tab the
+  country chart follows the same switch.
+- **`components/ProportionBar.tsx`**: labelled horizontal bars whose label always carries the unit
+  ("30% of page views"), width = share of the whole total, an "All other values" bar for what the
+  top list leaves out, Libas colour tokens, a screen-reader table with the same rows;
+  `ProportionTable` is the visible "Show all values" dialog (fetched on open, up to
+  `BREAKDOWN_LIMIT_MAX`). Pure helpers in `components/proportionShares.ts`. In-page tabs:
+  `components/ui/tabs.tsx` (Radix Tabs, inactive tabs unmount and send no queries).
+- **Places:** the Geography content moved into `features/geography/GeoPlacesSection.tsx` (used by
+  `/geography` and the Places tab). The "no location" notice now says the status, the cause (every
+  request reaches Nexus from the gateway's internal address) and links Data health.
+- **Nav:** the "Devices & places" item (id `devices`) points to `PAGES.devices()` with
+  `alsoActiveOn: [PAGES.geography()]`; `/geography` keeps working.
+- Tests: `features/devices/DevicesView.test.tsx` (MSW), `features/devices/shareOf.test.ts`,
+  `components/ProportionBar.test.tsx`, `components/proportionShares.test.ts`, `lib/pages.test.ts`.
+
+**Next**: Person 360 with daily activity.
+
+**Notes / known issues**
+- `npm run test:smoke` and the DB suites not run (no Docker on this laptop); no API change.
+- Bars load together (5 queries on the Devices tab), not three first.
+
+## 2026-11-23 — Phase B step 1: "Today" range, Libas look, object-first menu, page hero and page end
+
+First visible step of the Phase B redesign (web + one contract value).
+
+**Done**
+- **Contract:** `RANGE_VALUES` gains `today` = the current IST calendar day, 00:00 up to the next
+  00:00 (the window ends in the future so a chart shows the whole day; the previous window is
+  yesterday). `resolveTimeWindow` + `startOfReportingDay` in `packages/shared/src/time-window.ts`,
+  `REPORTING_UTC_OFFSET_MS` in `constants/time.ts`; test in `contracts.test.ts`. The web picks it up
+  through `RANGE_VALUES` (range picker "Today" chip, command palette action).
+- **Look:** Libas brand tokens in `apps/web/src/app/globals.css` (logo purple `#71006a` / orchid
+  `#e58ad9` in dark, blush-white page with two soft glows, deep plum sidebar in both modes, new
+  `sidebar-muted` / `sidebar-hover` tokens), Rajdhani for `h1` / `h2` and KPI numbers
+  (`--font-heading`, `app/layout.tsx`), softer cards with a hover lift (`components/ui/card.tsx`).
+  Contrast guard still green (`--destructive` and `--method-post` darkened for the blush page).
+- **Menu:** `lib/nav.ts` grouped by object (top: Overview, Live; People: People, Visits, Devices &
+  places; Apps: Apps, Pages & features, Request types, Problems; Setup: Data health, App keys).
+  Ids and URLs unchanged. Every item has `question` + `questionHi` (English + Hinglish purpose).
+  Page `h1`s follow the new names (smoke test: "App keys").
+- **Page hero:** `components/PageHeader.tsx` is a hero band; on a list page it prints the nav
+  item's purpose sentence in English and Hinglish.
+- **Page end:** new `components/PageEnd.tsx`, rendered by `AppShell` under every page: "End of
+  <page>" divider, the colour legend (red failed, amber slow, green live, purple click), IST note,
+  "Back to top". Owner feedback: "scroll karne par pata nahi chalta page kab khatam hota hai".
+- Checked in Chrome on a local `next build` + `next start` (no Docker on this laptop, so no API
+  data): both themes, the hero, the menu and the page end render.
+
+**Next**: Devices & places page (B1c), Person 360 with daily activity (first / last activity,
+active time), admin-only person pages + access log.
+
+**Notes / known issues**
+- `npm run test:smoke` not run (needs the Docker stack).
+- Detail pages keep their old breadcrumb words ("Users", "Journeys"); they move with B1b.
+
 ## 2026-11-19 — First automatic deploy: api image build fixed, CI now builds both images
 
 The runner was registered on the server and Phase A (`629a529`) was pushed: the first real run of

@@ -60,6 +60,23 @@ describe('bucketStarts', () => {
     ]);
   });
 
+  it('stops at the current bucket while the window is still running (`today`)', () => {
+    // today = 1 Oct 00:00 IST → 2 Oct 00:00 IST, now = 14:20 IST (08:50Z): 15 hour buckets, the
+    // last one 14:00 IST — no zeros for the hours still to come.
+    const window = {
+      from: new Date('2026-09-30T18:30:00Z'),
+      to: new Date('2026-10-01T18:30:00Z'),
+      grain: 'hour' as const,
+      elapsedTo: new Date('2026-10-01T08:50:00Z'),
+    };
+    const starts = bucketStarts(window);
+    expect(starts).toHaveLength(15);
+    expect(starts.at(-1)?.toISOString()).toBe('2026-10-01T08:30:00.000Z');
+    expect(fillTimeseriesGaps([], window)).toHaveLength(15);
+    // A finished window (elapsedTo = to) is filled to its end.
+    expect(bucketStarts({ ...window, elapsedTo: window.to })).toHaveLength(24);
+  });
+
   it('is empty for an empty window', () => {
     const at = new Date('2026-10-01T06:00:00Z');
     expect(bucketStarts({ from: at, to: at, grain: 'minute' })).toEqual([]);

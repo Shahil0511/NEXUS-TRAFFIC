@@ -3,7 +3,7 @@
 /**
  * The user filter of the sessions table as URL state (`?userKey=`).
  *
- * WHY THE URL: "View sessions" on a user's profile links here with the user's OPAQUE key, and a
+ * WHY THE URL: "View visits" on a user's profile links here with the user's OPAQUE key, and a
  * filtered list must be shareable. The value is checked with the API's own rule (userKeySchema),
  * so a hand-edited URL falls back to "every session" instead of producing a 400.
  */

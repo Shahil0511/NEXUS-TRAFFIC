@@ -19,6 +19,7 @@ import { useAppList } from '@/features/apps/useAppList';
 import { useEndpointStats } from '@/features/endpoints/useEndpointStats';
 import { RANGE_LABELS } from '@/features/filters/rangeLabels';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { useUserSearch } from '@/features/users/useUserSearch';
 import { NAV_ITEMS } from '@/lib/nav';
 import { PAGES, withQuery } from '@/lib/pages';
@@ -32,7 +33,13 @@ const MIN_SERVER_SEARCH = 2;
 /** Results per server-searched group. */
 const GROUP_LIMIT = 5;
 /** Range presets offered as palette actions. */
-const RANGE_ACTIONS: readonly Exclude<RangePreset, 'custom'>[] = ['1h', '24h', '7d', '30d'];
+const RANGE_ACTIONS: readonly Exclude<RangePreset, 'custom'>[] = [
+  'today',
+  '1h',
+  '24h',
+  '7d',
+  '30d',
+];
 /** Name of the search button; below sm it is the ONLY name (the visible text is hidden). */
 const SEARCH_BUTTON_LABEL = 'Search pages, apps, users, routes…';
 /** aria-keyshortcuts of the search button: Ctrl+K, ⌘K and "/" all open the palette. */
@@ -286,11 +293,14 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
   const query = text.trim();
   const settled = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
   const serverSearch = settled.length >= MIN_SERVER_SEARCH;
+  // A user result opens the person page, which only admins may open: nobody else gets one.
+  const canOpenPerson = useCanOpenPersonPages();
+  const searchUsers = serverSearch && canOpenPerson;
 
   const apps = useAppList();
   const users = useUserSearch(
     { ...filters, search: settled, sort: 'lastSeen', dir: 'desc', limit: GROUP_LIMIT },
-    { enabled: serverSearch },
+    { enabled: searchUsers },
   );
   // Routes need percentiles: over a too-long range the search simply returns nothing.
   const routes = useEndpointStats({
@@ -329,7 +339,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
         href: withQuery(PAGES.applicationDetail(app.slug), { ...linkQuery, app: undefined }),
       }));
 
-    const userItems: PaletteItem[] = serverSearch
+    const userItems: PaletteItem[] = searchUsers
       ? (users.data?.pages[0]?.items ?? []).map((user) => ({
           id: `user:${user.userKey}`,
           group: 'Users',
@@ -371,7 +381,17 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
     }));
 
     return [...pages, ...appItems, ...userItems, ...routeItems, ...rangeItems];
-  }, [query, apps.data, users.data, routes.data, serverSearch, linkQuery, filters.range, setRange]);
+  }, [
+    query,
+    apps.data,
+    users.data,
+    routes.data,
+    serverSearch,
+    searchUsers,
+    linkQuery,
+    filters.range,
+    setRange,
+  ]);
 
   const status: SearchStatus = !serverSearch
     ? query === settled || query.length < MIN_SERVER_SEARCH

@@ -63,7 +63,7 @@ export function ApplicationsView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Applications"
+        title="Apps"
         description={
           query.data
             ? formatWindowCaption(query.data.window)

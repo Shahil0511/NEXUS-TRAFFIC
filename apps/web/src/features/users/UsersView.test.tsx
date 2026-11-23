@@ -103,4 +103,18 @@ describe('UsersView', () => {
     });
     expect(failed.getAttribute('href')).toBe(`/errors?userKey=${USER_KEY}`);
   });
+
+  it('a viewer who is not an admin gets the list as plain text: no link to a page that refuses them', async () => {
+    useUserHandlers();
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () =>
+        HttpResponse.json({ email: 'viewer@libas.in', isAdmin: false }),
+      ),
+    );
+    renderWithProviders(<UsersView />);
+    expect(await screen.findByText('buyer@libas.in')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('12')).toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: 'buyer@libas.in' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /failed requests of/ })).not.toBeInTheDocument();
+  });
 });

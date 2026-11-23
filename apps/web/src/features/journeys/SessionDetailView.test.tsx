@@ -56,7 +56,7 @@ describe('SessionDetailView', () => {
     const metrics = screen.getByRole('region', { name: 'Session metrics' });
     expect(within(metrics).getByText('12m 0s')).toBeInTheDocument();
     expect(within(metrics).getByText('1 failed')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /user profile/i }).getAttribute('href')).toBe(
+    expect((await screen.findByRole('link', { name: /user profile/i })).getAttribute('href')).toBe(
       `/users/${USER_KEY}?app=ebo-sales`,
     );
   });
@@ -74,11 +74,11 @@ describe('SessionDetailView', () => {
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     const links = within(trail).getAllByRole('link');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['Applications', '/applications?range=7d'],
+      ['Apps', '/applications?range=7d'],
       ['ebo-sales', '/applications/ebo-sales?range=7d'],
-      ['Journeys', '/journeys?app=ebo-sales&range=7d'],
+      ['Visits', '/journeys?app=ebo-sales&range=7d'],
     ]);
-    expect(screen.getByRole('link', { name: /user profile/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /user profile/i })).toHaveAttribute(
       'href',
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
     );

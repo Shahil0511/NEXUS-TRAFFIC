@@ -11,6 +11,7 @@ import type {
   IngestSource,
   IpClass,
   KeyKind,
+  PersonAccessSurface,
   PiiField,
   PiiKind,
   SdkCaptureModule,
@@ -389,6 +390,56 @@ export interface UserProfileRows {
 }
 
 /**
+ * One (device type, browser, OS) group of a user's API calls + browser events.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDevices
+ */
+export interface UserDeviceRow {
+  device: string | null;
+  browser: string | null;
+  os: string | null;
+  first_seen_at: Date;
+  last_seen_at: Date;
+  page_views: number;
+  requests: number;
+  visits: number;
+  /** App slugs, sorted. */
+  apps: string[];
+}
+
+/**
+ * The user's most recent browser event in the window (its context columns only).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getUserLatestContext
+ */
+export interface UserLatestContextRow {
+  seen_at: Date;
+  app_slug: string;
+  ua_device: string | null;
+  ua_browser: string | null;
+  ua_os: string | null;
+  client_tz: string | null;
+  client_lang: string | null;
+  release: string | null;
+}
+
+/**
+ * One IST day of a user's activity over both tables.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
+ */
+export interface UserDayActivityRow {
+  day: Date;
+  first_activity_at: Date;
+  last_activity_at: Date;
+  active_ms: number;
+  page_views: number;
+  requests: number;
+  failed_requests: number;
+  tool_uses: number;
+  visits: number;
+  /** App slugs, sorted. */
+  apps: string[];
+}
+
+/**
  * One API call or browser event of a user, merged by time (`page_time` folded into `visible_ms`).
  * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserTimeline
  */
@@ -717,4 +768,19 @@ export interface IngestHealthRows {
   rejections: RejectionReasonRow[];
   piiDetections: PiiDetectionRow[];
   ssoOutcomes: SsoCookieOutcomeRow[];
+}
+
+/**
+ * One row of the person access log. `viewed_at_key` is the µs-precision text of keysetTimeExpr
+ * (the keyset cursor; a Date would truncate it to ms).
+ * @see ../../migrations/0013_person_access_log.sql
+ */
+export interface PersonAccessLogRow {
+  id: number;
+  viewed_at: Date;
+  viewed_at_key: string;
+  viewer_email: string;
+  subject_user_key: Buffer;
+  subject_email_masked: string;
+  surface: PersonAccessSurface;
 }

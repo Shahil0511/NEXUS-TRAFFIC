@@ -1,10 +1,11 @@
 'use client';
 
-import { Activity, Clock, Menu } from 'lucide-react';
+import { Clock, Menu } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 
+import { LibasLogo } from '@/components/LibasLogo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,14 +48,16 @@ export function DashboardNav({
     <nav aria-label="Dashboard" className={cn('space-y-5 overflow-y-auto px-2 py-4', className)}>
       {NAV_SECTIONS.map((section) => (
         <div key={section.id} className="space-y-1">
-          <p
-            className={cn(
-              'px-2.5 text-2xs font-semibold tracking-[0.12em] text-muted-foreground uppercase',
-              rail && 'hidden lg:block',
-            )}
-          >
-            {section.label}
-          </p>
+          {section.label ? (
+            <p
+              className={cn(
+                'px-2.5 text-2xs font-semibold tracking-[0.16em] text-sidebar-muted uppercase',
+                rail && 'hidden lg:block',
+              )}
+            >
+              {section.label}
+            </p>
+          ) : null}
           <ul className="space-y-0.5">
             {section.items.map((item) => (
               <li key={item.id}>
@@ -93,20 +96,20 @@ function NavLink({
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
-      title={rail ? item.label : undefined}
+      title={rail ? `${item.label}: ${item.question}` : undefined}
       onClick={onNavigate}
       className={cn(
-        'group flex items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-        rail ? 'h-8' : 'h-10',
+        'group relative flex items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent-foreground/60',
+        rail ? 'h-9' : 'h-10',
         active
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'text-sidebar-foreground hover:bg-muted hover:text-foreground',
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_3px_0_0_0_var(--sidebar-indicator)]'
+          : 'text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
       )}
     >
       <Icon
         className={cn(
           'size-4 shrink-0',
-          active ? '' : 'text-muted-foreground group-hover:text-foreground',
+          active ? '' : 'text-sidebar-muted group-hover:text-sidebar-hover-foreground',
         )}
         aria-hidden="true"
       />
@@ -145,19 +148,16 @@ export function MobileNav({ className }: { className?: string }) {
       </DialogTrigger>
       <DialogContent className="top-0 left-0 h-dvh max-h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 gap-0 overflow-hidden rounded-none rounded-r-xl bg-sidebar p-0 text-sidebar-foreground data-[state=open]:slide-in-from-left data-[state=open]:zoom-in-100">
         <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 pr-12">
-          <span
-            aria-hidden="true"
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 text-white shadow-sm shadow-violet-500/30"
-          >
-            <Activity className="size-4" />
-          </span>
-          <DialogTitle className="text-sm">Data Nexus Traffic</DialogTitle>
+          <LibasLogo className="size-8 text-sidebar-title" />
+          <DialogTitle className="font-heading text-base font-bold text-sidebar-title">
+            Data Nexus Traffic
+          </DialogTitle>
         </div>
         <DialogDescription className="sr-only">
           Pages of the dashboard. Links keep the current app and time range.
         </DialogDescription>
         <DashboardNav variant="full" onNavigate={() => setOpen(false)} className="flex-1" />
-        <p className="flex shrink-0 items-center gap-1.5 border-t border-sidebar-border px-4 py-3 text-2xs text-muted-foreground">
+        <p className="flex shrink-0 items-center gap-1.5 border-t border-sidebar-border px-4 py-3 text-2xs text-sidebar-muted">
           <Clock className="size-3" aria-hidden="true" />
           All times in IST
         </p>

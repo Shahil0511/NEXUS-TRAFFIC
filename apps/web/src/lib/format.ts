@@ -187,3 +187,55 @@ export function formatAgo(iso: string | null, nowMs: number): string | null {
   if (ms < MS_PER_DAY) return `${Math.floor(ms / MS_PER_HOUR)} h ago`;
   return `${Math.floor(ms / MS_PER_DAY)} d ago`;
 }
+
+const MINUTES_PER_HOUR = 60;
+
+/**
+ * A length of time people read at a glance: 11_520_000 → "3 h 12 min", 2_700_000 → "45 min",
+ * 7_200_000 → "2 h", 20_000 → "< 1 min", 0 → "0 min". Rounded to the nearest minute.
+ */
+export function formatHoursMinutes(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return EMPTY_VALUE;
+  const totalMinutes = Math.round(ms / MS_PER_MINUTE);
+  if (totalMinutes === 0) return ms > 0 ? '< 1 min' : '0 min';
+  const hours = Math.floor(totalMinutes / MINUTES_PER_HOUR);
+  const minutes = totalMinutes % MINUTES_PER_HOUR;
+  if (hours === 0) return `${minutes} min`;
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
+
+const clockFormat = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: REPORTING_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** "14:05" — the IST wall-clock time of an instant. */
+export function formatClockTime(iso: string | null | undefined): string {
+  if (!iso) return EMPTY_VALUE;
+  return clockFormat.format(new Date(iso));
+}
+
+/** A time of day given as ms after midnight: 33_000_000 → "09:10" (minutes rounded down). */
+export function formatClockOffset(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return EMPTY_VALUE;
+  const totalMinutes = Math.floor(ms / MS_PER_MINUTE) % (24 * MINUTES_PER_HOUR);
+  const hours = Math.floor(totalMinutes / MINUTES_PER_HOUR);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(hours)}:${pad(totalMinutes % MINUTES_PER_HOUR)}`;
+}
+
+const dayFormat = new Intl.DateTimeFormat(LOCALE, {
+  timeZone: REPORTING_TIME_ZONE,
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+});
+
+/** "Thu, 1 Oct 2026" — the IST calendar day of an instant (e.g. an IST-midnight day bucket). */
+export function formatDay(iso: string | null | undefined): string {
+  if (!iso) return EMPTY_VALUE;
+  return dayFormat.format(new Date(iso));
+}

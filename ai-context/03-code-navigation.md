@@ -308,9 +308,11 @@ apps/api/src/domain/mappers.ts                         mapSessionSummary (IP adm
 | `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, offset cursor; `sessions` = browser sessions; `sort`/`dir` whitelist `USER_ORDER_SQL` |
 | `users.activity` | `.activity` | `listDailyUsers`, `countIdentifiedUsers` | DAU per IST day (gap-filled, `fillCountGaps`) + WAU/MAU ending at the window end; registered before `/:userKey` |
 | `users.search` | `UserController.search` / `UserService.search` | `listUsers` | **POST** body `userSearchBodySchema` — the email never travels in a URL (ADR 0006) |
-| `users.profile` | `.profile` | `getUserProfile` + `ApiRequestQueryRepository.listUserTopEndpoints` | by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows; per-app activity (`listUserApps`) |
-| `users.timeline` | `.timeline` | `listUserTimeline` | API ∪ browser, keyset `(occurred_at, event_id)` DESC; IP admin-only |
-| `journeys.sessions` | `JourneyController.sessions` / `JourneyService.sessions` | `listSessions` | strongest identity (`IDENTITY_RANKS`), entry/exit page, optional `userKey`, offset cursor |
+| `users.profile` | `.profile` | `getUserProfile` + `ApiRequestQueryRepository.listUserTopEndpoints` + `getUserLatestContext` | **admin-only** (`...admin`); by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows; per-app activity (`listUserApps`); `latest` = the newest browser event's device / tz / lang / release (identity card) |
+| `users.timeline` | `.timeline` | `listUserTimeline` | **admin-only**; API ∪ browser, keyset `(occurred_at, event_id)` DESC |
+| `users.devices` | `.devices` | `listUserDevices` | **admin-only**; both tables grouped by `ua_device, ua_browser, ua_os` (newest first, `USER_DEVICES_LIMIT`); empty (not 404) without activity; read by the Devices tab only |
+| `users.daily` | `.daily` | `listUserDailyActivity` | **admin-only**; window widened to whole IST days (`wholeReportingDays`), one row per IST day (same bucket as DAU), newest first, idle days absent, today `inProgress`; first / last activity over both tables, active time = Σ `page_time.visible_ms` |
+| `journeys.sessions` | `JourneyController.sessions` / `JourneyService.sessions` | `listSessions` | strongest identity (`IDENTITY_RANKS`), entry/exit page, optional `userKey` (then admin-only + `person_visits`), offset cursor |
 | `journeys.session` | `.session` | `getSession` | see above |
 | `journeys.topPaths` | `.topPaths` | `listTopPaths` | 3-step `lead()` over page views, reloads collapsed; 31-day cap |
 | `pages.list` | `PageController.list` / `PageService.list` | `listPageStats` | Σ `visible_ms` per page view → avg / p50 (31-day cap), exits, distinct users; `pageId` = `toPageId` |
@@ -318,6 +320,27 @@ apps/api/src/domain/mappers.ts                         mapSessionSummary (IP adm
 | `tools.usage` | `ToolController.usage` / `ToolService.usage` | `listToolUsage` | top tools + trend of those tools; gaps → `fillToolTrendGaps`; `toolId` = `toToolId` |
 | `tools.detail` | `.detail` | `listToolNames` → `getToolDetail` | opaque `toolId` resolved in the service; users, pages, actions |
 | `geo.countries` / `geo.cities` | `GeoController` / `GeoService` | `listCountries` / `listCities` | API calls + page views per location (`geoStatement`) |
+
+**Person-level leaves** (`PERSON_ROUTE_LEAVES` in `packages/shared/src/routes.ts`: `users.profile`,
+`users.timeline`, `users.devices`, `users.daily`) use `...admin` (`ssoAuth` + `dashboardCsrf` +
+`requireAdmin` → 403 `FORBIDDEN` for anyone else; proven per leaf by `apps/api/test/person-access.routes.test.ts`).
+After a successful read, `UserService` calls `PersonAccessRecorder.record` (`apps/api/src/services/person-access.recorder.ts`):
+coalesced in memory (`apps/api/src/services/person-access.coalescer.ts`, `PERSON_ACCESS_COALESCE_MS` = 10 min per
+viewer + person + surface), the person's email looked up in the read's window (`WebEventQueryRepository.findUserEmail`)
+and MASKED (`maskEmail`), then `PersonAccessLogRepository.record` (WRITE pool,
+`apps/api/src/repositories/person-access-log.repository.ts`). No event in the window → no row; a failed write
+only logs a warning (surface + pg code); a concurrent request with the same key waits for the running attempt and
+records itself when that one wrote nothing. The lists (`users.list`, `users.search`, `users.activity`) stay `...dashboard`.
+**Narrowed lists** (`PERSON_FILTERED_ROUTE_LEAVES`: `journeys.sessions`, `errors.summary`, `errors.list`, `live.online`)
+stay `...dashboard` but run `mw.requireAdminForUserKey` after `validateQuery` (`dashboard-guards.middleware.ts`):
+with `?userKey=` they are admin-only, and `JourneyService.sessions` / `ErrorService.summary` / `.list` record
+`person_visits` / `person_failures` ([ADR 0015](decisions/0015-admin-only-person-pages-and-access-log.md)). `UserService.daily`
+widens its window to whole IST days (`wholeReportingDays`, `packages/shared/src/time-window.ts`) and flags today
+`inProgress`; the profile carries the identity card's `latest` facts, so `users.devices` is read by the Devices tab only.
+
+| ROUTES leaf | Controller / service method | Repository method | Notes |
+|---|---|---|---|
+| `privacy.accessLog` | `PrivacyController.accessLog` / `PrivacyService.accessLog` | `PersonAccessLogRepository.list` | **admin-only**; newest first, keyset `(viewed_at, id)` (`parseAccessLogCursor`), optional `userKey`; `no-store`; rows written by `PersonAccessRecorder` ([0013](../apps/api/migrations/0013_person_access_log.sql)) |
 
 Non-paged lists (top paths, pages, tools, geo) return `WindowedListDto<T>` = `{ window, items }`.
 `page_time` rows carry visible-ms DELTAS: the time of a page view is Σ `visible_ms` of the `page_time`
@@ -328,13 +351,15 @@ Web half (page → View → hook → `api.*`; every View reads the global filter
 
 | Page (`apps/web/src/app/(dashboard)/…`) | View (`apps/web/src/features/…`) | Hook(s) → `api.*` | Notes |
 |---|---|---|---|
-| `users/` | `users/UsersView.tsx` | `useUserList` → `users.list`, `useUserSearch` → `users.search` | search text in React state only (never the URL); "Load more"; link `PAGES.userDetail(userKey)`, app chips |
-| `users/[userKey]/` | `users/UserDetailView.tsx` | `useUserProfile` → `users.profile`, `useUserTimeline` → `users.timeline` | `userKeyParamsSchema` → 404; timeline columns in `userTimelineColumns.tsx` |
-| `journeys/` | `journeys/JourneysView.tsx` | `useTopPaths` → `journeys.topPaths`, `useSessionList` → `journeys.sessions` | `?userKey=` (`useSessionListParams`, from a profile's "View sessions"); `ClaimedBadge` via `ActorCell` |
+| `users/` | `users/UsersView.tsx` | `useUserList` → `users.list`, `useUserSearch` → `users.search` | search text in React state only (never the URL); "Load more"; link `PAGES.userDetail(userKey)` for admins only (`features/me/useCanOpenPersonPages.ts`; plain text for viewers), app chips |
+| `users/[userKey]/` | `users/UserDetailView.tsx` (admins only: `useMe` decides before any person read; a non-admin, or a 403 from the API, sees `PersonAdminOnly` via `components/AdminOnly.tsx`) | `useUserProfile` → `users.profile`, `useUserDevices` → `users.devices`, `useUserDaily` → `users.daily`, `useUserTimeline` → `users.timeline` | `userKeyParamsSchema` → 404; identity card `users/PersonIdentityCard.tsx` (always shown); tabs `?tab=summary\|daily\|devices\|activity` (`users/userDetailParams.ts`, nuqs): `UserSummaryTab.tsx`, `UserDailyActivityTab.tsx` (day strip + totals, helpers `users/dailyActivity.ts`), `UserDevicesTab.tsx` (helpers `users/personFacts.ts`), `UserActivityTab.tsx` (timeline columns in `userTimelineColumns.tsx`) |
+| `journeys/` | `journeys/JourneysView.tsx` | `useTopPaths` → `journeys.topPaths`, `useSessionList` → `journeys.sessions` | `?userKey=` (`useSessionListParams`, from the person page's "View visits"; admin-only on the API, ADR 0015); `ClaimedBadge` via `ActorCell` |
 | `journeys/[app]/[sessionId]/` | `journeys/SessionDetailView.tsx` | `useSessionDetail` → `journeys.session` | see the chain above |
 | `pages/` · `tools/` | `pages/PagesView.tsx` · `tools/ToolsView.tsx` | `usePageStats` → `pages.list` · `useToolUsage` → `tools.usage` | ONE nav entry ("Pages & Tools", `alsoActiveOn`); `PagesToolsTabs` switches routes; loaded-rows text filter (`components/LoadedRowsFilter.tsx`, never sent to the API or the URL) |
 | `pages/[app]/[pageId]/` · `tools/[app]/[toolId]/` | `pages/PageDetailView.tsx` · `tools/ToolDetailView.tsx` | `usePageDetail` → `pages.detail` · `useToolDetail` → `tools.detail` | params validated with the API's schemas → 404; `PageLink` / `ToolLink` (`components/EntityLinks.tsx`) link every listed page/tool here |
-| `geography/` | `geography/GeographyView.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | `RankedBarChart`; cities labelled approximate; GeoLite2 attribution; `?metric=` (nuqs); "no location" notice when every row is unlocated (private network / proxy) |
+| `devices/` | `devices/DevicesView.tsx` | `useBreakdown` → `overview.breakdown` (per dimension, `features/devices/DimensionSharePanel.tsx`), `useDeviceReturn` → `overview.devices`, the Places tab reuses `geography/GeoPlacesSection.tsx` | sidebar "Devices & places" (`alsoActiveOn` `/geography`); tabs `?tab=devices\|places` and the "Show share of" switch `?share=pageViews\|requests` (`features/devices/devicesParams.ts`, nuqs); `share=requests` reads `source=server` and greys out the dimensions the server source lacks without a request (`features/devices/shareOf.ts`); bars are `components/ProportionBar.tsx` (unit inside every label, "All other values" row, screen-reader table; helpers `components/proportionShares.ts`); "Show all values" dialog fetches `BREAKDOWN_LIMIT_MAX` on open |
+| `geography/` | `geography/GeographyView.tsx` → `geography/GeoPlacesSection.tsx` | `useGeoCountries` → `geo.countries`, `useGeoCities` → `geo.cities` | old link, same nav item; `RankedBarChart`; cities labelled approximate; GeoLite2 attribution; `?metric=` (nuqs, or controlled by the Devices & places switch); "no location" notice when every row is unlocated (every request reaches Nexus from the gateway's internal address), linking Data health and the client-IP guide |
+| `privacy/` | `privacy/PrivacyView.tsx` (admins only, `AdminOnly` otherwise) | `useAccessLog` → `privacy.accessLog` | sidebar Setup → "Privacy & access" (`PAGES.privacy()`); access-log table (`privacy/accessLogColumns.tsx`: when, admin, person masked, part of the page → `PAGES.userDetail` with `?tab=`), "Load more", "Only this person" `?userKey=` (`privacy/accessLogParams.ts`, nuqs, validated like `toUserKeyFilter`); the "What this dashboard records" list (`RECORDED_ITEMS`) |
 
 | `applications/` | `applications/ApplicationsView.tsx` | `useAppTraffic` → `overview.apps` | per-app table (`appTrafficColumns.tsx`); the app filter is hidden here |
 | `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file; audience section `ApplicationAudienceSection.tsx` → `features/breakdowns/` (`BreakdownPanel` + `useBreakdown` → `overview.breakdown`, `DeviceReturnPanel` + `useDeviceReturn` → `overview.devices`) |
@@ -355,9 +380,22 @@ Environment filter (ADR 0008): `features/filters/EnvironmentSelect.tsx` in the `
 `features/filters/environmentLabels.ts`; `NavItem.filters.environment` turns it off on Live, Integration and Apps.
 
 Navigation helpers: `components/CommandPalette.tsx` (Ctrl/⌘+K, mounted in `AppShell` TopBar),
-`components/AppChip.tsx` (app → its page), `UserLink` in `components/ActorCell.tsx` (verified user → profile),
+`components/AppChip.tsx` (app → its page), `UserLink` in `components/ActorCell.tsx` (verified user → profile; a link for admins
+only, `useCanOpenPersonPages`),
 `components/RelativeTime.tsx`, `lib/useDocumentTitle.ts` (masked emails only), `NavItem.filters` +
 `pageFiltersFor` in `lib/nav.ts` (which global filters a page shows, and its range cap).
+
+Page frame (Phase B, [ADR 0014](decisions/0014-object-first-navigation-and-person-page.md)): `NAV_SECTIONS` in
+`apps/web/src/lib/nav.ts` groups the sidebar by object (top, People, Apps, Setup); each `NavItem` carries
+`question` + `questionHi`, printed by the hero `apps/web/src/components/PageHeader.tsx` on list pages.
+`apps/web/src/components/AppShell.tsx` wraps every page in `PageEndProvider` (`apps/web/src/components/PageEndProvider.tsx`)
+and renders `apps/web/src/components/PageEnd.tsx` under it: "Still loading…" during a first load, "More rows
+above" while a `LoadMoreButton` list has more (`useOpenListMarker`), else "End of <page>". The `today` preset
+(`RANGE_VALUES`) resolves in `packages/shared/src/time-window.ts` (`resolveTimeWindow`; `elapsedTo` for
+comparisons and gap filling, `wholeReportingDays` for the person page's Daily activity). The sidebar brand is `apps/web/src/components/LibasLogo.tsx` (mask of
+`public/brand/libas-logo.png`); the light under the mouse on cards is `apps/web/src/components/CursorSpotlight.tsx`
+(mounted in `AppProviders`, CSS `::after` in `globals.css`). Light is the default theme; sidebar colours are the
+`--sidebar*` tokens in `globals.css`.
 
 Shared UI of these pages: `components/ActivityEvent.tsx` (timeline/replay row), `components/RankedList.tsx`,
 `components/charts/RankedBarChart.tsx`, `components/charts/Sparkline.tsx`; `formatCountry` / `formatElapsed`

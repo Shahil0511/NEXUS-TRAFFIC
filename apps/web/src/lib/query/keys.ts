@@ -21,12 +21,15 @@ import type {
   OverviewTimeseriesQuery,
   PageDetailQuery,
   PageListQuery,
+  PrivacyAccessLogQuery,
   SessionListQuery,
   SessionQuery,
   ToolDetailQuery,
   ToolUsageQuery,
   TopPathsQuery,
   UserActivityQuery,
+  UserDailyQuery,
+  UserDevicesQuery,
   UserListQuery,
   UserProfileQuery,
   UserSearchBody,
@@ -40,6 +43,7 @@ export type UserListKeyQuery = Omit<UserListQuery, 'cursor'>;
 export type UserSearchKeyBody = Omit<UserSearchBody, 'cursor'>;
 export type UserTimelineKeyQuery = Omit<UserTimelineQuery, 'cursor'>;
 export type SessionListKeyQuery = Omit<SessionListQuery, 'cursor'>;
+export type AccessLogKeyQuery = Omit<PrivacyAccessLogQuery, 'cursor'>;
 
 export const qk = {
   me: {
@@ -78,6 +82,8 @@ export const qk = {
     profile: (userKey: string, q: UserProfileQuery) => ['users', 'profile', userKey, q] as const,
     timeline: (userKey: string, q: UserTimelineKeyQuery) =>
       ['users', 'timeline', userKey, q] as const,
+    devices: (userKey: string, q: UserDevicesQuery) => ['users', 'devices', userKey, q] as const,
+    daily: (userKey: string, q: UserDailyQuery) => ['users', 'daily', userKey, q] as const,
   },
   journeys: {
     all: ['journeys'] as const,
@@ -111,5 +117,9 @@ export const qk = {
   integration: {
     all: ['integration'] as const,
     health: () => ['integration', 'health'] as const,
+  },
+  privacy: {
+    all: ['privacy'] as const,
+    accessLog: (q: AccessLogKeyQuery) => ['privacy', 'accessLog', q] as const,
   },
 } as const;

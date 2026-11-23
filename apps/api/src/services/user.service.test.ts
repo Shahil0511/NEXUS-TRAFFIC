@@ -1,4 +1,9 @@
-import { ERROR_CODES, type UserListQuery, type UserTimelineQuery } from '@nexus/shared';
+import {
+  ERROR_CODES,
+  USER_DEVICES_LIMIT,
+  type UserListQuery,
+  type UserTimelineQuery,
+} from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,11 +12,15 @@ import {
   timelineEventRow,
   USER_KEY,
   USER_KEY_HEX,
+  userDayActivityRow,
+  userDeviceRow,
+  userLatestContextRow,
   userSummaryRow,
 } from '../../test/fixtures/analytics-rows';
 import {
   FakeApiRequestQueries,
   FakeAppSlugs,
+  FakePersonAccess,
   FakeWebEventQueries,
   KNOWN_APP_ID,
   KNOWN_APP_SLUG,
@@ -22,6 +31,7 @@ import { FixedClock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+import type { PersonAccessRecorder } from './person-access.recorder';
 import { UserService } from './user.service';
 
 const NOW = new Date('2026-10-01T10:00:00.000Z');
@@ -32,13 +42,15 @@ const ID_3 = 'aaaaaaaa-0000-4000-8000-000000000003';
 function build() {
   const webEvents = new FakeWebEventQueries();
   const requests = new FakeApiRequestQueries();
+  const access = new FakePersonAccess();
   const service = new UserService(
     webEvents as unknown as WebEventQueryRepository,
     requests as unknown as ApiRequestQueryRepository,
     new FakeAppSlugs() as unknown as AppSlugResolver,
     new FixedClock(NOW),
+    access as unknown as PersonAccessRecorder,
   );
-  return { service, webEvents, requests };
+  return { service, webEvents, requests, access };
 }
 
 const listQuery = (overrides: Partial<UserListQuery> = {}): UserListQuery => ({
@@ -119,9 +131,13 @@ describe('UserService.profile', () => {
       perApp: [],
       countries: ['IN'],
     };
-    const dto = await service.profile(USER_KEY_HEX, { range: '7d' });
-    const [userKey] = webEvents.argsOf('getUserProfile')[0] ?? [];
+    webEvents.latestContext = userLatestContextRow();
+    const dto = await service.profile(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    const [userKey, filter] = webEvents.argsOf('getUserProfile')[0] ?? [];
     expect(Buffer.isBuffer(userKey) && userKey.equals(USER_KEY)).toBe(true);
+    // The identity card's latest facts come with the profile (one access-log surface).
+    expect(webEvents.argsOf('getUserLatestContext')[0]?.[1]).toEqual(filter);
+    expect(dto.latest).toMatchObject({ timeZone: 'Asia/Kolkata', language: 'en-IN' });
     expect(dto).toMatchObject({
       summary: { userKey: USER_KEY_HEX },
       firstSeenAt: '2026-10-01T08:00:00.000Z',
@@ -134,22 +150,26 @@ describe('UserService.profile', () => {
 
   it('no activity in the window is a 404', async () => {
     const { service } = build();
-    await expect(service.profile(USER_KEY_HEX, { range: '24h' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
+    await expect(
+      service.profile(USER_KEY_HEX, { range: '24h' }, ADMIN_VIEWER),
+    ).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('allows 90 days (counts only) but not 120', async () => {
     const { service } = build();
-    await expect(service.profile(USER_KEY_HEX, { range: '90d' })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
     await expect(
-      service.profile(USER_KEY_HEX, {
-        range: 'custom',
-        from: '2026-06-01T00:00:00Z',
-        to: '2026-10-01T00:00:00Z',
-      }),
+      service.profile(USER_KEY_HEX, { range: '90d' }, ADMIN_VIEWER),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      service.profile(
+        USER_KEY_HEX,
+        {
+          range: 'custom',
+          from: '2026-06-01T00:00:00Z',
+          to: '2026-10-01T00:00:00Z',
+        },
+        ADMIN_VIEWER,
+      ),
     ).rejects.toMatchObject({ code: ERROR_CODES.RANGE_TOO_LARGE });
   });
 });
@@ -244,7 +264,7 @@ describe('UserService.profile (routes and apps)', () => {
         failed: 1,
       },
     ];
-    const dto = await service.profile(USER_KEY_HEX, { range: '7d' });
+    const dto = await service.profile(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
     expect(dto.topEndpoints).toEqual([
       {
         endpointId: ID_1,
@@ -259,5 +279,152 @@ describe('UserService.profile (routes and apps)', () => {
     expect(requests.argsOf('listUserTopEndpoints')[0]?.[0]).toEqual(
       Buffer.from(USER_KEY_HEX, 'hex'),
     );
+  });
+});
+
+describe('UserService.devices', () => {
+  it('reads the devices (capped) by the stored user_key, without the latest context', async () => {
+    const { service, webEvents } = build();
+    webEvents.userDevices = [userDeviceRow()];
+    const dto = await service.devices(
+      USER_KEY_HEX,
+      { range: '7d', app: KNOWN_APP_SLUG },
+      ADMIN_VIEWER,
+    );
+    const [userKey, filter, limit] = webEvents.argsOf('listUserDevices')[0] ?? [];
+    expect(Buffer.isBuffer(userKey) && userKey.equals(USER_KEY)).toBe(true);
+    expect(filter).toMatchObject({ appId: KNOWN_APP_ID, to: NOW });
+    expect(limit).toBe(USER_DEVICES_LIMIT);
+    expect(webEvents.argsOf('getUserLatestContext')).toEqual([]);
+    expect(dto.window.to).toBe(NOW.toISOString());
+    expect(dto.items).toEqual([
+      expect.objectContaining({ device: 'desktop', browser: 'Chrome 126', visits: 2 }),
+    ]);
+    expect(dto).not.toHaveProperty('latest');
+  });
+
+  it('no activity is an empty list (never a 404)', async () => {
+    const { service } = build();
+    expect(await service.devices(USER_KEY_HEX, { range: '24h' }, ADMIN_VIEWER)).toMatchObject({
+      items: [],
+    });
+  });
+
+  it('is bounded like the profile: 90 days yes, 120 no', async () => {
+    const { service } = build();
+    await expect(
+      service.devices(
+        USER_KEY_HEX,
+        {
+          range: 'custom',
+          from: '2026-06-01T00:00:00Z',
+          to: '2026-10-01T00:00:00Z',
+        },
+        ADMIN_VIEWER,
+      ),
+    ).rejects.toMatchObject({ code: ERROR_CODES.RANGE_TOO_LARGE });
+  });
+});
+
+/** 2 Oct 00:00 IST (NOW is 15:30 IST on 1 Oct) and 24 Sep 00:00 IST. */
+const END_OF_TODAY = new Date('2026-10-01T18:30:00.000Z');
+const DAILY_FROM = new Date('2026-09-23T18:30:00.000Z');
+
+describe('UserService.daily', () => {
+  it('maps the active days newest first over WHOLE IST days; today is in progress', async () => {
+    const { service, webEvents } = build();
+    webEvents.userDays = [
+      userDayActivityRow(),
+      userDayActivityRow({ day: new Date('2026-09-29T18:30:00.000Z'), active_ms: 0 }),
+    ];
+    const dto = await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    const [userKey, filter] = webEvents.argsOf('listUserDailyActivity')[0] ?? [];
+    expect(Buffer.isBuffer(userKey) && userKey.equals(USER_KEY)).toBe(true);
+    // 7d ending 15:30 IST 1 Oct → 24 Sep 00:00 IST up to 2 Oct 00:00 IST (no day cut in half).
+    expect(filter).toMatchObject({ from: DAILY_FROM, to: END_OF_TODAY });
+    expect(dto.window).toMatchObject({
+      from: DAILY_FROM.toISOString(),
+      to: END_OF_TODAY.toISOString(),
+    });
+    expect(dto.items.map((d) => d.inProgress)).toEqual([true, false]);
+    expect(dto.items.map((d) => d.day)).toEqual([
+      '2026-09-30T18:30:00.000Z',
+      '2026-09-29T18:30:00.000Z',
+    ]);
+    expect(dto.items[0]).toMatchObject({ activeMs: 11_520_000, failedRequests: 2, visits: 2 });
+  });
+
+  it('an unknown app is a 404; a too-long window is refused', async () => {
+    const { service } = build();
+    await expect(
+      service.daily(USER_KEY_HEX, { range: '7d', app: 'nope' }, ADMIN_VIEWER),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      service.daily(
+        USER_KEY_HEX,
+        {
+          range: 'custom',
+          from: '2026-06-01T00:00:00Z',
+          to: '2026-10-01T00:00:00Z',
+        },
+        ADMIN_VIEWER,
+      ),
+    ).rejects.toMatchObject({ code: ERROR_CODES.RANGE_TOO_LARGE });
+  });
+});
+
+describe('UserService person access log', () => {
+  const profileRows = () => ({
+    summary: userSummaryRow(),
+    topTools: [],
+    topPages: [],
+    perApp: [],
+    countries: [],
+  });
+
+  it('records ONE access per person leaf, with the viewer, stored key, surface and window', async () => {
+    const { service, webEvents, access } = build();
+    webEvents.profile = profileRows();
+    await service.profile(USER_KEY_HEX, { range: '7d', app: KNOWN_APP_SLUG }, ADMIN_VIEWER);
+    await service.timeline(USER_KEY_HEX, timelineQuery(), ADMIN_VIEWER);
+    await service.devices(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+
+    expect(access.accesses.map((a) => a.surface)).toEqual([
+      'person_profile',
+      'person_timeline',
+      'person_devices',
+      'person_daily',
+    ]);
+    for (const recorded of access.accesses) {
+      expect(recorded.viewer).toBe(ADMIN_VIEWER);
+      expect(recorded.subjectUserKey.equals(USER_KEY)).toBe(true);
+      expect(recorded.filter.to).toEqual(recorded.surface === 'person_daily' ? END_OF_TODAY : NOW);
+    }
+    expect(access.accesses[0]?.filter.appId).toBe(KNOWN_APP_ID);
+  });
+
+  it('records nothing when the read fails (404 profile, unknown app, too-long range)', async () => {
+    const { service, access } = build();
+    await expect(service.profile(USER_KEY_HEX, { range: '24h' }, ADMIN_VIEWER)).rejects.toThrow();
+    await expect(
+      service.daily(USER_KEY_HEX, { range: '7d', app: 'nope' }, ADMIN_VIEWER),
+    ).rejects.toThrow();
+    await expect(
+      service.devices(
+        USER_KEY_HEX,
+        { range: 'custom', from: '2026-06-01T00:00:00Z', to: '2026-10-01T00:00:00Z' },
+        ADMIN_VIEWER,
+      ),
+    ).rejects.toThrow();
+    expect(access.accesses).toEqual([]);
+  });
+
+  it('lists are not person-level: list, search and activity record nothing', async () => {
+    const { service, access } = build();
+    await service.list(listQuery());
+    await service.search({ ...listQuery(), search: 'some' });
+    await service.activity({ range: '7d' });
+    expect(access.accesses).toEqual([]);
   });
 });

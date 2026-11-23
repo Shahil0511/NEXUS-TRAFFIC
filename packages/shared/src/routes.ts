@@ -95,6 +95,10 @@ export const ROUTES = {
     search: { method: 'POST', path: '/v1/users/search' },
     profile: { method: 'GET', path: '/v1/users/:userKey' },
     timeline: { method: 'GET', path: '/v1/users/:userKey/timeline' },
+    /** The (device type, browser, OS) combinations a user used in the window + latest known facts. */
+    devices: { method: 'GET', path: '/v1/users/:userKey/devices' },
+    /** One row per IST calendar day the user was active in the window, newest first. */
+    daily: { method: 'GET', path: '/v1/users/:userKey/daily' },
   },
   journeys: {
     sessions: { method: 'GET', path: '/v1/journeys/sessions' },
@@ -122,6 +126,10 @@ export const ROUTES = {
   },
   integration: {
     health: { method: 'GET', path: '/v1/integration/health' },
+  },
+  privacy: {
+    /** Admin-only: who opened whose person page, and when (newest first, keyset-paged). */
+    accessLog: { method: 'GET', path: '/v1/privacy/access-log' },
   },
 } as const satisfies RouteTable;
 
@@ -187,3 +195,35 @@ export const NON_DASHBOARD_ROUTE_GROUPS = [
  * @see ../../../apps/web/src/lib/api.test.ts
  */
 export const PENDING_ROUTE_LEAVES: readonly RouteLeafId[] = []; // S5 registered the last one
+
+/**
+ * The person-level read leaves: everything about ONE person. ADMIN-ONLY (requireAdmin in the route
+ * table), and each answer is recorded in the person access log (PERSON_ACCESS_SURFACE_VALUES).
+ * Lists of people (users.list / search / activity) are not person-level and stay open to viewers.
+ *
+ * @see ../../../apps/api/src/http/routes/index.ts
+ * @see ../../../apps/api/test/person-access.routes.test.ts
+ */
+export const PERSON_ROUTE_LEAVES = [
+  'users.profile',
+  'users.timeline',
+  'users.devices',
+  'users.daily',
+] as const satisfies readonly RouteLeafId[];
+
+/**
+ * Leaves that are open to every viewer EXCEPT when `?userKey=` narrows them to one person: then
+ * the read is person-level, so it is ADMIN-ONLY (requireAdminForUserKey in the route table). The
+ * sessions and failure reads are also recorded in the person access log (`person_visits`,
+ * `person_failures`); `live.online?userKey=` is the "online now" badge of the person page itself,
+ * covered by that page's `person_profile` row.
+ *
+ * @see ../../../apps/api/src/http/routes/index.ts
+ * @see ../../../apps/api/test/person-access.routes.test.ts
+ */
+export const PERSON_FILTERED_ROUTE_LEAVES = [
+  'journeys.sessions',
+  'errors.summary',
+  'errors.list',
+  'live.online',
+] as const satisfies readonly RouteLeafId[];

@@ -12,6 +12,7 @@ import {
 } from '../../test/fixtures/analytics-rows';
 import {
   FakeAppSlugs,
+  FakePersonAccess,
   FakeWebEventQueries,
   KNOWN_APP_ID,
   KNOWN_APP_SLUG,
@@ -21,18 +22,21 @@ import { NotFoundError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+import type { PersonAccessRecorder } from './person-access.recorder';
 import { JourneyService } from './journey.service';
 
 const NOW = new Date('2026-10-01T10:00:00.000Z');
 
 function build() {
   const webEvents = new FakeWebEventQueries();
+  const access = new FakePersonAccess();
   const service = new JourneyService(
     webEvents as unknown as WebEventQueryRepository,
     new FakeAppSlugs() as unknown as AppSlugResolver,
     new FixedClock(NOW),
+    access as unknown as PersonAccessRecorder,
   );
-  return { service, webEvents };
+  return { service, webEvents, access };
 }
 
 const sessionsQuery = (overrides: Partial<SessionListQuery> = {}): SessionListQuery => ({
@@ -51,6 +55,17 @@ describe('JourneyService.sessions', () => {
     expect(options.limit).toBe(2);
     expect(page.items).toHaveLength(1);
     expect(decodeOffsetCursor(page.nextCursor ?? undefined)).toBe(1);
+  });
+
+  it('records a list narrowed to one user as person_visits; the open list is not recorded', async () => {
+    const { service, webEvents, access } = build();
+    webEvents.sessions = [sessionSummaryRow()];
+    await service.sessions(sessionsQuery(), ADMIN_VIEWER);
+    expect(access.accesses).toEqual([]);
+    await service.sessions(sessionsQuery({ userKey: USER_KEY_HEX }), ADMIN_VIEWER);
+    expect(access.accesses).toHaveLength(1);
+    expect(access.accesses[0]).toMatchObject({ viewer: ADMIN_VIEWER, surface: 'person_visits' });
+    expect(access.accesses[0]?.subjectUserKey.equals(USER_KEY)).toBe(true);
   });
 
   it('maps the strongest identity, durations rounded, IP for admins only', async () => {

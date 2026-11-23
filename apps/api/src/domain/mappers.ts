@@ -21,6 +21,7 @@ import type {
   OnlineAppDto,
   OnlineUserDto,
   PageStatsDto,
+  PersonAccessEntryDto,
   PiiDetectionDto,
   RejectionReasonDto,
   RequestSampleDto,
@@ -36,11 +37,15 @@ import type {
   ToolUsageDto,
   TopPathDto,
   UserAppUsageDto,
+  UserDayActivityDto,
+  UserDeviceDto,
   UserEndpointUsageDto,
+  UserLatestContextDto,
   UserProfileDto,
   UserSummaryDto,
   UserUsageDto,
 } from '@nexus/shared';
+import { RANGE_DURATIONS_MS } from '@nexus/shared';
 import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 
 import { userKeyToHex } from '../enrichment/user-key.hasher';
@@ -65,6 +70,7 @@ import type {
   OnlineAppRow,
   OnlineUserRow,
   PageStatsRow,
+  PersonAccessLogRow,
   PiiDetectionRow,
   RejectionReasonRow,
   SdkHealthRow,
@@ -78,7 +84,10 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   UserAppRow,
+  UserDayActivityRow,
+  UserDeviceRow,
   UserEndpointRow,
+  UserLatestContextRow,
   UserProfileRows,
   UserSummaryRow,
   UserUsageRow,
@@ -100,6 +109,8 @@ function nullIfEmpty(value: string): string | null {
 
 /** Decimals of 0..1 shares and ratios (0.12345 → 0.1235). */
 const SHARE_DECIMALS = 4;
+/** One IST calendar day (India has no DST). */
+const REPORTING_DAY_MS = RANGE_DURATIONS_MS.today;
 
 /**
  * WHY: the Apps page lists keys without ever exposing a secret. `key_hash` is NEVER copied; the
@@ -387,6 +398,7 @@ export function mapUserApp(row: UserAppRow): UserAppUsageDto {
 export function mapUserProfile(
   rows: UserProfileRows,
   topEndpoints: readonly UserEndpointRow[],
+  latest: UserLatestContextRow | null,
 ): UserProfileDto {
   return {
     summary: mapUserSummary(rows.summary),
@@ -407,6 +419,56 @@ export function mapUserProfile(
     topEndpoints: topEndpoints.map(mapUserEndpoint),
     perApp: rows.perApp.map(mapUserApp),
     countries: [...rows.countries],
+    latest: latest ? mapUserLatestContext(latest) : null,
+  };
+}
+
+/** WHY: one device (device type, browser, OS) a user was seen on ("Devices" tab). */
+export function mapUserDevice(row: UserDeviceRow): UserDeviceDto {
+  return {
+    device: row.device,
+    browser: row.browser,
+    os: row.os,
+    firstSeenAt: row.first_seen_at.toISOString(),
+    lastSeenAt: row.last_seen_at.toISOString(),
+    pageViews: row.page_views,
+    requests: row.requests,
+    visits: row.visits,
+    apps: [...row.apps],
+  };
+}
+
+/** WHY: the "latest known" facts of a user's identity card, from ONE browser event. */
+export function mapUserLatestContext(row: UserLatestContextRow): UserLatestContextDto {
+  return {
+    seenAt: row.seen_at.toISOString(),
+    app: row.app_slug,
+    device: row.ua_device,
+    browser: row.ua_browser,
+    os: row.ua_os,
+    timeZone: row.client_tz,
+    language: row.client_lang,
+    appVersion: row.release,
+  };
+}
+
+/**
+ * WHY: one IST day of a user's activity ("Daily activity" tab). `now` decides whether the day is
+ * still running (`inProgress`: its last activity is only "so far").
+ */
+export function mapUserDayActivity(row: UserDayActivityRow, now: Date): UserDayActivityDto {
+  return {
+    day: row.day.toISOString(),
+    firstActivityAt: row.first_activity_at.toISOString(),
+    lastActivityAt: row.last_activity_at.toISOString(),
+    activeMs: row.active_ms,
+    pageViews: row.page_views,
+    requests: row.requests,
+    failedRequests: row.failed_requests,
+    toolUses: row.tool_uses,
+    visits: row.visits,
+    apps: [...row.apps],
+    inProgress: row.day.getTime() + REPORTING_DAY_MS > now.getTime(),
   };
 }
 
@@ -724,4 +786,20 @@ export function mapPiiDetection(row: PiiDetectionRow): PiiDetectionDto {
 /** @see ../../migrations/0012_sso_cookie_outcomes.sql */
 export function mapSsoCookieOutcome(row: SsoCookieOutcomeRow): SsoCookieOutcomeDto {
   return { outcome: row.outcome, beaconOrigin: row.beacon_origin, beacons: row.beacons };
+}
+
+/**
+ * WHY: the access log names the person by the MASKED email stored at write time (never the full
+ * address); the hex user_key opens their page.
+ * @see ../../migrations/0013_person_access_log.sql
+ */
+export function mapPersonAccessEntry(row: PersonAccessLogRow): PersonAccessEntryDto {
+  return {
+    id: row.id,
+    viewedAt: row.viewed_at.toISOString(),
+    viewerEmail: row.viewer_email,
+    subjectUserKey: row.subject_user_key.toString('hex'),
+    subjectEmailMasked: row.subject_email_masked,
+    surface: row.surface,
+  };
 }

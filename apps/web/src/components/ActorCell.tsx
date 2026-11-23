@@ -3,6 +3,7 @@ import Link from 'next/link';
 
 import { ClaimedBadge } from '@/components/ClaimedBadge';
 import { ENTITY_LINK_CLASS } from '@/components/EntityLinks';
+import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
@@ -20,8 +21,13 @@ export interface UserLinkProps {
   linkQuery?: Readonly<Record<string, string | undefined>>;
 }
 
-/** WHY: a verified user's email opens their page — the URL carries only the opaque userKey. */
+/**
+ * WHY: a verified user's email opens their page — the URL carries only the opaque userKey. Only
+ * admins may open a person's page, so for everyone else the email is plain text.
+ */
 export function UserLink({ userKey, email, linkQuery = {} }: UserLinkProps) {
+  const canOpenPerson = useCanOpenPersonPages();
+  if (!canOpenPerson) return <span className="truncate">{email}</span>;
   return (
     <Link
       href={withQuery(PAGES.userDetail(userKey), linkQuery)}

@@ -162,7 +162,7 @@ export function EndpointsView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="API Routes"
+        title="Request types"
         description="Calls, errors and latency per route template (streams excluded from percentiles)"
         actions={
           <label className="relative block w-72">

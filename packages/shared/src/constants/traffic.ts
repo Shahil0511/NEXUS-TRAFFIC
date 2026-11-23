@@ -206,3 +206,29 @@ export const AUDIT_ACTION_VALUES = [
   'APP_SDK_CONFIG_UPDATE',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
+
+// ─── Person access log (0013) ───────────────────────────────────────────────
+
+/**
+ * WHY: which person-level read an admin opened. One value per person-level read leaf
+ * (ROUTES.users.profile / timeline / devices / daily, PERSON_ROUTE_LEAVES), plus one per list
+ * narrowed to one person by `?userKey=` (PERSON_FILTERED_ROUTE_LEAVES): `person_visits` = the
+ * sessions list, `person_failures` = the failed-request summary and list. Stored in
+ * `traffic.person_access_log.surface` and mirrored by `person_access_log_surface_check` (0013).
+ */
+export const PERSON_ACCESS_SURFACE_VALUES = [
+  'person_profile',
+  'person_timeline',
+  'person_devices',
+  'person_daily',
+  'person_visits',
+  'person_failures',
+] as const;
+export type PersonAccessSurface = (typeof PERSON_ACCESS_SURFACE_VALUES)[number];
+
+/**
+ * WHY: one page open fires several requests (tabs, refetches, "Load more"). The same admin +
+ * person + surface is recorded at most once per this window, so the log reads as "who opened
+ * whose page", not as a request log.
+ */
+export const PERSON_ACCESS_COALESCE_MS = 10 * 60 * 1000;

@@ -58,16 +58,16 @@ export function Breadcrumbs({ items, className }: BreadcrumbsProps) {
 }
 
 /**
- * The "Applications › <app>" head of every app-scoped trail (pages, tools, sessions, routes).
+ * The "Apps › <app>" head of every app-scoped trail (pages, tools, sessions, routes).
  * The app filter is dropped from the hrefs — the app page IS the app (like AppChip).
  * WHY the caller passes the ENTITY's app in `linkQuery`: the section crumb that follows
- * ("Pages", "API Routes", "Journeys") must list that app's items, not whatever ?app= the deep
+ * ("Pages", "Request types", "Visits") must list that app's items, not whatever ?app= the deep
  * link carried — build it as `{ ...globalFilters, app }` (see PageDetailView).
  */
 export function applicationCrumbs(app: string, linkQuery: LinkQuery): BreadcrumbItem[] {
   const query = { ...linkQuery, app: undefined };
   return [
-    { label: 'Applications', href: withQuery(PAGES.applications(), query) },
+    { label: 'Apps', href: withQuery(PAGES.applications(), query) },
     { label: app, href: withQuery(PAGES.applicationDetail(app), query) },
   ];
 }

@@ -2,6 +2,7 @@
 
 import { ChevronsDown, Loader2 } from 'lucide-react';
 
+import { useOpenListMarker } from '@/components/PageEndProvider';
 import { Button } from '@/components/ui/button';
 
 export interface LoadMoreButtonProps {
@@ -14,9 +15,11 @@ export interface LoadMoreButtonProps {
 
 /**
  * WHY: cursor-paged lists grow on demand (no page numbers: keyset cursors cannot jump). The
- * count is announced politely so screen-reader users hear the list grow.
+ * count is announced politely so screen-reader users hear the list grow. While more rows exist the
+ * page footer does not say "End of …" (useOpenListMarker).
  */
 export function LoadMoreButton({ hasMore, loading, onLoadMore, shown }: LoadMoreButtonProps) {
+  useOpenListMarker(hasMore);
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
       <p className="text-xs text-muted-foreground" aria-live="polite">

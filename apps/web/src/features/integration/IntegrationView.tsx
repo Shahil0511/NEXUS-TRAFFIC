@@ -143,7 +143,7 @@ export function IntegrationView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Integration"
+        title="Data health"
         description={
           health.data
             ? `Last ${WINDOW_HOURS} hours · checked ${formatDateTime(health.data.to)} IST`

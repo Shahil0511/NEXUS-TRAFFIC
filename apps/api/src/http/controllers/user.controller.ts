@@ -1,8 +1,12 @@
 /**
- * ROUTES.users.* — the Users page (user list, profile, combined timeline).
+ * ROUTES.users.* — the Users page (user list, profile, devices, days, combined timeline).
+ * profile / timeline / devices / daily are admin-only (requireAdmin in the route table) and pass
+ * the viewer on, so the service can record the access.
  */
 import {
   userActivityQuerySchema,
+  userDailyQuerySchema,
+  userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
   userProfileQuerySchema,
@@ -45,9 +49,9 @@ export class UserController {
 
   /** @see ../../services/user.service.ts UserService.profile */
   profile: RequestHandler = async (_req, res) => {
-    requireViewer(res);
+    const viewer = requireViewer(res);
     const { userKey } = validParams(res, userKeyParamsSchema);
-    const body = await this.users.profile(userKey, validQuery(res, userProfileQuerySchema));
+    const body = await this.users.profile(userKey, validQuery(res, userProfileQuerySchema), viewer);
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };
@@ -57,6 +61,24 @@ export class UserController {
     const { userKey } = validParams(res, userKeyParamsSchema);
     const query = validQuery(res, userTimelineQuerySchema);
     const body = await this.users.timeline(userKey, query, requireViewer(res));
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/user.service.ts UserService.devices */
+  devices: RequestHandler = async (_req, res) => {
+    const viewer = requireViewer(res);
+    const { userKey } = validParams(res, userKeyParamsSchema);
+    const body = await this.users.devices(userKey, validQuery(res, userDevicesQuerySchema), viewer);
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/user.service.ts UserService.daily */
+  daily: RequestHandler = async (_req, res) => {
+    const viewer = requireViewer(res);
+    const { userKey } = validParams(res, userKeyParamsSchema);
+    const body = await this.users.daily(userKey, validQuery(res, userDailyQuerySchema), viewer);
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

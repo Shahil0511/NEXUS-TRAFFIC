@@ -13,6 +13,7 @@ import { AdminAuditRepository } from '../../src/repositories/admin-audit.reposit
 import { ApiRequestIngestRepository } from '../../src/repositories/api-request-ingest.repository';
 import { AppRepository } from '../../src/repositories/app.repository';
 import { PartitionRepository } from '../../src/repositories/partition.repository';
+import { PersonAccessLogRepository } from '../../src/repositories/person-access-log.repository';
 import { apiRequestRow } from './fixtures';
 import { RUN_DB_TESTS, caught, createTestDatabase, partitionName, type TestDatabase } from './test-database';
 
@@ -56,6 +57,9 @@ describe.skipIf(!RUN_DB_TESTS)('nexus_app privileges and error classification (d
     ['TRUNCATE', 'TRUNCATE traffic.api_requests'],
     ['UPDATE audit log', `UPDATE traffic.admin_audit_log SET actor_email = 'x@libas.in'`],
     ['DELETE audit log', 'DELETE FROM traffic.admin_audit_log'],
+    ['UPDATE access log', `UPDATE traffic.person_access_log SET viewer_email = 'x@libas.in'`],
+    ['DELETE access log', 'DELETE FROM traffic.person_access_log'],
+    ['TRUNCATE access log', 'TRUNCATE traffic.person_access_log'],
     ['write the ledger', `DELETE FROM traffic.schema_migrations`],
     ['DROP FUNCTION', 'DROP FUNCTION traffic.ensure_partitions(int, int)'],
   ])('nexus_app cannot %s', async (_label, sql) => {
@@ -67,6 +71,17 @@ describe.skipIf(!RUN_DB_TESTS)('nexus_app privileges and error classification (d
     const ledger = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.schema_migrations');
     expect(audit.rows[0].n).toBe(1);
     expect(ledger.rows[0].n).toBe((await loadMigrations(MIGRATIONS_DIR)).length);
+  });
+
+  it('nexus_app can append to and read the person access log (0013, listed in grants.ts)', async () => {
+    await new PersonAccessLogRepository(db.appPool).record({
+      viewerEmail: 'admin@libas.in',
+      subjectUserKey: Buffer.alloc(32, 7),
+      subjectEmailMasked: 's***@libas.in',
+      surface: 'person_profile',
+    });
+    const { rows } = await db.appPool.query('SELECT count(*)::int AS n FROM traffic.person_access_log');
+    expect(rows[0].n).toBe(1);
   });
 
   // ─── the diagnostic aggregates (0010–0012): listed explicitly in grants.ts ─

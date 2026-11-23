@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest';
 
 import { recordingLogger } from '../../../test/fixtures/recording-logger';
 import type { Viewer } from '../../domain/viewer';
-import { dashboardCsrfMiddleware, requireAdminMiddleware } from './dashboard-guards.middleware';
+import {
+  dashboardCsrfMiddleware,
+  requireAdminForUserKeyMiddleware,
+  requireAdminMiddleware,
+} from './dashboard-guards.middleware';
 import { errorHandlerMiddleware } from './error-handler.middleware';
 
 function withViewer(viewer: Viewer | undefined): RequestHandler {
@@ -62,5 +66,40 @@ describe('requireAdminMiddleware', () => {
     const res = await request(buildApp(requireAdminMiddleware())).get('/probe');
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe(ERROR_CODES.INTERNAL_ERROR);
+  });
+});
+
+describe('requireAdminForUserKeyMiddleware', () => {
+  const withQuery =
+    (query: Record<string, unknown>): RequestHandler =>
+    (_req, res, next) => {
+      res.locals.validated = { query };
+      next();
+    };
+  const viewer: Viewer = { email: 'v@libas.in', isAdmin: false };
+  const admin: Viewer = { email: 'a@libas.in', isAdmin: true };
+  const guarded = (query: Record<string, unknown>, who: Viewer = viewer) =>
+    express()
+      .get(
+        '/probe',
+        withViewer(who),
+        withQuery(query),
+        requireAdminForUserKeyMiddleware(),
+        (_req, res) => {
+          res.json({ ok: true });
+        },
+      )
+      .use(errorHandlerMiddleware(recordingLogger().logger));
+
+  it('lets every viewer read the list when it is not narrowed to one person', async () => {
+    expect((await request(guarded({ range: '24h' })).get('/probe')).status).toBe(200);
+  });
+
+  it('403 FORBIDDEN for a viewer once ?userKey= narrows it to one person; admins pass', async () => {
+    const res = await request(guarded({ userKey: 'ab'.repeat(32) })).get('/probe');
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe(ERROR_CODES.FORBIDDEN);
+    const ok = await request(guarded({ userKey: 'ab'.repeat(32) }, admin)).get('/probe');
+    expect(ok.status).toBe(200);
   });
 });

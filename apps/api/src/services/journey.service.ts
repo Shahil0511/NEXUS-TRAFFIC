@@ -25,6 +25,7 @@ import { NotFoundError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+import type { PersonAccessRecorder } from './person-access.recorder';
 import { currentFilter, resolveQueryWindow, toTimeWindowDto } from './query-window';
 
 /** WHY: orchestrates the Journeys queries (window → app id → repository → domain → mappers). */
@@ -33,12 +34,15 @@ export class JourneyService {
     private readonly webEvents: WebEventQueryRepository,
     private readonly appSlugs: AppSlugResolver,
     private readonly clock: Clock,
+    private readonly personAccess: PersonAccessRecorder,
   ) {}
 
   /**
    * Sessions most recently active first, optionally only those of one user, offset-cursor paged.
-   * Counts only → MAX_COUNT_RANGE_MS. Rows are role-masked (IP admin-only).
+   * Counts only → MAX_COUNT_RANGE_MS. Rows are role-masked (IP admin-only). Narrowed to one user
+   * it is a person-level read (admin-only in the route table) and recorded as `person_visits`.
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listSessions
+   * @see ./person-access.recorder.ts PersonAccessRecorder.record
    */
   async sessions(query: SessionListQuery, viewer: Viewer): Promise<CursorPage<SessionSummaryDto>> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
@@ -48,18 +52,28 @@ export class JourneyService {
       environmentsOf(query.env),
     );
     const offset = decodeOffsetCursor(query.cursor);
+    const userKey = query.userKey === undefined ? undefined : userKeyFromHex(query.userKey);
 
     const rows = await this.webEvents.listSessions(filter, {
-      userKey: query.userKey === undefined ? undefined : userKeyFromHex(query.userKey),
+      userKey,
       limit: pageFetchSize(query.limit),
       offset,
     });
-    return toCursorPage(
+    const page = toCursorPage(
       rows,
       query.limit,
       (row) => mapSessionSummary(row, viewer),
       () => encodeOffsetCursor(offset + query.limit),
     );
+    if (userKey) {
+      await this.personAccess.record({
+        viewer,
+        subjectUserKey: userKey,
+        surface: 'person_visits',
+        filter,
+      });
+    }
+    return page;
   }
 
   /**

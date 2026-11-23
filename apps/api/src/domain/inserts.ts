@@ -14,6 +14,7 @@ import type {
   KeyKind,
   NavType,
   PageTimeReason,
+  PersonAccessSurface,
   PiiField,
   PiiKind,
   ServerEventKind,
@@ -167,4 +168,16 @@ export interface PiiDetectionIncrement {
   field: PiiField;
   kind: PiiKind;
   detections: number;
+}
+
+/**
+ * One person-page open to append to the access log. `subjectEmailMasked` is ALREADY masked
+ * (maskEmail, src/lib/redact.ts): the full address of the person is never written here.
+ * @see ../../migrations/0013_person_access_log.sql
+ */
+export interface PersonAccessInsert {
+  viewerEmail: string;
+  subjectUserKey: Buffer;
+  subjectEmailMasked: string;
+  surface: PersonAccessSurface;
 }

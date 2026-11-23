@@ -66,13 +66,16 @@ Flags: `--status` (report only), `--dry` (show what would be applied). Exit code
 | `traffic.ingest_rejections` | [0010](0010_ingest_rejections.sql) | no | nexus_app (ingest) | hourly refused events per source, SDK, code and normalised schema path (codes only, never messages) |
 | `traffic.pii_detections` | [0011](0011_pii_detections.sql) | no | nexus_app (ingest) | hourly PII redactions per source, field and kind (counts only, never values) |
 | `traffic.sso_cookie_outcomes` | [0012](0012_sso_cookie_outcomes.sql) | no | nexus_app (browser ingest) | hourly SSO cookie verification outcomes per beacon origin |
+| `traffic.person_access_log` | [0013](0013_person_access_log.sql) | no | nexus_app, **append-only** (person-level reads) | which admin opened which part of whose person page, when; person = `user_key` + masked email |
 
 Column additions: [0007](0007_event_environment_and_client_context.sql) adds `environment`
 (both event tables, default `'prod'`) and `client_tz`, `client_lang`, `release` (`web_events`);
 [0008](0008_api_requests_page_view_index.sql) adds `idx_api_requests_page_view_id`;
 [0009](0009_app_sdk_config.sql) adds `sdk_config_version`, `sdk_disabled_modules`,
 `sdk_config_updated_at` to `apps` and swaps `admin_audit_log_action_check` (same name) to allow
-`APP_SDK_CONFIG_UPDATE`. The three aggregate tables of 0010–0012 are pruned after
+`APP_SDK_CONFIG_UPDATE`. [0013](0013_person_access_log.sql) also adds the trigger function
+`traffic.reject_person_access_log_change()` and two triggers that refuse UPDATE / DELETE (per row) and
+TRUNCATE (per statement) on `person_access_log` for every role, the owner included. The three aggregate tables of 0010–0012 are pruned after
 `AGGREGATE_RETENTION_DAYS` (90) by the retention job.
 
 ## Functions ([0001](0001_helpers_and_partitions.sql))
@@ -93,7 +96,9 @@ revoked from `PUBLIC`; `EXECUTE` for nexus_app is granted by
 
 `nexus_app`: `USAGE` on schema `traffic`; `SELECT, INSERT, UPDATE, DELETE` on `apps`, `api_keys`,
 `api_requests`, `web_events`, `ingest_counters`, `ingest_rejections`, `pii_detections`,
-`sso_cookie_outcomes`; `SELECT, INSERT` on `admin_audit_log`; `SELECT` on
+`sso_cookie_outcomes`; `SELECT, INSERT` on `admin_audit_log` and `person_access_log` (plus an explicit
+`REVOKE UPDATE, DELETE, TRUNCATE` on the latter, so the default privileges of an already-migrated
+database cannot widen it); `SELECT` on
 `schema_migrations`; sequences `USAGE, SELECT`; `EXECUTE` on the three partition functions; default
 privileges for tables/sequences the owner creates later (monthly partitions included) — these do
 NOT cover tables created by the migrations of a fresh database, hence the explicit table list (rule 8). **No DDL,

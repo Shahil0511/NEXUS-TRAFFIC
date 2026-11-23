@@ -120,3 +120,18 @@ export interface SessionListOptions {
   limit: number;
   offset: number;
 }
+
+/** Position in the person access log (newest first): (viewed_at µs text, id). */
+export interface AccessLogKeyset {
+  viewedAt: string;
+  id: number;
+}
+
+/** Paging + optional person scope of `PersonAccessLogRepository.list` (keyset). */
+export interface AccessLogListOptions {
+  /** Stored user_key (bytea): only the rows about this person. */
+  subjectUserKey?: Buffer;
+  /** Rows strictly older than this keyset; null = first page. */
+  after: AccessLogKeyset | null;
+  limit: number;
+}

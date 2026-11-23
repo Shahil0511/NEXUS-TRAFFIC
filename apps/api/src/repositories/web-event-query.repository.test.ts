@@ -55,13 +55,17 @@ describe('WebEventQueryRepository SQL (S3)', () => {
     const { exec, repo } = build();
     await repo.listUsers(FILTER, { search: 'a', limit: 3, offset: 0 });
     await repo.listUserTimeline(USER_KEY, FILTER, { after: null, limit: 3 });
+    await repo.findUserEmail(USER_KEY, FILTER);
     await repo.listSessions(FILTER, { userKey: USER_KEY, limit: 3, offset: 0 });
     await repo.listTopPaths(FILTER, 5);
     await repo.listPageStats(FILTER, 5);
     await repo.listToolUsage(FILTER, 'hour', 5);
     await repo.listCountries(FILTER, 5);
     await repo.listCities(FILTER, 5);
-    expect(exec.statements).toHaveLength(8);
+    await repo.listUserDevices(USER_KEY, FILTER, 5);
+    await repo.getUserLatestContext(USER_KEY, FILTER);
+    await repo.listUserDailyActivity(USER_KEY, FILTER);
+    expect(exec.statements).toHaveLength(12);
     for (const { text } of exec.statements) expectEveryTableBounded(text);
   });
 
@@ -121,6 +125,55 @@ describe('WebEventQueryRepository SQL (S3)', () => {
   });
 });
 
+describe('WebEventQueryRepository person reads (devices, daily)', () => {
+  /** The user key must be ONE bound parameter used on both tables, never inlined. */
+  function expectKeyedOnBothTables(statement: { text: string; values: unknown[] } | undefined) {
+    expect(statement?.text).toMatch(/r\.user_key = \$1(?!\d)/);
+    expect(statement?.text).toMatch(/w\.user_key = \$1(?!\d)/);
+    expect(statement?.values[0]).toBe(USER_KEY);
+  }
+
+  it('listUserDevices groups both tables by the ua_* columns, newest first, limited', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDevices(USER_KEY, FILTER, 7);
+    const [statement] = exec.statements;
+    expectKeyedOnBothTables(statement);
+    expect(statement?.text).toContain(
+      'r.ua_device AS device, r.ua_browser AS browser, r.ua_os AS os',
+    );
+    expect(statement?.text).toContain('GROUP BY h.device, h.browser, h.os');
+    expect(statement?.text).toContain('ORDER BY max(h.occurred_at) DESC');
+    expect(statement?.text).toContain(
+      "count(DISTINCT h.session_id) FILTER (WHERE h.kind <> 'api') AS visits",
+    );
+    expect(statement?.values.at(-1)).toBe(7);
+  });
+
+  it('getUserLatestContext reads the single newest browser event of the user', async () => {
+    const { exec, repo } = build();
+    expect(await repo.getUserLatestContext(USER_KEY, FILTER)).toBeNull();
+    const text = exec.statements[0]?.text ?? '';
+    expect(text).not.toContain('api_requests');
+    expect(text).toMatch(/w\.user_key = \$\d+/);
+    expect(text).toContain('w.client_tz, w.client_lang, w.release');
+    expect(text).toContain('ORDER BY w.occurred_at DESC, w.event_id DESC');
+    expect(text).toContain('LIMIT 1');
+  });
+
+  it('listUserDailyActivity buckets by IST day, newest first, active time from page_time only', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDailyActivity(USER_KEY, FILTER);
+    const [statement] = exec.statements;
+    expectKeyedOnBothTables(statement);
+    expect(statement?.text).toContain("date_trunc('day', h.occurred_at, 'Asia/Kolkata') AS day");
+    expect(statement?.text).toContain(
+      "coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms",
+    );
+    expect(statement?.text).toContain('(r.status_code >= 400) AS failed');
+    expect(statement?.text).toContain('ORDER BY 1 DESC');
+  });
+});
+
 // ─── Environment filter (ADR 0008) ──────────────────────────────────────────
 
 /** Each `FROM traffic.<table> <alias>` must carry `<alias>.environment = ANY($n::text[])`. */
@@ -155,6 +208,10 @@ const READS: Record<string, (repo: WebEventQueryRepository) => Promise<unknown>>
   listUsers: (r) => r.listUsers(STAGING, { limit: 3, offset: 0 }),
   getUserProfile: (r) => r.getUserProfile(USER_KEY, STAGING),
   listUserTimeline: (r) => r.listUserTimeline(USER_KEY, STAGING, { after: null, limit: 3 }),
+  listUserDevices: (r) => r.listUserDevices(USER_KEY, STAGING, 5),
+  getUserLatestContext: (r) => r.getUserLatestContext(USER_KEY, STAGING),
+  findUserEmail: (r) => r.findUserEmail(USER_KEY, STAGING),
+  listUserDailyActivity: (r) => r.listUserDailyActivity(USER_KEY, STAGING),
   listSessions: (r) => r.listSessions(STAGING, { userKey: USER_KEY, limit: 3, offset: 0 }),
   getSession: (r) => r.getSession('app-id', SESSION_ID, STAGING),
   listTopPaths: (r) => r.listTopPaths(STAGING, 5),

@@ -7,6 +7,7 @@ import { NuqsAdapter } from 'nuqs/adapters/next/app';
 import { useState, type ReactNode } from 'react';
 import { Toaster } from 'sonner';
 
+import { CursorSpotlight } from '@/components/CursorSpotlight';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { createQueryClient } from '@/lib/query/client';
 
@@ -30,7 +31,7 @@ export function AppProviders({ nonce, children }: AppProvidersProps) {
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
+      defaultTheme="light"
       enableSystem
       disableTransitionOnChange
       nonce={nonce}
@@ -43,6 +44,7 @@ export function AppProviders({ nonce, children }: AppProvidersProps) {
         </NuqsAdapter>
       </QueryClientProvider>
       <Toaster position="bottom-right" richColors closeButton theme="system" />
+      <CursorSpotlight />
     </ThemeProvider>
   );
 }

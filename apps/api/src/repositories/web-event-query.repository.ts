@@ -72,6 +72,9 @@ import type {
   ToolUsageRows,
   TopPathRow,
   UserAppRow,
+  UserDayActivityRow,
+  UserDeviceRow,
+  UserLatestContextRow,
   UserPageCountRow,
   UserProfileRows,
   UserSummaryRow,
@@ -851,6 +854,144 @@ export class WebEventQueryRepository {
        ) items
        ORDER BY items.occurred_at DESC, items.event_id DESC
        LIMIT ${limit}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * One row per (device type, browser, OS) of one user over API calls + browser events (the ua_*
+   * columns exist on both tables), most recently used first, at most `limit`. `visits` counts
+   * BROWSER sessions only, like the Users list.
+   */
+  async listUserDevices(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<UserDeviceRow[]> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const { rows } = await exec.query<UserDeviceRow>(
+      `SELECT h.device, h.browser, h.os,
+              min(h.occurred_at) AS first_seen_at, max(h.occurred_at) AS last_seen_at,
+              count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
+              count(*) FILTER (WHERE h.kind = '${API_KIND}') AS requests,
+              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS visits,
+              array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps
+         FROM (
+           SELECT r.ua_device AS device, r.ua_browser AS browser, r.ua_os AS os, r.app_id,
+                  r.session_id, r.occurred_at, '${API_KIND}'::text AS kind
+             FROM traffic.api_requests r WHERE ${api}
+           UNION ALL
+           SELECT w.ua_device, w.ua_browser, w.ua_os, w.app_id,
+                  w.session_id, w.occurred_at, w.event_type
+             FROM traffic.web_events w WHERE ${web}
+         ) h
+         JOIN traffic.apps a ON a.id = h.app_id
+        GROUP BY h.device, h.browser, h.os
+        ORDER BY max(h.occurred_at) DESC, h.device ASC NULLS LAST, h.browser ASC NULLS LAST,
+                 h.os ASC NULLS LAST
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * The context columns of one user's MOST RECENT browser event in the window (one row, so the
+   * values belong together), via idx_web_events_user_key_occurred_at. Null without browser events.
+   */
+  async getUserLatestContext(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<UserLatestContextRow | null> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      `w.user_key = ${params.add(userKey)}`,
+    ].join(' AND ');
+    const { rows } = await exec.query<UserLatestContextRow>(
+      `SELECT w.occurred_at AS seen_at, a.slug AS app_slug, w.ua_device, w.ua_browser, w.ua_os,
+              w.client_tz, w.client_lang, w.release
+         FROM traffic.web_events w
+         JOIN traffic.apps a ON a.id = w.app_id
+        WHERE ${where}
+        ORDER BY w.occurred_at DESC, w.event_id DESC
+        LIMIT 1`,
+      params.values,
+    );
+    return rows[0] ?? null;
+  }
+
+  /**
+   * The verified email of one user, from their newest event of EITHER table inside the window;
+   * null when they did nothing there. Used ONLY to name the person (masked) in the person access
+   * log (PersonAccessRecorder) — never returned to a client in full.
+   */
+  async findUserEmail(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<string | null> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const { rows } = await exec.query<{ user_email: string }>(
+      `SELECT h.user_email
+         FROM (
+           (SELECT r.user_email, r.occurred_at FROM traffic.api_requests r
+             WHERE ${api} ORDER BY r.occurred_at DESC LIMIT 1)
+           UNION ALL
+           (SELECT w.user_email, w.occurred_at FROM traffic.web_events w
+             WHERE ${web} ORDER BY w.occurred_at DESC LIMIT 1)
+         ) h
+        ORDER BY h.occurred_at DESC
+        LIMIT 1`,
+      params.values,
+    );
+    return rows[0]?.user_email ?? null;
+  }
+
+  /**
+   * One row per IST calendar day (same bucket as listDailyUsers) on which one user was active,
+   * newest first; days without activity are absent. First / last activity span BOTH tables;
+   * `active_ms` = Σ visible_ms of the day's page_time rows (tab-visible time).
+   */
+  async listUserDailyActivity(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<UserDayActivityRow[]> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const { rows } = await exec.query<UserDayActivityRow>(
+      `SELECT ${bucketExpr('day', 'h.occurred_at')} AS day,
+              min(h.occurred_at) AS first_activity_at, max(h.occurred_at) AS last_activity_at,
+              coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = '${PAGE_TIME}'), 0)::int8 AS active_ms,
+              count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
+              count(*) FILTER (WHERE h.kind = '${API_KIND}') AS requests,
+              count(*) FILTER (WHERE h.failed) AS failed_requests,
+              count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
+              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS visits,
+              array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps
+         FROM (
+           SELECT r.app_id, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind,
+                  (${FAILURE_PREDICATES.all}) AS failed, NULL::int AS visible_ms
+             FROM traffic.api_requests r WHERE ${api}
+           UNION ALL
+           SELECT w.app_id, w.session_id, w.occurred_at, w.event_type, false, w.visible_ms
+             FROM traffic.web_events w WHERE ${web}
+         ) h
+         JOIN traffic.apps a ON a.id = h.app_id
+        GROUP BY 1
+        ORDER BY 1 DESC`,
       params.values,
     );
     return rows;

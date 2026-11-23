@@ -6,7 +6,7 @@
  * scripts and next-themes receives it for its inline no-flash script).
  */
 import type { Metadata, Viewport } from 'next';
-import { JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google';
+import { JetBrains_Mono, Plus_Jakarta_Sans, Rajdhani } from 'next/font/google';
 import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
 
@@ -15,11 +15,19 @@ import { NONCE_HEADER } from '@/lib/csp';
 
 import './globals.css';
 
-/** Data Nexus brand typefaces — same as the portal shell and its other apps. */
+/** Body text typeface of the Data Nexus portal apps. */
 const jakarta = Plus_Jakarta_Sans({
   variable: '--font-jakarta',
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
+  display: 'swap',
+});
+
+/** Headings and big numbers: the Libas display face, shared with the EBO Sales Leaderboard. */
+const rajdhani = Rajdhani({
+  variable: '--font-rajdhani',
+  subsets: ['latin'],
+  weight: ['500', '600', '700'],
   display: 'swap',
 });
 
@@ -38,8 +46,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
-    { media: '(prefers-color-scheme: dark)', color: '#060608' },
+    { media: '(prefers-color-scheme: light)', color: '#faf6f9' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f0a11' },
   ],
 };
 
@@ -49,7 +57,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
     <html
       lang="en-IN"
       suppressHydrationWarning
-      className={`${jakarta.variable} ${jetbrainsMono.variable} h-full`}
+      className={`${jakarta.variable} ${rajdhani.variable} ${jetbrainsMono.variable} h-full`}
     >
       <body className="min-h-full">
         <AppProviders nonce={nonce}>{children}</AppProviders>

@@ -30,8 +30,8 @@ Each app has its own ad-hoc logging; nothing is shared or real-time.
 
 | Who | What they do |
 |---|---|
-| Dashboard viewers (allow-listed emails) | read analytics, live feed, journeys |
-| Dashboard admins (`DASHBOARD_ADMIN_EMAILS`) | register apps, issue/expire/revoke API keys, see IP addresses |
+| Dashboard viewers (allow-listed emails) | read analytics, live feed, journeys and the People list (not one person's page, not lists narrowed to one person) |
+| Dashboard admins (`DASHBOARD_ADMIN_EMAILS`) | register apps, issue/expire/revoke API keys, see IP addresses, open a person's page and lists narrowed to one person (each open is recorded in the access log, [ADR 0015](decisions/0015-admin-only-person-pages-and-access-log.md)) |
 | Other teams | read the public guide, add the middleware/hook to their apps, check *Integration Health* |
 | Team Lead | deploys with Docker Compose, configures nginx and `.env` |
 

@@ -23,6 +23,9 @@ import {
   toolUsageRow,
   trafficBucketRow,
   USER_KEY_HEX,
+  userDayActivityRow,
+  userDeviceRow,
+  userLatestContextRow,
   userSummaryRow,
 } from '../../test/fixtures/analytics-rows';
 import { apiKeyRow, appRow, CREATED_AT } from '../../test/fixtures/app-rows';
@@ -51,6 +54,9 @@ import {
   mapTimeseriesPoint,
   mapToolUsage,
   mapTopPath,
+  mapUserDayActivity,
+  mapUserDevice,
+  mapUserLatestContext,
   mapUserProfile,
   mapUserSummary,
   splitSdkLabel,
@@ -274,13 +280,75 @@ describe('mapUserSummary / mapUserProfile', () => {
         countries: ['IN', 'AE'],
       },
       [],
+      userLatestContextRow(),
     );
+    expect(dto.latest).toMatchObject({ app: 'ebo-sales', browser: 'Chrome 126' });
+    const empty = {
+      summary: userSummaryRow(),
+      topTools: [],
+      topPages: [],
+      perApp: [],
+      countries: [],
+    };
+    expect(mapUserProfile(empty, [], null).latest).toBeNull();
     expect(dto).toMatchObject({
       firstSeenAt: '2026-10-01T08:00:00.000Z',
       failedRequests: 2,
       topTools: [{ app: 'ebo-sales', tool: 'export-csv', uses: 2 }],
       topPages: [{ app: 'ebo-sales', pathTemplate: '/home', views: 3 }],
       countries: ['IN', 'AE'],
+    });
+  });
+});
+
+describe('mapUserDevice / mapUserLatestContext / mapUserDayActivity', () => {
+  it('maps a device group with ISO times and a copy of the apps', () => {
+    const row = userDeviceRow({ os: null });
+    const dto = mapUserDevice(row);
+    expect(dto).toEqual({
+      device: 'desktop',
+      browser: 'Chrome 126',
+      os: null,
+      firstSeenAt: '2026-10-01T08:00:00.000Z',
+      lastSeenAt: OCCURRED_AT.toISOString(),
+      pageViews: 5,
+      requests: 12,
+      visits: 2,
+      apps: ['ebo-sales'],
+    });
+    expect(dto.apps).not.toBe(row.apps);
+  });
+
+  it('renames the context columns to the card facts', () => {
+    expect(mapUserLatestContext(userLatestContextRow({ release: null }))).toEqual({
+      seenAt: OCCURRED_AT.toISOString(),
+      app: 'ebo-sales',
+      device: 'desktop',
+      browser: 'Chrome 126',
+      os: 'Windows 10',
+      timeZone: 'Asia/Kolkata',
+      language: 'en-IN',
+      appVersion: null,
+    });
+  });
+
+  it('maps one IST day (day = the instant of IST midnight)', () => {
+    // The day (1 Oct IST) has ended by 2 Oct 00:00 IST; one minute earlier it is still running.
+    const dayEnd = new Date('2026-10-01T18:30:00.000Z');
+    const running = mapUserDayActivity(userDayActivityRow(), new Date(dayEnd.getTime() - 60_000));
+    expect(running.inProgress).toBe(true);
+    expect(mapUserDayActivity(userDayActivityRow(), dayEnd)).toEqual({
+      day: '2026-09-30T18:30:00.000Z',
+      firstActivityAt: '2026-10-01T03:40:00.000Z',
+      lastActivityAt: OCCURRED_AT.toISOString(),
+      activeMs: 11_520_000,
+      pageViews: 5,
+      requests: 12,
+      failedRequests: 2,
+      toolUses: 3,
+      visits: 2,
+      apps: ['ebo-sales', 'hr-portal'],
+      inProgress: false,
     });
   });
 });

@@ -14,8 +14,10 @@ export class ErrorController {
 
   /** @see ../../services/error.service.ts ErrorService.summary */
   summary: RequestHandler = async (_req, res) => {
-    requireViewer(res);
-    const body = await this.errors.summary(validQuery(res, errorSummaryQuerySchema));
+    const body = await this.errors.summary(
+      validQuery(res, errorSummaryQuerySchema),
+      requireViewer(res),
+    );
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

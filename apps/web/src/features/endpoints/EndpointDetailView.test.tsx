@@ -42,9 +42,9 @@ describe('EndpointDetailView', () => {
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     const links = within(trail).getAllByRole('link');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-      ['Applications', '/applications?range=7d'],
+      ['Apps', '/applications?range=7d'],
       ['ebo-sales', '/applications/ebo-sales?range=7d'],
-      ['API Routes', '/endpoints?app=ebo-sales&range=7d'],
+      ['Request types', '/endpoints?app=ebo-sales&range=7d'],
     ]);
     expect(within(trail).getByText('GET /api/orders/:id')).toHaveAttribute('aria-current', 'page');
 
@@ -53,7 +53,7 @@ describe('EndpointDetailView', () => {
       `${PAGES.errors()}?app=ebo-sales&range=7d&endpointId=${ENDPOINT_ID}`,
     );
     const callers = screen.getByRole('list', { name: 'Top callers' });
-    expect(within(callers).getByRole('link', { name: 'buyer@libas.in' })).toHaveAttribute(
+    expect(await within(callers).findByRole('link', { name: 'buyer@libas.in' })).toHaveAttribute(
       'href',
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
     );
@@ -72,7 +72,7 @@ describe('EndpointDetailView', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Route' })).toBeInTheDocument();
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(trail).getAllByRole('link')).toHaveLength(1);
-    expect(within(trail).getByRole('link', { name: 'API Routes' })).toHaveAttribute(
+    expect(within(trail).getByRole('link', { name: 'Request types' })).toHaveAttribute(
       'href',
       '/endpoints?app=other',
     );

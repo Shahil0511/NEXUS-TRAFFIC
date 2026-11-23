@@ -61,15 +61,18 @@ function SplitBar({ dto }: { dto: DeviceReturnDto }) {
 export function DeviceReturnPanel({
   filters,
   className,
+  title = 'New vs returning',
 }: {
   filters: TimeWindowQuery;
   className?: string;
+  /** Panel title; Devices & places says "First-time vs returning devices". */
+  title?: string;
 }) {
   const devices = useDeviceReturn(filters);
   const dto = devices.data;
   return (
     <Panel
-      title="New vs returning"
+      title={title}
       description={`Returning = also seen in the ${RETURNING_LOOKBACK_DAYS} days before`}
       className={className}
     >

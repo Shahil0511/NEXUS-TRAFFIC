@@ -147,6 +147,17 @@ export type UserProfileQuery = z.infer<typeof userProfileQuerySchema>;
 export const userTimelineQuerySchema = timeWindowQuerySchema.safeExtend({ ...pageQueryShape });
 export type UserTimelineQuery = z.infer<typeof userTimelineQuerySchema>;
 
+/** Safety cap on the device rows of ROUTES.users.devices (most recently used first). */
+export const USER_DEVICES_LIMIT = 50;
+
+/** ROUTES.users.devices: the window + app + env, like the profile. */
+export const userDevicesQuerySchema = timeWindowQuerySchema;
+export type UserDevicesQuery = z.infer<typeof userDevicesQuerySchema>;
+
+/** ROUTES.users.daily: the window + app + env, like the profile (days bucketed in IST). */
+export const userDailyQuerySchema = timeWindowQuerySchema;
+export type UserDailyQuery = z.infer<typeof userDailyQuerySchema>;
+
 // ─── journeys ───────────────────────────────────────────────────────────────
 export const sessionListQuerySchema = timeWindowQuerySchema.safeExtend({
   userKey: userKeySchema.optional(),

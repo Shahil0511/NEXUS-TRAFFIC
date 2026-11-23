@@ -12,3 +12,4 @@ export * from './tools';
 export * from './geo';
 export * from './live';
 export * from './integration';
+export * from './privacy';

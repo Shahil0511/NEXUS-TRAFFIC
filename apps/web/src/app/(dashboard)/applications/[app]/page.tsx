@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { ApplicationDetailView } from '@/features/applications/ApplicationDetailView';
 
-export const metadata: Metadata = { title: 'Application' };
+export const metadata: Metadata = { title: 'App' };
 
 /**
  * PAGES.applicationDetail(app) — @see ../../../../features/applications/ApplicationDetailView.tsx

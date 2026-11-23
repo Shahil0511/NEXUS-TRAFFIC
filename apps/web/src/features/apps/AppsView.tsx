@@ -21,7 +21,7 @@ import { KeyActionDialog, type KeyAction, type KeyActionTarget } from './KeyActi
 import { RemoteConfigDialog } from './RemoteConfigDialog';
 import { useAppList } from './useAppList';
 
-const TITLE = 'Apps';
+const TITLE = 'App keys';
 const DESCRIPTION = 'Registered apps and their ingest keys — a new key is shown once, at creation';
 
 export interface AppsViewProps {

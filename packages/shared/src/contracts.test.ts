@@ -5,6 +5,8 @@ import {
   ENVIRONMENT_VALUES,
   EVENT_CLOCK_POLICY,
   BREAKDOWN_DIMENSION_VALUES,
+  PERSON_ACCESS_COALESCE_MS,
+  PERSON_ACCESS_SURFACE_VALUES,
   SDK_DEFAULTS,
   SERVER_BREAKDOWN_DIMENSION_VALUES,
   SSO_COOKIE_OUTCOME_VALUES,
@@ -25,15 +27,28 @@ import {
   listRoutes,
   NON_DASHBOARD_ROUTE_GROUPS,
   PENDING_ROUTE_LEAVES,
+  PERSON_FILTERED_ROUTE_LEAVES,
+  PERSON_ROUTE_LEAVES,
   ROUTES,
 } from './routes';
 import {
   breakdownOverviewQuerySchema,
   endpointListQuerySchema,
+  errorListQuerySchema,
+  errorSummaryQuerySchema,
+  liveOnlineQuerySchema,
+  sessionListQuerySchema,
+  privacyAccessLogQuerySchema,
   timeWindowQuerySchema,
   updateSdkConfigBodySchema,
 } from './schemas';
-import { grainFor, resolveTimeWindow, TimeWindowError } from './time-window';
+import {
+  grainFor,
+  resolveTimeWindow,
+  startOfReportingDay,
+  TimeWindowError,
+  wholeReportingDays,
+} from './time-window';
 
 describe('ROUTES', () => {
   it('versions every group except health and docs', () => {
@@ -60,10 +75,50 @@ describe('ROUTES', () => {
 
   it('serves the Phase A leaves under /v1 with the agreed verbs', () => {
     expect(ROUTES.ingest.config).toEqual({ method: 'POST', path: '/v1/ingest/config' });
-    expect(ROUTES.apps.updateSdkConfig).toEqual({ method: 'PATCH', path: '/v1/apps/:slug/sdk-config' });
+    expect(ROUTES.apps.updateSdkConfig).toEqual({
+      method: 'PATCH',
+      path: '/v1/apps/:slug/sdk-config',
+    });
     expect(ROUTES.overview.breakdown).toEqual({ method: 'GET', path: '/v1/overview/breakdown' });
     expect(ROUTES.overview.devices).toEqual({ method: 'GET', path: '/v1/overview/devices' });
     expect(PENDING_ROUTE_LEAVES).toEqual([]);
+  });
+
+  it('serves the person leaves under /v1/users/:userKey', () => {
+    expect(ROUTES.users.devices).toEqual({ method: 'GET', path: '/v1/users/:userKey/devices' });
+    expect(ROUTES.users.daily).toEqual({ method: 'GET', path: '/v1/users/:userKey/daily' });
+    expect(buildPath(ROUTES.users.daily, { userKey: 'ab' })).toBe('/v1/users/ab/daily');
+  });
+
+  it('names the person-level leaves (admin-only, access-logged): one surface each', () => {
+    const known = new Set(listRoutes().map(({ group, leaf }) => `${group}.${leaf}`));
+    for (const id of PERSON_ROUTE_LEAVES) expect(known.has(id), id).toBe(true);
+    for (const id of PERSON_ROUTE_LEAVES) {
+      const [, leaf] = id.split('.') as [string, keyof typeof ROUTES.users];
+      expect(ROUTES.users[leaf].path).toMatch(/^\/v1\/users\/:userKey(\/[a-z]+)?$/);
+    }
+    // + person_visits and person_failures (the lists narrowed to one person by ?userKey=).
+    expect(PERSON_ACCESS_SURFACE_VALUES).toHaveLength(PERSON_ROUTE_LEAVES.length + 2);
+    for (const id of PERSON_FILTERED_ROUTE_LEAVES) expect(known.has(id), id).toBe(true);
+    const narrowable = [
+      sessionListQuerySchema,
+      errorSummaryQuerySchema,
+      errorListQuerySchema,
+      liveOnlineQuerySchema,
+    ];
+    for (const schema of narrowable) {
+      expect(schema.safeParse({ userKey: 'a'.repeat(64) }).success).toBe(true);
+    }
+    expect(PERSON_ACCESS_COALESCE_MS).toBe(10 * 60 * 1000);
+  });
+
+  it('serves the access log at /v1/privacy/access-log, filtered by an opaque key only', () => {
+    expect(ROUTES.privacy.accessLog).toEqual({ method: 'GET', path: '/v1/privacy/access-log' });
+    expect(privacyAccessLogQuerySchema.parse({})).toEqual({ limit: 50 });
+    expect(privacyAccessLogQuerySchema.safeParse({ userKey: 'a'.repeat(64) }).success).toBe(true);
+    expect(privacyAccessLogQuerySchema.safeParse({ userKey: 'someone@libas.in' }).success).toBe(
+      false,
+    );
   });
 
   it('buildPath encodes params and throws on missing ones', () => {
@@ -109,6 +164,53 @@ describe('time windows', () => {
     expect(w.from.toISOString()).toBe('2026-09-30T10:00:00.000Z');
     expect(w.previousFrom.toISOString()).toBe('2026-09-29T10:00:00.000Z');
     expect(w.grain).toBe('hour');
+  });
+
+  it('resolves today as the IST calendar day, compared with yesterday', () => {
+    // 10:00Z = 15:30 IST on 1 Oct → 1 Oct 00:00 IST (30 Sep 18:30Z) up to 2 Oct 00:00 IST.
+    const w = resolveTimeWindow({ range: 'today' }, now);
+    expect(w.from.toISOString()).toBe('2026-09-30T18:30:00.000Z');
+    expect(w.to.toISOString()).toBe('2026-10-01T18:30:00.000Z');
+    expect(w.previousFrom.toISOString()).toBe('2026-09-29T18:30:00.000Z');
+    expect(w.grain).toBe('hour');
+    // The day is not over: data ends now, and it is compared with yesterday up to the same time.
+    expect(w.elapsedTo.toISOString()).toBe(now.toISOString());
+    expect(w.previousTo.toISOString()).toBe('2026-09-30T10:00:00.000Z');
+    // 23:59 IST still belongs to the same day; 00:00 IST starts the next one.
+    const lateEvening = resolveTimeWindow({ range: 'today' }, new Date('2026-10-01T18:29:59Z'));
+    expect(lateEvening.from.toISOString()).toBe('2026-09-30T18:30:00.000Z');
+    const midnight = resolveTimeWindow({ range: 'today' }, new Date('2026-10-01T18:30:00Z'));
+    expect(midnight.from.toISOString()).toBe('2026-10-01T18:30:00.000Z');
+  });
+
+  it('compares a running window with the same elapsed span, a finished one with the whole one', () => {
+    // 04:30Z = 10:00 IST: today 00:00-10:00 IST vs yesterday 00:00-10:00 IST.
+    const midDay = resolveTimeWindow({ range: 'today' }, new Date('2026-10-01T04:30:00Z'));
+    expect(midDay.previousFrom.toISOString()).toBe('2026-09-29T18:30:00.000Z');
+    expect(midDay.previousTo.toISOString()).toBe('2026-09-30T04:30:00.000Z');
+    expect(midDay.durationMs).toBe(86_400_000);
+    const rolling = resolveTimeWindow({ range: '24h' }, now);
+    expect(rolling.elapsedTo.toISOString()).toBe(now.toISOString());
+    expect(rolling.previousTo.toISOString()).toBe(rolling.from.toISOString());
+    const past = resolveTimeWindow(
+      { range: 'custom', from: '2026-09-01T00:00:00Z', to: '2026-09-02T00:00:00Z' },
+      now,
+    );
+    expect(past.elapsedTo.toISOString()).toBe('2026-09-02T00:00:00.000Z');
+    expect(past.previousTo.toISOString()).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('widens a window to whole IST days', () => {
+    // 24h ending 15:30 IST 1 Oct → 30 Sep 00:00 IST up to 2 Oct 00:00 IST.
+    const days = wholeReportingDays(resolveTimeWindow({ range: '24h' }, now));
+    expect(days.from.toISOString()).toBe('2026-09-29T18:30:00.000Z');
+    expect(days.to.toISOString()).toBe('2026-10-01T18:30:00.000Z');
+    // Already whole days: unchanged (`to` is exclusive).
+    const whole = { from: new Date('2026-09-28T18:30:00Z'), to: new Date('2026-09-30T18:30:00Z') };
+    expect(wholeReportingDays(whole)).toEqual(whole);
+    expect(startOfReportingDay(new Date('2026-09-30T18:29:59Z')).toISOString()).toBe(
+      '2026-09-29T18:30:00.000Z',
+    );
   });
 
   it('validates custom ranges and caps', () => {
@@ -167,7 +269,8 @@ describe('Phase A contract invariants', () => {
 
   it('kill and key-guess codes are real error codes; rejection codes extend the event codes', () => {
     const codes = new Set<string>(Object.values(ERROR_CODES));
-    for (const c of [...SDK_KILL_ERROR_CODES, ...KEY_GUESS_ERROR_CODES]) expect(codes.has(c), c).toBe(true);
+    for (const c of [...SDK_KILL_ERROR_CODES, ...KEY_GUESS_ERROR_CODES])
+      expect(codes.has(c), c).toBe(true);
     expect(INGEST_REJECTION_CODE_VALUES.slice(0, INGEST_EVENT_REJECT_CODES.length)).toEqual([
       ...INGEST_EVENT_REJECT_CODES,
     ]);
@@ -175,14 +278,25 @@ describe('Phase A contract invariants', () => {
   });
 
   it('a policy denial is never counted as a key guess', () => {
-    for (const c of [ERROR_CODES.APP_DISABLED, ERROR_CODES.BROWSER_INGEST_DISABLED, ERROR_CODES.ORIGIN_NOT_ALLOWED]) {
+    for (const c of [
+      ERROR_CODES.APP_DISABLED,
+      ERROR_CODES.BROWSER_INGEST_DISABLED,
+      ERROR_CODES.ORIGIN_NOT_ALLOWED,
+    ]) {
       expect((KEY_GUESS_ERROR_CODES as readonly string[]).includes(c), c).toBe(false);
     }
   });
 
   it('the IP failure limiter counts key guesses + ORIGIN_NOT_ALLOWED, never a kill code', () => {
-    expect(IP_FAILURE_ERROR_CODES).toEqual([...KEY_GUESS_ERROR_CODES, ERROR_CODES.ORIGIN_NOT_ALLOWED]);
-    for (const c of [ERROR_CODES.APP_DISABLED, ERROR_CODES.BROWSER_INGEST_DISABLED, ERROR_CODES.SECRET_KEY_EXPOSED]) {
+    expect(IP_FAILURE_ERROR_CODES).toEqual([
+      ...KEY_GUESS_ERROR_CODES,
+      ERROR_CODES.ORIGIN_NOT_ALLOWED,
+    ]);
+    for (const c of [
+      ERROR_CODES.APP_DISABLED,
+      ERROR_CODES.BROWSER_INGEST_DISABLED,
+      ERROR_CODES.SECRET_KEY_EXPOSED,
+    ]) {
       expect((IP_FAILURE_ERROR_CODES as readonly string[]).includes(c), c).toBe(false);
     }
   });
@@ -205,18 +319,32 @@ describe('Phase A contract invariants', () => {
       limit: 10,
       range: '24h',
     });
-    expect(breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'release' }).success).toBe(true);
-    expect(breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'client_tz' }).success).toBe(false);
+    expect(
+      breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'release' }).success,
+    ).toBe(true);
+    expect(
+      breakdownOverviewQuerySchema.safeParse({ source: 'server', dimension: 'client_tz' }).success,
+    ).toBe(false);
     expect(breakdownOverviewQuerySchema.safeParse({ dimension: 'nope' }).success).toBe(false);
   });
 
   it('sdk config updates need a version and refuse duplicate or unknown modules', () => {
-    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: [] }).success).toBe(true);
     expect(
-      updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: ['custom', 'custom'] }).success,
+      updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: [] }).success,
+    ).toBe(true);
+    expect(
+      updateSdkConfigBodySchema.safeParse({
+        expectedVersion: 1,
+        disabledModules: ['custom', 'custom'],
+      }).success,
     ).toBe(false);
-    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: ['nope'] }).success).toBe(false);
-    expect(updateSdkConfigBodySchema.safeParse({ expectedVersion: 0, disabledModules: [] }).success).toBe(false);
+    expect(
+      updateSdkConfigBodySchema.safeParse({ expectedVersion: 1, disabledModules: ['nope'] })
+        .success,
+    ).toBe(false);
+    expect(
+      updateSdkConfigBodySchema.safeParse({ expectedVersion: 0, disabledModules: [] }).success,
+    ).toBe(false);
   });
 });
 

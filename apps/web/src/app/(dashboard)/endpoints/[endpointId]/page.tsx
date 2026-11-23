@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { EndpointDetailView } from '@/features/endpoints/EndpointDetailView';
 
-export const metadata: Metadata = { title: 'Route' };
+export const metadata: Metadata = { title: 'Request type' };
 
 /**
  * PAGES.endpointDetail(endpointId) — @see ../../../../features/endpoints/EndpointDetailView.tsx

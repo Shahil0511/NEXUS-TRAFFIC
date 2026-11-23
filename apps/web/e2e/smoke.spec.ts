@@ -136,7 +136,7 @@ test('Live: an ingested call appears within seconds (socket via the gateway)', a
 
 test('Apps: an admin sees the registered app and the admin actions', async ({ page }) => {
   await page.goto(`${BASE_URL}/apps`);
-  await expect(page.getByRole('heading', { level: 1, name: 'Apps' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'App keys' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Register app' }).first()).toBeVisible();
   await expect(page.getByText(SMOKE_APP).first()).toBeVisible();
 });

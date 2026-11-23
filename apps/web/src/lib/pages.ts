@@ -43,12 +43,16 @@ export const PAGES = {
   /** @see ../app/(dashboard)/tools/[app]/[toolId]/page.tsx (app slug + opaque toolId) */
   toolDetail: (app: string, toolId: string) =>
     `/tools/${encodeURIComponent(app)}/${encodeURIComponent(toolId)}`,
-  /** @see ../app/(dashboard)/geography/page.tsx */
+  /** @see ../app/(dashboard)/devices/page.tsx (tabs `?tab=devices|places`, `?share=`) */
+  devices: () => '/devices',
+  /** @see ../app/(dashboard)/geography/page.tsx (old link; the places content on its own) */
   geography: () => '/geography',
   /** @see ../app/(dashboard)/integration/page.tsx */
   integration: () => '/integration',
   /** @see ../app/(dashboard)/apps/page.tsx */
   apps: () => '/apps',
+  /** @see ../app/(dashboard)/privacy/page.tsx (admins only; `?userKey=` narrows the access log) */
+  privacy: () => '/privacy',
   /** @see ../app/no-access/page.tsx */
   noAccess: () => '/no-access',
 } as const;

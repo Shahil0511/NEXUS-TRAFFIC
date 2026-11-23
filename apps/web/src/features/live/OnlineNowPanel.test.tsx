@@ -89,7 +89,7 @@ describe('OnlineNowPanel', () => {
     expect(rows).toHaveLength(2);
 
     const first = within(rows[0]!);
-    expect(first.getByRole('link', { name: 'buyer@libas.in' }).getAttribute('href')).toBe(
+    expect((await first.findByRole('link', { name: 'buyer@libas.in' })).getAttribute('href')).toBe(
       `/users/${USER_KEY}`,
     );
     expect(first.getByRole('link', { name: 'ebo-sales' }).getAttribute('href')).toBe(

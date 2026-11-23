@@ -13,6 +13,7 @@
 | **endpoint** | One (app, HTTP method, route template). Identified by an opaque **endpointId** (UUID v5). | `toEndpointId()` |
 | **route template** | The parameterised path, e.g. `/ebo-sales/api/stores/:id` (`:name` = one segment, trailing `:name*` = catch-all). Browser templates are kept only when they fit the path. | `isPlausibleRouteTemplate()` |
 | **session** | One browser tab's visit: all browser events with the same (app, sessionId). Idle > 30 min → new session. | |
+| **visit** | The on-screen word for a **session** (nav "Visits", the person page's "View visits", the Visits KPI and column). Counts browser sessions only: a person or device seen only through API calls has 0 visits. | `PAGES.journeys()`, `ROUTES.journeys.sessions` |
 | **journey** | The ordered list of a session's page views, tool uses and correlated API calls. | `ROUTES.journeys.*` |
 | **identity source** | How much we trust the user on an event: `sso_cookie` > `app_attested` > `client_claimed` > `anonymous`. | `IDENTITY_SOURCE_VALUES` |
 | **user key** | Opaque HMAC of a user's email, used in URLs instead of the email. | `user_key` column |
@@ -22,7 +23,15 @@
 | **enricher** | A small class that adds/cleans one aspect of an event (geo, UA, identity…). | `apps/api/src/enrichment/` |
 | **tick** | A live update with the current minute's cumulative counters, every 2 s. | `SOCKET_EVENTS.trafficTick` |
 | **scope** | What a live subscription covers: `all` or `app:<slug>`. | `liveScopeKey()` |
-| **viewer / admin** | Dashboard roles. Admins manage apps/keys and see IPs. | `DASHBOARD_ADMIN_EMAILS` |
+| **viewer / admin** | Dashboard roles. Admins manage apps/keys, see IPs and are the only ones who may read person-level data (ADR 0015). | `DASHBOARD_ADMIN_EMAILS` |
+| **person-level read** | Anything about ONE person: the person page (`PERSON_ROUTE_LEAVES`) or a list narrowed by `?userKey=` (`PERSON_FILTERED_ROUTE_LEAVES`). Admin-only, recorded in the person access log. | `packages/shared/src/routes.ts` |
+| **person page (Person 360)** | The admin-only page of ONE verified user over the global range: identity card + tabs Summary, Daily activity, Devices, Activity (`?tab=`). ADR 0014 / 0015. | `PAGES.userDetail()`, `apps/web/src/features/users/UserDetailView.tsx` |
+| **daily activity** | One row per IST day for one person: first activity, last activity (today "so far", `inProgress`), active time, page views, requests, failed, visits. Idle days are absent. | `ROUTES.users.daily`, `UserDayActivityDto` |
+| **active time (tab visible)** | Σ `visible_ms` of a day's `page_time` rows: time a page of the app was open in a visible tab, not time spent working. | `listUserDailyActivity` |
+| **access log (person access log)** | Append-only record of which admin opened which part (surface) of whose person page, and when; the person named by a masked email. Coalesced: one row per admin + person + surface per 10 min. Read on Privacy & access. ADR 0015. | table `person_access_log`, `ROUTES.privacy.accessLog`, `PERSON_ACCESS_SURFACE_VALUES` |
+| **surface** | Which part of a person-level read an access-log row is about (`person_profile`, `person_daily`, `person_visits`, …). | `PERSON_ACCESS_SURFACE_VALUES` |
+| **today (range preset)** | The current IST calendar day, 00:00 to the next 00:00; compared with the same elapsed span of yesterday (`elapsedTo`). ADR 0014. | `RANGE_VALUES`, `resolveTimeWindow()` |
+| **page end** | The footer under every page: "End of <page>", or "Still loading…" / "More rows above" when that is the truth. ADR 0014. | `apps/web/src/components/PageEnd.tsx` |
 | **dry run** | `?dryRun=1` on server ingest: validate everything, write nothing. | |
 | **environment** | Which deployment an event came from: `prod`, `staging` or `dev`. Sent per batch (lenient), loopback browser origins are always `dev`, absent = `prod`. Dashboards filter on it (`?env=`, default prod); Live is prod only. ADR 0008. | `ENVIRONMENT_VALUES`, `resolveEnvironment()` |
 | **release** | The sender's build label (git sha, version) on server events and, since Phase A, on browser batches. Feeds release coverage. | `release` columns |

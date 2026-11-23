@@ -26,7 +26,7 @@ describe('MobileNav', () => {
     for (const item of NAV_ITEMS) {
       expect(within(nav).getByRole('link', { name: new RegExp(`^${item.label}`) })).toBeVisible();
     }
-    const errors = within(nav).getByRole('link', { name: /^Errors/ });
+    const errors = within(nav).getByRole('link', { name: /^Problems/ });
     expect(errors).toHaveAttribute('aria-current', 'page');
     expect(errors).toHaveAttribute('href', `${PAGES.errors()}?app=ebo-sales&range=7d`);
   });
@@ -54,7 +54,7 @@ describe('MobileNav', () => {
 
       await user.click(screen.getByRole('button', { name: 'Open navigation' }));
       const sheet = await screen.findByRole('dialog');
-      await user.click(within(sheet).getByRole('link', { name: /^Users/ }));
+      await user.click(within(sheet).getByRole('link', { name: /^People/ }));
 
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     } finally {
@@ -62,12 +62,19 @@ describe('MobileNav', () => {
     }
   });
 
-  it('draws section labels in full muted-foreground (no opacity: 4.5:1 on the sidebar)', () => {
+  it('draws section labels in full sidebar-muted (no opacity: 4.5:1 on the plum sidebar)', () => {
     renderWithProviders(<DashboardNav variant="full" />);
-    for (const section of NAV_SECTIONS) {
+    for (const section of NAV_SECTIONS.filter((candidate) => candidate.label !== '')) {
       const label = screen.getByText(section.label, { selector: 'p' });
-      expect(label).toHaveClass('text-muted-foreground');
-      expect(label.className).not.toMatch(/text-muted-foreground\//);
+      expect(label).toHaveClass('text-sidebar-muted');
+      expect(label.className).not.toMatch(/text-sidebar-muted\//);
+    }
+  });
+
+  it('gives every item a purpose sentence in English and Hinglish', () => {
+    for (const item of NAV_SECTIONS.flatMap((section) => section.items)) {
+      expect(item.question.length).toBeGreaterThan(10);
+      expect(item.questionHi.length).toBeGreaterThan(10);
     }
   });
 });

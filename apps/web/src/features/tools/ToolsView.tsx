@@ -146,7 +146,7 @@ export function ToolsView() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Pages & Tools"
+        title="Pages & features"
         description={
           tools.data
             ? formatWindowCaption(tools.data.window)

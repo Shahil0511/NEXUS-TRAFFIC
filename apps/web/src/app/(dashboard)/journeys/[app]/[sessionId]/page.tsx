@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { SessionDetailView } from '@/features/journeys/SessionDetailView';
 
-export const metadata: Metadata = { title: 'Session' };
+export const metadata: Metadata = { title: 'Visit' };
 
 /**
  * PAGES.sessionDetail(app, sessionId) — @see ../../../../../features/journeys/SessionDetailView.tsx

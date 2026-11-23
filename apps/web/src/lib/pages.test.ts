@@ -4,7 +4,7 @@ import path from 'node:path';
 import { MAX_COUNT_RANGE_MS, MAX_PERCENTILE_RANGE_MS } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { isNavItemActive, NAV_ITEMS, pageFiltersFor } from './nav';
+import { isNavItemActive, NAV_ITEMS, NAV_SECTIONS, pageFiltersFor } from './nav';
 import { PAGES, withQuery } from './pages';
 
 const PAGES_FILE = path.join(__dirname, 'pages.ts');
@@ -14,6 +14,8 @@ describe('PAGES', () => {
     expect(PAGES.overview()).toBe('/');
     expect(PAGES.endpoints()).toBe('/endpoints');
     expect(PAGES.noAccess()).toBe('/no-access');
+    expect(PAGES.devices()).toBe('/devices');
+    expect(PAGES.geography()).toBe('/geography');
   });
 
   it('encodes dynamic segments', () => {
@@ -60,6 +62,39 @@ describe('NAV_ITEMS', () => {
     expect(isNavItemActive(byId('endpoints'), '/endpointsX')).toBe(false);
     expect(isNavItemActive(byId('pages'), '/tools')).toBe(true);
   });
+
+  it('points "Devices & places" at /devices and keeps the old /geography link highlighted', () => {
+    const devices = NAV_ITEMS.find((item) => item.id === 'devices')!;
+    expect(devices.href).toBe(PAGES.devices());
+    expect(devices.alsoActiveOn).toEqual([PAGES.geography()]);
+    expect(isNavItemActive(devices, PAGES.devices())).toBe(true);
+    expect(isNavItemActive(devices, PAGES.geography())).toBe(true);
+    expect(isNavItemActive(devices, '/devicesX')).toBe(false);
+  });
+});
+
+describe('the Privacy & access nav item', () => {
+  it('sits in the Setup group, links to PAGES.privacy() and states its purpose', () => {
+    const setup = NAV_SECTIONS.find((section) => section.label === 'Setup')!;
+    const privacy = setup.items.find((item) => item.id === 'privacy')!;
+    expect(PAGES.privacy()).toBe('/privacy');
+    expect(privacy).toMatchObject({
+      label: 'Privacy & access',
+      href: PAGES.privacy(),
+      question: 'Who opened whose person page, and when.',
+      questionHi: 'Kisne kiska page kab khola.',
+    });
+    expect(isNavItemActive(privacy, '/privacy')).toBe(true);
+    expect(isNavItemActive(privacy, '/privacyX')).toBe(false);
+  });
+
+  it('reads no global filter (the log is not windowed)', () => {
+    expect(pageFiltersFor('/privacy')).toMatchObject({
+      app: false,
+      range: false,
+      environment: false,
+    });
+  });
 });
 
 describe('pageFiltersFor', () => {
@@ -80,6 +115,13 @@ describe('pageFiltersFor', () => {
     expect(pageFiltersFor('/apps')).toMatchObject({ app: false, range: false, environment: false });
     expect(pageFiltersFor('/integration')).toMatchObject({ environment: false });
     expect(pageFiltersFor('/geography').environment).toBe(true);
+    expect(pageFiltersFor('/devices')).toEqual({
+      app: true,
+      range: true,
+      environment: true,
+      maxRangeMs: MAX_COUNT_RANGE_MS,
+    });
+    expect(pageFiltersFor('/geography').maxRangeMs).toBe(MAX_COUNT_RANGE_MS);
   });
 
   it('does not confuse /applications with /apps', () => {

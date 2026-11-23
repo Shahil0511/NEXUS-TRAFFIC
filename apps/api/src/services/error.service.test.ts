@@ -8,12 +8,17 @@ import {
   endpointStatsRow,
   PLAIN_VIEWER,
 } from '../../test/fixtures/analytics-rows';
-import { FakeApiRequestQueries, FakeAppSlugs } from '../../test/fixtures/fake-query-repositories';
+import {
+  FakeApiRequestQueries,
+  FakeAppSlugs,
+  FakePersonAccess,
+} from '../../test/fixtures/fake-query-repositories';
 import { encodeKeysetCursor } from '../db/sql';
 import { BadRequestError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+import type { PersonAccessRecorder } from './person-access.recorder';
 import { ErrorService } from './error.service';
 
 const NOW = new Date('2026-10-01T10:00:00.000Z');
@@ -23,12 +28,14 @@ const ID_3 = 'aaaaaaaa-0000-4000-8000-000000000003';
 
 function build() {
   const requests = new FakeApiRequestQueries();
+  const access = new FakePersonAccess();
   const service = new ErrorService(
     requests as unknown as ApiRequestQueryRepository,
     new FakeAppSlugs() as unknown as AppSlugResolver,
     new FixedClock(NOW),
+    access as unknown as PersonAccessRecorder,
   );
-  return { service, requests };
+  return { service, requests, access };
 }
 
 /** A failed-request row at a µs-precision time (as the repository SELECTs it). */
@@ -63,7 +70,7 @@ describe('ErrorService.summary', () => {
       ],
       byErrorCode: [],
     };
-    const dto = await service.summary({ range: '6h' });
+    const dto = await service.summary({ range: '6h' }, ADMIN_VIEWER);
     expect(dto).toMatchObject({ total: 9, errors4xx: 6, errors5xx: 3 });
     expect(dto.byStatus).toEqual([
       { status: 404, count: 6 },
@@ -147,7 +154,7 @@ describe('ErrorService (one user)', () => {
       ],
       byErrorCode: [],
     };
-    const dto = await service.summary({ range: '24h', userKey: key });
+    const dto = await service.summary({ range: '24h', userKey: key }, ADMIN_VIEWER);
     expect(requests.argsOf('summarizeErrors')[0]?.[0]).toMatchObject({
       userKey: Buffer.from(key, 'hex'),
     });
@@ -155,6 +162,21 @@ describe('ErrorService (one user)', () => {
     expect(dto.topAffectedUsers).toEqual([
       { userKey: key, email: 'a@libas.in', count: 4, lastSeenAt: NOW.toISOString() },
     ]);
+  });
+
+  it('records the summary and the list narrowed to one user as person_failures', async () => {
+    const { service, access } = build();
+    const key = 'ab'.repeat(32);
+    await service.summary({ range: '24h' }, ADMIN_VIEWER);
+    await service.list(listQuery(), ADMIN_VIEWER);
+    expect(access.accesses).toEqual([]);
+    await service.summary({ range: '24h', userKey: key }, ADMIN_VIEWER);
+    await service.list(listQuery({ userKey: key }), ADMIN_VIEWER);
+    expect(access.accesses.map((item) => item.surface)).toEqual([
+      'person_failures',
+      'person_failures',
+    ]);
+    expect(access.accesses[0]?.subjectUserKey.equals(Buffer.from(key, 'hex'))).toBe(true);
   });
 });
 
@@ -168,7 +190,7 @@ describe('ErrorService (error codes)', () => {
         { error_code: null, count: 3, routes: 1 },
       ],
     };
-    const dto = await service.summary({ range: '24h' });
+    const dto = await service.summary({ range: '24h' }, ADMIN_VIEWER);
     expect(dto.byErrorCode).toEqual([
       { errorCode: 'QUERY_TIMEOUT', count: 7, routes: 2 },
       { errorCode: null, count: 3, routes: 1 },
@@ -177,9 +199,9 @@ describe('ErrorService (error codes)', () => {
 
   it('passes errorCode through to the summary AND the list (absent = every code)', async () => {
     const { service, requests } = build();
-    await service.summary({ range: '24h', errorCode: 'SERVICE_UNAVAILABLE' });
+    await service.summary({ range: '24h', errorCode: 'SERVICE_UNAVAILABLE' }, ADMIN_VIEWER);
     await service.list(listQuery({ errorCode: 'SERVICE_UNAVAILABLE' }), ADMIN_VIEWER);
-    await service.summary({ range: '24h' });
+    await service.summary({ range: '24h' }, ADMIN_VIEWER);
     expect(requests.argsOf('summarizeErrors')[0]?.[0]).toMatchObject({
       errorCode: 'SERVICE_UNAVAILABLE',
     });

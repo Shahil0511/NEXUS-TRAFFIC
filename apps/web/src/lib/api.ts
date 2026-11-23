@@ -59,6 +59,8 @@ import {
   type PageListQuery,
   type PageStatsDto,
   type PathParams,
+  type PersonAccessEntryDto,
+  type PrivacyAccessLogQuery,
   type RouteDescriptor,
   type SessionDetailDto,
   type SessionListQuery,
@@ -75,6 +77,10 @@ import {
   type UpdateSdkConfigBody,
   type UserActivityDto,
   type UserActivityQuery,
+  type UserDailyActivityDto,
+  type UserDailyQuery,
+  type UserDevicesDto,
+  type UserDevicesQuery,
   type UserListQuery,
   type UserProfileDto,
   type UserProfileQuery,
@@ -257,6 +263,16 @@ export const api = {
         ...o,
         params: { userKey },
       }),
+    devices: (userKey: string, q: UserDevicesQuery, o?: CallOptions) =>
+      request<UserDevicesDto, typeof ROUTES.users.devices>(ROUTES.users.devices, q, {
+        ...o,
+        params: { userKey },
+      }),
+    daily: (userKey: string, q: UserDailyQuery, o?: CallOptions) =>
+      request<UserDailyActivityDto, typeof ROUTES.users.daily>(ROUTES.users.daily, q, {
+        ...o,
+        params: { userKey },
+      }),
   },
   journeys: {
     sessions: (q: SessionListQuery, o?: CallOptions) =>
@@ -303,5 +319,10 @@ export const api = {
   integration: {
     health: (o?: CallOptions) =>
       request<IntegrationHealthDto>(ROUTES.integration.health, undefined, o),
+  },
+  privacy: {
+    /** Admin-only: who opened whose person page, newest first (keyset-paged). */
+    accessLog: (q: PrivacyAccessLogQuery, o?: CallOptions) =>
+      request<CursorPage<PersonAccessEntryDto>>(ROUTES.privacy.accessLog, q, o),
   },
 } as const;

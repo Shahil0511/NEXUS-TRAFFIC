@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 
 import { UserDetailView } from '@/features/users/UserDetailView';
 
-export const metadata: Metadata = { title: 'User' };
+export const metadata: Metadata = { title: 'Person' };
 
 /**
  * PAGES.userDetail(userKey) — @see ../../../../features/users/UserDetailView.tsx

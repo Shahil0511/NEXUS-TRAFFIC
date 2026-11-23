@@ -3,12 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_VALUE,
   formatBucket,
+  formatClockOffset,
+  formatClockTime,
   formatCompact,
   formatDateTime,
+  formatDay,
   formatDeltaPct,
   formatCountry,
   formatDuration,
   formatElapsed,
+  formatHoursMinutes,
   formatInteger,
   formatPercent,
   formatWindowCaption,
@@ -83,5 +87,30 @@ describe('format helpers', () => {
     expect(formatCountry('ae')).toBe('United Arab Emirates');
     expect(formatCountry(null)).toBe(UNKNOWN_COUNTRY);
     expect(formatCountry('EU-X')).toBe('EU-X');
+  });
+});
+
+describe('person-page time formats', () => {
+  it('formats durations as hours and minutes ("3 h 12 min")', () => {
+    expect(formatHoursMinutes(3 * 3_600_000 + 12 * 60_000)).toBe('3 h 12 min');
+    expect(formatHoursMinutes(45 * 60_000)).toBe('45 min');
+    expect(formatHoursMinutes(2 * 3_600_000)).toBe('2 h');
+    expect(formatHoursMinutes(89_990)).toBe('1 min');
+    expect(formatHoursMinutes(59 * 60_000 + 40_000)).toBe('1 h');
+    expect(formatHoursMinutes(20_000)).toBe('< 1 min');
+    expect(formatHoursMinutes(0)).toBe('0 min');
+    expect(formatHoursMinutes(null)).toBe(EMPTY_VALUE);
+    expect(formatHoursMinutes(-1)).toBe(EMPTY_VALUE);
+  });
+
+  it('prints IST clock times, offsets after midnight and calendar days', () => {
+    // 03:40 UTC = 09:10 IST
+    expect(formatClockTime('2026-10-01T03:40:00Z')).toBe('09:10');
+    expect(formatClockTime(null)).toBe(EMPTY_VALUE);
+    expect(formatClockOffset(9 * 3_600_000 + 10 * 60_000 + 59_000)).toBe('09:10');
+    expect(formatClockOffset(0)).toBe('00:00');
+    expect(formatClockOffset(undefined)).toBe(EMPTY_VALUE);
+    // IST midnight of 1 Oct is 30 Sep 18:30 UTC.
+    expect(formatDay('2026-09-30T18:30:00.000Z')).toMatch(/Thu.*1 Oct.*2026/);
   });
 });

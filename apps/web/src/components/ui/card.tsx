@@ -8,7 +8,7 @@ export function Card({ className, ...props }: ComponentProps<'section'>) {
     <section
       data-slot="card"
       className={cn(
-        'flex flex-col rounded-xl bg-card text-sm text-card-foreground ring-1 ring-foreground/[0.07] dark:ring-white/[0.07]',
+        'flex flex-col rounded-2xl bg-card text-sm text-card-foreground shadow-[0_1px_2px_rgba(30,20,32,0.04)] ring-1 ring-foreground/[0.07] transition-shadow duration-300 hover:shadow-raised dark:ring-white/[0.07]',
         className,
       )}
       {...props}
@@ -30,7 +30,7 @@ export function CardTitle({ className, ...props }: ComponentProps<'h2'>) {
   return (
     <h2
       data-slot="card-title"
-      className={cn('text-sm leading-snug font-semibold tracking-tight', className)}
+      className={cn('text-base leading-snug font-bold tracking-tight', className)}
       {...props}
     />
   );

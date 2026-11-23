@@ -27,10 +27,10 @@ describe('Breadcrumbs', () => {
     expect(within(nav).queryByRole('link', { name: 's***@libas.in' })).toBeNull();
   });
 
-  it('starts app-scoped trails at Applications › <app>, without the app filter in the hrefs', () => {
+  it('starts app-scoped trails at Apps › <app>, without the app filter in the hrefs', () => {
     const crumbs = applicationCrumbs('ebo-sales', { app: 'ebo-sales', range: '7d' });
     expect(crumbs).toEqual([
-      { label: 'Applications', href: '/applications?range=7d' },
+      { label: 'Apps', href: '/applications?range=7d' },
       { label: 'ebo-sales', href: '/applications/ebo-sales?range=7d' },
     ]);
   });

@@ -10,10 +10,12 @@ import type { CursorPage } from '@nexus/shared';
 
 import { decodeKeysetCursor } from '../db/sql';
 import { BadRequestError } from '../errors/app-error';
-import type { EventKeyset } from './filters';
+import type { AccessLogKeyset, EventKeyset } from './filters';
 
 /** event_id is a uuid column: a tampered cursor must fail as 400 here, not as a SQL cast error. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** person_access_log.id is a bigint identity (1, 2, …); at most 15 digits stays an exact JS number. */
+const ACCESS_LOG_ID_PATTERN = /^[1-9]\d{0,14}$/;
 
 /** How many rows to request for a page of `limit` items. */
 export function pageFetchSize(limit: number): number {
@@ -46,4 +48,18 @@ export function parseKeysetCursor(cursor: string | undefined): EventKeyset | nul
   const keyset = decodeKeysetCursor(cursor);
   if (!keyset || !UUID_PATTERN.test(keyset.eventId)) throw new BadRequestError('Invalid cursor');
   return keyset;
+}
+
+/**
+ * Keyset cursor of the person access log → position, or null for the first page. Same encoding as
+ * the event lists (encodeKeysetCursor) with the row id in place of the event id; a cursor that
+ * cannot be decoded is a 400, like parseKeysetCursor.
+ */
+export function parseAccessLogCursor(cursor: string | undefined): AccessLogKeyset | null {
+  if (cursor === undefined) return null;
+  const keyset = decodeKeysetCursor(cursor);
+  if (!keyset || !ACCESS_LOG_ID_PATTERN.test(keyset.eventId)) {
+    throw new BadRequestError('Invalid cursor');
+  }
+  return { viewedAt: keyset.occurredAt, id: Number(keyset.eventId) };
 }

@@ -26,6 +26,7 @@ import {
   pageDetailParamsSchema,
   pageDetailQuerySchema,
   pageListQuerySchema,
+  privacyAccessLogQuerySchema,
   ROUTES,
   sdkConfigRequestSchema,
   serverIngestEnvelopeSchema,
@@ -39,6 +40,8 @@ import {
   updateAppBodySchema,
   updateSdkConfigBodySchema,
   userActivityQuerySchema,
+  userDailyQuerySchema,
+  userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
   userProfileQuerySchema,
@@ -213,16 +216,19 @@ export function buildRouter(c: Container): Router {
   );
 
   // ─── Dashboard: errors ────────────────────────────────────────────────────
+  // ?userKey= narrows them to one person (PERSON_FILTERED_ROUTE_LEAVES): then admins only.
   r.get(
     ROUTES.errors.summary.path,
     ...dashboard,
     validateQuery(errorSummaryQuerySchema),
+    mw.requireAdminForUserKey,
     ctl.errors.summary,
   );
   r.get(
     ROUTES.errors.list.path,
     ...dashboard,
     validateQuery(errorListQuerySchema),
+    mw.requireAdminForUserKey,
     ctl.errors.list,
   );
 
@@ -243,26 +249,43 @@ export function buildRouter(c: Container): Router {
     validateBody(userSearchBodySchema),
     ctl.users.search,
   );
+  // Person-level leaves (PERSON_ROUTE_LEAVES): admins only; each answer is access-logged.
   r.get(
     ROUTES.users.profile.path,
-    ...dashboard,
+    ...admin,
     validateParams(userKeyParamsSchema),
     validateQuery(userProfileQuerySchema),
     ctl.users.profile,
   );
   r.get(
     ROUTES.users.timeline.path,
-    ...dashboard,
+    ...admin,
     validateParams(userKeyParamsSchema),
     validateQuery(userTimelineQuerySchema),
     ctl.users.timeline,
   );
+  r.get(
+    ROUTES.users.devices.path,
+    ...admin,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userDevicesQuerySchema),
+    ctl.users.devices,
+  );
+  r.get(
+    ROUTES.users.daily.path,
+    ...admin,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userDailyQuerySchema),
+    ctl.users.daily,
+  );
 
   // ─── Dashboard: journeys ──────────────────────────────────────────────────
+  // ?userKey= narrows the list to one person (PERSON_FILTERED_ROUTE_LEAVES): then admins only.
   r.get(
     ROUTES.journeys.sessions.path,
     ...dashboard,
     validateQuery(sessionListQuerySchema),
+    mw.requireAdminForUserKey,
     ctl.journeys.sessions,
   );
   r.get(
@@ -313,15 +336,25 @@ export function buildRouter(c: Container): Router {
     validateQuery(liveSnapshotQuerySchema),
     ctl.live.snapshot,
   );
+  // ?userKey= = the person page's "online now" badge (PERSON_FILTERED_ROUTE_LEAVES): admins only.
   r.get(
     ROUTES.live.online.path,
     ...dashboard,
     validateQuery(liveOnlineQuerySchema),
+    mw.requireAdminForUserKey,
     ctl.live.online,
   );
 
   // ─── Dashboard: integration health ────────────────────────────────────────
   r.get(ROUTES.integration.health.path, ...dashboard, ctl.integration.health);
+
+  // ─── Dashboard: privacy & access (admins only) ────────────────────────────
+  r.get(
+    ROUTES.privacy.accessLog.path,
+    ...admin,
+    validateQuery(privacyAccessLogQuerySchema),
+    ctl.privacy.accessLog,
+  );
 
   return r;
 }

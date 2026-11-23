@@ -8,7 +8,7 @@
  * steps still have to add. When a step registers a leaf, it MUST remove it from PENDING_ROUTE_LEAVES
  * (packages/shared/src/routes.ts) and add its api.* function in apps/web/src/lib/api.ts.
  */
-import { listRoutes, PENDING_ROUTE_LEAVES, type RouteDescriptor } from '@nexus/shared';
+import { listRoutes, PENDING_ROUTE_LEAVES, ROUTES, type RouteDescriptor } from '@nexus/shared';
 import type { RequestHandler, Router } from 'express';
 import { describe, expect, it } from 'vitest';
 
@@ -129,6 +129,29 @@ describe('ROUTES ↔ buildRouter', () => {
       expect(regs.filter((reg) => leaf && sameRoute(reg, leaf.route))).toEqual([]);
     },
   );
+
+  it('registers every literal /v1/users/<word> leaf BEFORE users.profile (/:userKey would shadow it)', () => {
+    const indexOf = (route: RouteDescriptor) => regs.findIndex((reg) => sameRoute(reg, route));
+    const profileAt = indexOf(ROUTES.users.profile);
+    const literal = Object.values(ROUTES.users).filter((route) =>
+      /^\/v1\/users\/[a-z]+$/.test(route.path),
+    );
+    expect(literal.map((route) => route.path).sort()).toEqual([
+      '/v1/users/activity',
+      '/v1/users/search',
+    ]);
+    for (const route of literal) expect(indexOf(route)).toBeLessThan(profileAt);
+  });
+
+  it('serves the person leaves (devices, daily) under /:userKey with the params validated', () => {
+    for (const route of [ROUTES.users.devices, ROUTES.users.daily]) {
+      const [match] = regs.filter((reg) => sameRoute(reg, route));
+      expect(match?.path).toMatch(/^\/v1\/users\/:userKey\/[a-z]+$/);
+      // ...admin (ssoAuth, dashboardCsrf, requireAdmin) + validateParams + validateQuery + the
+      // controller method.
+      expect(match?.handlers).toHaveLength(6);
+    }
+  });
 
   it('registers nothing that is not a ROUTES leaf', () => {
     const strays = regs.filter((reg) => !leaves.some((leaf) => sameRoute(reg, leaf.route)));

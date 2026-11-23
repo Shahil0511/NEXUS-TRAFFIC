@@ -45,9 +45,9 @@ describe('CommandPalette', () => {
 
     await user.keyboard('{Control>}k{/Control}');
     const input = await screen.findByRole('combobox', { name: 'Search' });
-    // "failed" is only in the Errors page's description, so it is the first (active) result.
+    // "failed" is only in the Problems (errors) page's description, so it is the first (active) result.
     await user.type(input, 'failed');
-    expect(screen.getByRole('option', { name: /^Errors/ })).toHaveAttribute(
+    expect(screen.getByRole('option', { name: /^Problems/ })).toHaveAttribute(
       'aria-selected',
       'true',
     );
@@ -81,5 +81,25 @@ describe('CommandPalette', () => {
 
     await user.click(option);
     await waitFor(() => expect(push).toHaveBeenCalledWith(`/users/${USER_KEY}`));
+  });
+
+  it('offers no user results to a viewer who is not an admin (the person page refuses them)', async () => {
+    const bodies = useHandlers();
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () =>
+        HttpResponse.json({ email: 'viewer@libas.in', isAdmin: false }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CommandPalette />);
+
+    await user.click(screen.getByRole('button', { name: /Search pages, apps, users, routes/ }));
+    await user.type(await screen.findByRole('combobox', { name: 'Search' }), 'buyer');
+    const listbox = await screen.findByRole('listbox', { name: 'Results' });
+    await waitFor(() => expect(within(listbox).queryByText(/Searching/i)).not.toBeInTheDocument());
+    expect(
+      within(listbox).queryByRole('option', { name: /buyer@libas\.in/ }),
+    ).not.toBeInTheDocument();
+    expect(bodies).toEqual([]);
   });
 });

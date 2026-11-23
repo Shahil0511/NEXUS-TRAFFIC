@@ -12,8 +12,14 @@ export const PUBLIC_BASE_PATH = '/traffic';
 export const REPORTING_TIME_ZONE = 'Asia/Kolkata';
 /** Fixed offset of REPORTING_TIME_ZONE (India has no DST) — used as the date_bin origin. */
 export const REPORTING_UTC_OFFSET = '+05:30';
+/** REPORTING_UTC_OFFSET in milliseconds (IST calendar-day bounds, e.g. the `today` preset). */
+export const REPORTING_UTC_OFFSET_MS = 330 * 60_000;
 
-export const RANGE_VALUES = ['15m', '1h', '6h', '24h', '7d', '30d', '90d', 'custom'] as const;
+/**
+ * `today` is the current IST calendar day, 00:00 up to the next 00:00 (it ends in the future, so a
+ * chart shows the whole day); every other preset is a rolling window ending now.
+ */
+export const RANGE_VALUES = ['today', '15m', '1h', '6h', '24h', '7d', '30d', '90d', 'custom'] as const;
 export type RangePreset = (typeof RANGE_VALUES)[number];
 
 const MINUTE = 60_000;
@@ -21,6 +27,7 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 export const RANGE_DURATIONS_MS = {
+  today: DAY,
   '15m': 15 * MINUTE,
   '1h': HOUR,
   '6h': 6 * HOUR,

@@ -26,6 +26,25 @@ describe('isTrafficDrivenKey', () => {
     expect(isTrafficDrivenKey(qk.apps.list())).toBe(false);
     expect(isTrafficDrivenKey(qk.live.snapshot({}))).toBe(false);
   });
+
+  it('never refetches person-level reads in the background (each one is access-logged)', () => {
+    const key = 'ab'.repeat(32);
+    for (const personKey of [
+      qk.users.profile(key, { range: '24h' }),
+      qk.users.timeline(key, { range: '24h', limit: 50 }),
+      qk.users.devices(key, { range: '24h' }),
+      qk.users.daily(key, { range: '24h' }),
+      qk.journeys.sessions({ range: '24h', limit: 50, userKey: key }),
+      qk.privacy.accessLog({ limit: 50 }),
+    ]) {
+      expect(isTrafficDrivenKey(personKey), String(personKey[1])).toBe(false);
+    }
+    // The open lists still follow the traffic.
+    expect(
+      isTrafficDrivenKey(qk.users.list({ range: '24h', limit: 50, sort: 'lastSeen', dir: 'desc' })),
+    ).toBe(true);
+    expect(isTrafficDrivenKey(qk.journeys.sessions({ range: '24h', limit: 50 }))).toBe(true);
+  });
 });
 
 describe('createThrottle', () => {

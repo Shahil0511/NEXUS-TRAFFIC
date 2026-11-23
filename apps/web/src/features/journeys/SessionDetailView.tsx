@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { formatCountry, formatDateTime, formatDuration, formatInteger } from '@/lib/format';
 import { PAGES, withQuery } from '@/lib/pages';
 
@@ -37,7 +38,7 @@ const CLIENT_ERROR_MIN = 400;
 export function SessionDetailView({ app, sessionId }: { app: string; sessionId: string }) {
   const { filters: globalFilters } = useGlobalFilters();
   // The session belongs to ONE app: its slug (from the path) is the app scope of every link —
-  // a stale ?app=other must not send "Journeys", the profile or the replay links elsewhere.
+  // a stale ?app=other must not send "Visits", the profile or the replay links elsewhere.
   const filters = useMemo(() => ({ ...globalFilters, app }), [globalFilters, app]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const detail = useSessionDetail(app, sessionId, filters);
@@ -46,7 +47,7 @@ export function SessionDetailView({ app, sessionId }: { app: string; sessionId: 
     <Breadcrumbs
       items={[
         ...applicationCrumbs(app, linkQuery),
-        { label: 'Journeys', href: withQuery(PAGES.journeys(), linkQuery) },
+        { label: 'Visits', href: withQuery(PAGES.journeys(), linkQuery) },
         { label: title },
       ]}
     />
@@ -123,6 +124,8 @@ interface DetailContentProps {
 
 function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps) {
   const { summary, events } = detail;
+  // The person page is admin-only: nobody else gets a button that leads to a refusal.
+  const canOpenPerson = useCanOpenPersonPages();
   const apiCalls = events.filter((event) => event.kind === 'api');
   const failedCalls = apiCalls.filter(
     (event) => event.status !== null && event.status >= CLIENT_ERROR_MIN,
@@ -145,7 +148,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
           </span>
         }
         actions={
-          summary.userKey ? (
+          summary.userKey && canOpenPerson ? (
             <Button asChild variant="outline">
               <Link href={withQuery(PAGES.userDetail(summary.userKey), linkQuery)}>
                 <UserRound aria-hidden="true" /> User profile

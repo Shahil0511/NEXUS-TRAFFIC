@@ -150,6 +150,29 @@ export const METRIC_COPY = {
     short: 'Distinct verified users in the 30 days ending where the selected range ends.',
     long: 'Compare with weekly active users: close values mean most people use the apps every week.',
   },
+  // ─── One person, per day ─────────────────────────────────────────────────────
+  activeTime: {
+    label: 'Active time (tab visible)',
+    short:
+      'How long an app page was on screen in a browser tab in front, added up over the day (India time).',
+    long: 'A tab in the background or a minimised window adds nothing. API calls alone add no time.',
+  },
+  firstActivity: {
+    label: 'First activity',
+    short: 'The earliest recorded API call or browser event of the day, India time.',
+    long: 'It is the first thing the apps recorded, not a sign-in time.',
+  },
+  lastActivity: {
+    label: 'Last activity',
+    short: 'The latest recorded API call or browser event of the day, India time.',
+    long: 'It is the last thing the apps recorded, not a sign-out time.',
+  },
+  daysActive: {
+    label: 'Days active',
+    short:
+      'Calendar days (India time) in the selected range with at least one API call or browser event.',
+    long: 'Days without any activity are not listed and do not count in the averages.',
+  },
   // ─── Devices (browser) ──────────────────────────────────────────────────────
   devices: {
     label: 'Devices',

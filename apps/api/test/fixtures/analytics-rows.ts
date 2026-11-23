@@ -18,6 +18,9 @@ import type {
   ToolUsageRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserDayActivityRow,
+  UserDeviceRow,
+  UserLatestContextRow,
   UserSummaryRow,
 } from '../../src/domain/rows';
 
@@ -106,6 +109,56 @@ export function userSummaryRow(overrides: Partial<UserSummaryRow> = {}): UserSum
     failed_requests: 2,
     page_views: 5,
     sessions: 2,
+    apps: ['ebo-sales', 'hr-portal'],
+    ...overrides,
+  };
+}
+
+export function userDeviceRow(overrides: Partial<UserDeviceRow> = {}): UserDeviceRow {
+  return {
+    device: 'desktop',
+    browser: 'Chrome 126',
+    os: 'Windows 10',
+    first_seen_at: new Date('2026-10-01T08:00:00.000Z'),
+    last_seen_at: OCCURRED_AT,
+    page_views: 5,
+    requests: 12,
+    visits: 2,
+    apps: ['ebo-sales'],
+    ...overrides,
+  };
+}
+
+export function userLatestContextRow(
+  overrides: Partial<UserLatestContextRow> = {},
+): UserLatestContextRow {
+  return {
+    seen_at: OCCURRED_AT,
+    app_slug: 'ebo-sales',
+    ua_device: 'desktop',
+    ua_browser: 'Chrome 126',
+    ua_os: 'Windows 10',
+    client_tz: 'Asia/Kolkata',
+    client_lang: 'en-IN',
+    release: '2026.11.3',
+    ...overrides,
+  };
+}
+
+/** 1 Oct 2026 in IST: the day starts at 30 Sep 18:30 UTC. */
+export function userDayActivityRow(
+  overrides: Partial<UserDayActivityRow> = {},
+): UserDayActivityRow {
+  return {
+    day: new Date('2026-09-30T18:30:00.000Z'),
+    first_activity_at: new Date('2026-10-01T03:40:00.000Z'),
+    last_activity_at: OCCURRED_AT,
+    active_ms: 11_520_000,
+    page_views: 5,
+    requests: 12,
+    failed_requests: 2,
+    tool_uses: 3,
+    visits: 2,
     apps: ['ebo-sales', 'hr-portal'],
     ...overrides,
   };

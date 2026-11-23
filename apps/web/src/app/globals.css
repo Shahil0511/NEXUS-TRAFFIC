@@ -61,6 +61,13 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-hover-foreground: var(--sidebar-hover-foreground);
+  --color-sidebar-title: var(--sidebar-title);
+  --color-sidebar-indicator: var(--sidebar-indicator);
+  --font-heading: var(--font-rajdhani), var(--font-jakarta), ui-sans-serif, sans-serif;
+  --shadow-raised: var(--elevation-raised);
   --color-chart-requests: var(--chart-requests);
   --color-chart-4xx: var(--chart-4xx);
   --color-chart-5xx: var(--chart-5xx);
@@ -71,85 +78,98 @@
 }
 
 :root {
-  --background: #fafafa;
-  --foreground: #0d0c14;
+  --background: #faf6f9;
+  --foreground: #1e1420;
   --card: #ffffff;
-  --card-foreground: #0d0c14;
+  --card-foreground: #1e1420;
   --popover: #ffffff;
-  --popover-foreground: #0d0c14;
-  --primary: #7c3aed;
+  --popover-foreground: #1e1420;
+  --primary: #71006a;
   --primary-foreground: #ffffff;
-  --secondary: #f5f3ff;
-  --secondary-foreground: #0d0c14;
-  --muted: #f4f3f8;
-  --muted-foreground: #5c5a6e;
-  --accent: #f0eaff;
-  --accent-foreground: #6d28d9;
+  --secondary: #f8eef6;
+  --secondary-foreground: #1e1420;
+  --muted: #f3ecf2;
+  --muted-foreground: #5c4d5c;
+  --accent: #f8e8f6;
+  --accent-foreground: #71006a;
   /* Status text hues: >= 4.5:1 on card/background AND on their own 12 % tint (status pills). */
-  --destructive: #c81e1e;
+  --destructive: #b91c1c;
   --success: #137333;
   --warning: #a14a07;
   /* 1xx/3xx (informational, redirect): blue, so 2xx/3xx/4xx/5xx are four distinct hues. */
   --info: #1d4ed8;
   /* Inline entity links (hover/focus colour): 7.1:1 on card, 6.8:1 on background. */
-  --link: #6d28d9;
-  --border: rgba(13, 12, 20, 0.08);
-  --input: rgba(13, 12, 20, 0.12);
-  --ring: #7c3aed;
+  --link: #8a1180;
+  --border: rgba(113, 0, 106, 0.1);
+  --input: rgba(113, 0, 106, 0.18);
+  --ring: #71006a;
   --radius: 0.625rem;
+  /* Light theme: a white sidebar like the page (the plum rail is the dark theme's). */
   --sidebar: #ffffff;
-  --sidebar-foreground: #3d3b4a;
-  --sidebar-accent: #f0eaff;
-  --sidebar-accent-foreground: #6d28d9;
-  --sidebar-border: rgba(13, 12, 20, 0.08);
+  --sidebar-foreground: #3d2a3c;
+  --sidebar-accent: #f8e8f6;
+  --sidebar-accent-foreground: #71006a;
+  --sidebar-border: rgba(113, 0, 106, 0.1);
 
   /* HTTP verbs (MethodBadge): text colour; the pill fills with the same hue at 10 %. */
   --method-get: #0369a1;
-  --method-post: #047857;
+  --method-post: #046c4e;
   --method-put: #a14a07;
   --method-patch: #6d28d9;
   --method-delete: #be123c;
 
   /* Charts: series identity + reserved status hues (4xx = warning, 5xx = critical). */
-  --chart-requests: #7c3aed;
+  --chart-requests: #8a1180;
   /*
    * 4xx 3.4:1 on card (was #eda100 at 2.2:1, under the 3:1 floor for graphical marks); 5xx
    * deepened with it so the stacked 4xx/5xx bars keep a 1.9:1 lightness step (CVD-safe).
    */
   --chart-4xx: #c27c00;
   --chart-5xx: #b91c1c;
-  --chart-grid: rgba(13, 12, 20, 0.07);
-  --chart-axis: #5c5a6e;
-  --chart-cursor: rgba(124, 58, 237, 0.08);
+  --chart-grid: rgba(113, 0, 106, 0.07);
+  --chart-axis: #5c4d5c;
+  --chart-cursor: rgba(113, 0, 106, 0.08);
+  --sidebar-muted: #6e5a6c;
+  --sidebar-hover: #fbf1f9;
+  --sidebar-hover-foreground: #71006a;
+  --sidebar-title: #71006a;
+  --sidebar-indicator: #a3159a;
+  --sidebar-glow: rgba(192, 38, 181, 0.07);
+  /* Cursor spotlight (CursorSpotlight): the soft purple light under the pointer on cards. */
+  --spot-inner: rgba(192, 38, 181, 0.1);
+  --spot-outer: rgba(113, 0, 106, 0.04);
+  --hero-from: rgba(113, 0, 106, 0.1);
+  --hero-to: rgba(192, 38, 181, 0.04);
+  --elevation-raised: 0 10px 30px -12px rgba(113, 0, 106, 0.18), 0 2px 6px -2px rgba(30, 20, 32, 0.06);
 }
 
 .dark {
-  --background: #060608;
-  --foreground: #f1f0f5;
-  --card: #111116;
-  --card-foreground: #f1f0f5;
-  --popover: #0e0e12;
-  --popover-foreground: #f1f0f5;
-  --primary: #7c3aed;
-  --primary-foreground: #ffffff;
-  --secondary: #16161d;
-  --secondary-foreground: #f1f0f5;
-  --muted: #16161d;
-  --muted-foreground: #8b8a99;
-  --accent: #1c1430;
-  --accent-foreground: #c084fc;
+  --background: #0f0a11;
+  --foreground: #f6ecf4;
+  --card: #1a121e;
+  --card-foreground: #f6ecf4;
+  --popover: #160f19;
+  --popover-foreground: #f6ecf4;
+  --primary: #e58ad9;
+  --primary-foreground: #120b14;
+  --secondary: #241a29;
+  --secondary-foreground: #f6ecf4;
+  --muted: #241a29;
+  --muted-foreground: #b8a3b5;
+  --accent: #3a1236;
+  --accent-foreground: #f0abfc;
   --destructive: #f87171;
   --success: #4ade80;
   --warning: #fbbf24;
   --info: #60a5fa;
-  --link: #a78bfa;
+  --link: #f0abfc;
   --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.12);
-  --ring: #8b5cf6;
-  --sidebar: #08080b;
-  --sidebar-foreground: #c9c8d3;
-  --sidebar-accent: #1c1430;
-  --sidebar-accent-foreground: #c084fc;
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #e58ad9;
+  --sidebar: #0b060c;
+  --sidebar-foreground: #e9dce7;
+  --sidebar-accent: #3a1236;
+  --sidebar-accent-foreground: #ffd6f6;
   --sidebar-border: rgba(255, 255, 255, 0.06);
 
   --method-get: #7dd3fc;
@@ -158,12 +178,23 @@
   --method-patch: #c4b5fd;
   --method-delete: #fda4af;
 
-  --chart-requests: #8b5cf6;
+  --chart-requests: #e58ad9;
   --chart-4xx: #c98500;
   --chart-5xx: #e5484d;
   --chart-grid: rgba(255, 255, 255, 0.06);
-  --chart-axis: #8b8a99;
-  --chart-cursor: rgba(139, 92, 246, 0.12);
+  --chart-axis: #b8a3b5;
+  --chart-cursor: rgba(229, 138, 217, 0.12);
+  --sidebar-muted: #9c879a;
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-hover-foreground: #ffffff;
+  --sidebar-title: #ffffff;
+  --sidebar-indicator: #e58ad9;
+  --sidebar-glow: rgba(192, 38, 181, 0.22);
+  --spot-inner: rgba(229, 138, 217, 0.14);
+  --spot-outer: rgba(192, 38, 181, 0.06);
+  --hero-from: rgba(229, 138, 217, 0.12);
+  --hero-to: rgba(192, 38, 181, 0.03);
+  --elevation-raised: 0 10px 30px -12px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
 }
 
 @layer base {
@@ -180,6 +211,17 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: 'cv11', 'ss01';
+    /* Two soft brand glows at the top of the page: depth without competing with the data. */
+    background-image:
+      radial-gradient(60rem 28rem at 85% -10%, var(--hero-from), transparent 70%),
+      radial-gradient(40rem 22rem at 10% -8%, var(--hero-to), transparent 70%);
+    background-repeat: no-repeat;
+  }
+  /* Page and panel titles in the display face; small labels (h3 in KPI cards) stay in Jakarta. */
+  h1,
+  h2 {
+    font-family: var(--font-heading);
+    letter-spacing: 0.005em;
   }
   /* Numbers line up in tables and KPI cards. */
   .tabular {
@@ -195,5 +237,37 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* Cursor spotlight (CursorSpotlight in AppProviders): a soft purple light under the pointer on
+   cards. The script writes --spot-x / --spot-y on the card under the pointer and marks it
+   [data-spot]; the light is this ::after, painted under the card's content (the card is its own
+   stacking context). Layered and :where()'d so any utility class wins. */
+@layer components {
+  :where([data-slot='card'], [data-spotlight]) {
+    position: relative;
+    isolation: isolate;
+  }
+
+  :where([data-slot='card'], [data-spotlight])::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      22rem circle at var(--spot-x, 50%) var(--spot-y, 50%),
+      var(--spot-inner),
+      var(--spot-outer) 45%,
+      transparent 72%
+    );
+    transition: opacity 300ms ease-out;
+  }
+
+  :where([data-slot='card'], [data-spotlight])[data-spot]::after {
+    opacity: 1;
   }
 }

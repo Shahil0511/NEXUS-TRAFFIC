@@ -21,10 +21,19 @@ reading order.
 4. **Controller + route**: arrow property named like the leaf in `apps/api/src/http/controllers/<group>.controller.ts`;
    register it in `apps/api/src/http/routes/index.ts` with `...dashboard` and `validateQuery(schema)`. New
    classes are built in `apps/api/src/container.ts`.
+   **A read about ONE person** (a `:userKey` leaf, or a list that accepts `userKey`) is person-level
+   ([ADR 0015](decisions/0015-admin-only-person-pages-and-access-log.md)): add it to `PERSON_ROUTE_LEAVES` (use `...admin`)
+   or `PERSON_FILTERED_ROUTE_LEAVES` (add `mw.requireAdminForUserKey` after `validateQuery`) in
+   `packages/shared/src/routes.ts`, give it a surface in `PERSON_ACCESS_SURFACE_VALUES` (and the CHECK of
+   `traffic.person_access_log`, through a new migration), call `PersonAccessRecorder.record` after a successful
+   read, cover it in `apps/api/test/person-access.routes.test.ts`, and keep its web query key out of auto-refresh
+   (`apps/web/src/features/live/autoRefreshPolicy.ts`).
 5. **Web**: `api.<group>.<leaf>` in `apps/web/src/lib/api.ts`, a key in `apps/web/src/lib/query/keys.ts`, a hook
    `apps/web/src/features/<group>/use<Thing>.ts` (one query), the view `<X>View.tsx`. A new page also needs
    `apps/web/src/app/(dashboard)/<page>/page.tsx`, a builder in `apps/web/src/lib/pages.ts` and a nav entry in
-   `apps/web/src/lib/nav.ts`.
+   `apps/web/src/lib/nav.ts` with `question` + `questionHi` (the purpose sentence the page hero prints, ADR 0014). A
+   paged list uses `components/LoadMoreButton.tsx` so the page end does not claim the page is over. Keep
+   on-screen labels descriptive; no per-person scores, ranks or comparisons between people.
 6. **Tests**: service unit test with fakes (`apps/api/test/fixtures/fake-query-repositories.ts`), a DB block in
    `apps/api/test/db/analytics-queries.integration.test.ts`, a view test with MSW. The route contract test
    (`apps/api/test/routes-contract.test.ts`) and `apps/web/src/lib/api.test.ts` fail until steps 4–5 exist.

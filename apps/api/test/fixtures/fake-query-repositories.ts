@@ -13,6 +13,7 @@ import type {
   TrafficFilter,
   UserListOptions,
 } from '../../src/domain/filters';
+import type { PersonAccess, PersonAccessRecorder } from '../../src/services/person-access.recorder';
 import type {
   ApiRequestRow,
   AppActivityRow,
@@ -37,7 +38,10 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserDayActivityRow,
+  UserDeviceRow,
   UserEndpointRow,
+  UserLatestContextRow,
   UserProfileRows,
   UserSummaryRow,
 } from '../../src/domain/rows';
@@ -184,6 +188,9 @@ type WebQueryMethods =
   | 'listUsers'
   | 'getUserProfile'
   | 'listUserTimeline'
+  | 'listUserDevices'
+  | 'getUserLatestContext'
+  | 'listUserDailyActivity'
   | 'listSessions'
   | 'getSession'
   | 'listTopPaths'
@@ -210,6 +217,9 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   users: UserSummaryRow[] = [];
   profile: UserProfileRows | null = null;
   timeline: TimelineEventRow[] = [];
+  userDevices: UserDeviceRow[] = [];
+  latestContext: UserLatestContextRow | null = null;
+  userDays: UserDayActivityRow[] = [];
   sessions: SessionSummaryRow[] = [];
   session: SessionRows | null = null;
   topPaths: TopPathRow[] = [];
@@ -314,6 +324,31 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
     return this.timeline;
   }
 
+  async listUserDevices(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<UserDeviceRow[]> {
+    this.calls.push({ method: 'listUserDevices', args: [userKey, filter, limit] });
+    return this.userDevices;
+  }
+
+  async getUserLatestContext(
+    userKey: Buffer,
+    filter: TrafficFilter,
+  ): Promise<UserLatestContextRow | null> {
+    this.calls.push({ method: 'getUserLatestContext', args: [userKey, filter] });
+    return this.latestContext;
+  }
+
+  async listUserDailyActivity(
+    userKey: Buffer,
+    filter: TrafficFilter,
+  ): Promise<UserDayActivityRow[]> {
+    this.calls.push({ method: 'listUserDailyActivity', args: [userKey, filter] });
+    return this.userDays;
+  }
+
   async listSessions(
     filter: TrafficFilter,
     options: SessionListOptions,
@@ -358,5 +393,14 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
 
   argsOf(method: WebQueryMethods): unknown[][] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args);
+  }
+}
+
+/** Records every access a service reports (the real PersonAccessRecorder is tested on its own). */
+export class FakePersonAccess implements Pick<PersonAccessRecorder, 'record'> {
+  readonly accesses: PersonAccess[] = [];
+
+  async record(access: PersonAccess): Promise<void> {
+    this.accesses.push(access);
   }
 }

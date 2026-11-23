@@ -17,19 +17,47 @@ import { qk } from '@/lib/query/keys';
 export const AUTO_REFRESH_MIN_INTERVAL_MS = 5_000;
 
 /**
- * Groups NOT refreshed by traffic: who-am-I and the app list do not change with traffic, and the
- * Live page keeps its own cache current from the same socket (useLiveFeed).
+ * Groups NOT refreshed by traffic: who-am-I and the app list do not change with traffic, the
+ * Live page keeps its own cache current from the same socket (useLiveFeed), and the access log
+ * does not change with traffic.
  */
 const NOT_TRAFFIC_DRIVEN: ReadonlySet<string> = new Set([
   qk.me.all[0],
   qk.apps.all[0],
   qk.live.all[0],
+  qk.privacy.all[0],
 ]);
 
-/** True for query keys whose data changes when new traffic arrives. */
+/** The second key part of the person-level reads (one person's page: PERSON_ROUTE_LEAVES). */
+const PERSON_USER_LEAVES: ReadonlySet<unknown> = new Set(
+  [
+    qk.users.profile('', { range: 'today' }),
+    qk.users.timeline('', { range: 'today', limit: 1 }),
+    qk.users.devices('', { range: 'today' }),
+    qk.users.daily('', { range: 'today' }),
+  ].map((key) => key[1]),
+);
+
+/**
+ * True for query keys whose data changes when new traffic arrives — EXCEPT person-level reads
+ * (a person's page, or any list narrowed to one person by `userKey`): each of those answers is
+ * recorded in the person access log, so a background refetch would read as the admin opening
+ * the person again. They refresh only on a real action (open, tab, focus, retry).
+ */
 export function isTrafficDrivenKey(queryKey: QueryKey): boolean {
   const group = queryKey[0];
-  return typeof group === 'string' && !NOT_TRAFFIC_DRIVEN.has(group);
+  if (typeof group !== 'string' || NOT_TRAFFIC_DRIVEN.has(group)) return false;
+  if (group === qk.users.all[0] && PERSON_USER_LEAVES.has(queryKey[1])) return false;
+  return !queryKey.some(isNarrowedToOnePerson);
+}
+
+/** A key part that is a query narrowed to one person (`?userKey=`). */
+function isNarrowedToOnePerson(part: unknown): boolean {
+  return (
+    typeof part === 'object' &&
+    part !== null &&
+    (part as { userKey?: unknown }).userKey !== undefined
+  );
 }
 
 /**

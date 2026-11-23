@@ -1,7 +1,7 @@
 /**
- * Privileges of the runtime role nexus_app — DML only, NO DDL, no TRUNCATE, and admin_audit_log is
- * append-only. Partition DDL happens only through the whitelisted SECURITY DEFINER functions of
- * 0001. The default privileges cover tables the owner creates later, including the monthly
+ * Privileges of the runtime role nexus_app — DML only, NO DDL, no TRUNCATE, and admin_audit_log and
+ * person_access_log are append-only. Partition DDL happens only through the whitelisted SECURITY
+ * DEFINER functions of 0001. The default privileges cover tables the owner creates later, including the monthly
  * partitions created by traffic.ensure_monthly_partition.
  *
  * WHY code and not a migration (ADR 0002): the role split is OPTIONAL. In DB_APP_ROLE_MODE=owner
@@ -13,6 +13,7 @@
  * Verified by test/db/privileges.integration.test.ts and test/db/migration-runner.integration.test.ts.
  * @see ./runner.ts
  * @see ../../../migrations/0001_helpers_and_partitions.sql
+ * @see ../../../migrations/0013_person_access_log.sql
  */
 import type { Pool } from 'pg';
 
@@ -33,6 +34,11 @@ export const APP_ROLE_GRANT_STATEMENTS: readonly string[] = [
      TO ${APP_ROLE}`,
 
   `GRANT SELECT, INSERT ON traffic.admin_audit_log TO ${APP_ROLE}`,
+
+  // Append-only (0013, also guarded by triggers). The REVOKE matters on a database migrated
+  // AFTER the default privileges below exist: those would otherwise hand out UPDATE and DELETE.
+  `GRANT SELECT, INSERT ON traffic.person_access_log TO ${APP_ROLE}`,
+  `REVOKE UPDATE, DELETE, TRUNCATE ON traffic.person_access_log FROM ${APP_ROLE}`,
 
   `GRANT SELECT ON traffic.schema_migrations TO ${APP_ROLE}`,
 

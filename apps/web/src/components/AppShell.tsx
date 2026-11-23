@@ -1,13 +1,16 @@
 'use client';
 
 import { useIsFetching } from '@tanstack/react-query';
-import { Activity, Clock } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import { CommandPalette } from '@/components/CommandPalette';
+import { LibasLogo } from '@/components/LibasLogo';
 import { DashboardNav, MobileNav } from '@/components/MobileNav';
+import { PageEnd } from '@/components/PageEnd';
+import { PageEndProvider } from '@/components/PageEndProvider';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ViewerBadge } from '@/components/ViewerBadge';
 import { AppSelect } from '@/features/filters/AppSelect';
@@ -46,7 +49,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           tabIndex={-1}
           className="flex-1 px-4 py-4 outline-none sm:px-6 sm:py-6"
         >
-          <div className="mx-auto w-full max-w-[1440px]">{children}</div>
+          <div className="mx-auto w-full max-w-[1440px]">
+            <PageEndProvider>
+              {children}
+              <PageEnd />
+            </PageEndProvider>
+          </div>
         </main>
       </div>
     </div>
@@ -59,27 +67,22 @@ export function AppShell({ children }: { children: ReactNode }) {
 function Sidebar() {
   const { filters } = useGlobalFilters();
   return (
-    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex lg:w-60">
+    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col border-r border-sidebar-border bg-sidebar bg-[radial-gradient(120%_60%_at_0%_0%,var(--sidebar-glow),transparent_60%)] text-sidebar-foreground md:flex lg:w-60">
       <Link
         href={withQuery(PAGES.overview(), filterLinkQuery(filters))}
-        className="flex h-14 items-center gap-2.5 px-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        className="flex h-16 items-center gap-2.5 border-b border-sidebar-border px-4 outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         aria-label="Data Nexus Traffic — Overview"
       >
-        <span
-          aria-hidden="true"
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 text-white shadow-sm shadow-violet-500/30"
-        >
-          <Activity className="size-4" />
-        </span>
+        <LibasLogo className="size-9 text-sidebar-title" />
         <span className="hidden min-w-0 flex-col leading-tight lg:flex">
-          <span className="text-2xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">
-            Data Nexus
+          <span className="text-2xs font-semibold tracking-[0.16em] text-sidebar-muted uppercase">
+            Libas · Data Nexus
           </span>
-          <span className="text-sm font-semibold text-foreground">Traffic</span>
+          <span className="font-heading text-lg font-bold text-sidebar-title">Traffic</span>
         </span>
       </Link>
       <DashboardNav variant="rail" className="flex-1" />
-      <p className="hidden items-center gap-1.5 border-t border-sidebar-border px-4 py-3 text-2xs text-muted-foreground lg:flex">
+      <p className="hidden items-center gap-1.5 border-t border-sidebar-border px-4 py-3 text-2xs text-sidebar-muted lg:flex">
         <Clock className="size-3" aria-hidden="true" />
         All times in IST
       </p>

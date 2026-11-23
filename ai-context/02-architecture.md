@@ -128,7 +128,9 @@ component. The exact files are listed in [03-code-navigation.md](03-code-navigat
 - **Auto-refresh of analytics pages** (`apps/web/src/features/live/useAutoRefresh.ts`, mounted once by
   the dashboard layout via `AutoRefresh.tsx`, off on the Live page): the same socket, scoped like the
   global app filter; every `traffic:events` batch (or a reconnect) invalidates the traffic-driven React
-  Query keys (`autoRefreshPolicy.ts`: all except `me`, `apps`, `live`), throttled to one refresh per 5 s.
+  Query keys (`autoRefreshPolicy.ts`: all except `me`, `apps`, `live`, `privacy` and the person-level
+  reads, i.e. the person page's keys and any key narrowed by `userKey`, whose answers are access-logged,
+  ADR 0015), throttled to one refresh per 5 s.
   Without it, pages kept their 60 s-stale data until the user navigated.
 - End-to-end delay is bounded by the SDK flush interval (`SDK_DEFAULTS.*.flushIntervalMs` = 5 s):
   measured 4.6 s from an EBO_SALES request to its `traffic:events` in dev.
@@ -143,3 +145,7 @@ kill switch + CORS layering [0009](decisions/0009-sdk-remote-config-and-kill-swi
 [0011](decisions/0011-header-propagation-and-early-entry.md), retry queue
 [0012](decisions/0012-browser-retry-queue.md), diagnostics + KPIs
 [0013](decisions/0013-integration-diagnostics-and-kpis.md).
+Phase B (dashboard redesign): object-first navigation, page hero + page end, the Today preset,
+Devices & places and the person page [0014](decisions/0014-object-first-navigation-and-person-page.md);
+admin-only person pages and the person access log
+[0015](decisions/0015-admin-only-person-pages-and-access-log.md).

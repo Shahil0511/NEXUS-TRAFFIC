@@ -1,23 +1,37 @@
 /**
- * ROUTES.users.* — the Users page: verified users, a user's profile and their combined timeline.
+ * ROUTES.users.* — the Users page: verified users, a user's profile, devices, days and their
+ * combined timeline. The four person-level leaves (PERSON_ROUTE_LEAVES) are admin-only in the
+ * route table, and each answer is recorded in the person access log (PersonAccessRecorder).
  */
 import {
   MAX_COUNT_RANGE_MS,
+  USER_DEVICES_LIMIT,
   type CursorPage,
   type UserActivityDto,
   type UserActivityQuery,
   type TimelineItemDto,
+  type UserDailyActivityDto,
+  type UserDailyQuery,
+  type UserDevicesDto,
+  type UserDevicesQuery,
   type UserListQuery,
   type UserProfileDto,
   type UserProfileQuery,
   type UserSearchBody,
   type UserSummaryDto,
   type UserTimelineQuery,
+  wholeReportingDays,
 } from '@nexus/shared';
 
 import { environmentsOf, type TrafficFilter } from '../domain/filters';
 import { decodeOffsetCursor, encodeKeysetCursor, encodeOffsetCursor } from '../db/sql';
-import { mapTimelineItem, mapUserProfile, mapUserSummary } from '../domain/mappers';
+import {
+  mapTimelineItem,
+  mapUserDayActivity,
+  mapUserDevice,
+  mapUserProfile,
+  mapUserSummary,
+} from '../domain/mappers';
 import { fillCountGaps } from '../domain/timeseries-gaps';
 import { pageFetchSize, parseKeysetCursor, toCursorPage } from '../domain/pagination';
 import type { Viewer } from '../domain/viewer';
@@ -30,6 +44,7 @@ import {
   type WebEventQueryRepository,
 } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
+import type { PersonAccessRecorder } from './person-access.recorder';
 import { currentFilter, resolveQueryWindow, toTimeWindowDto } from './query-window';
 
 const DAY_MS = 86_400_000;
@@ -47,6 +62,7 @@ export class UserService {
     private readonly requests: ApiRequestQueryRepository,
     private readonly appSlugs: AppSlugResolver,
     private readonly clock: Clock,
+    private readonly personAccess: PersonAccessRecorder,
   ) {}
 
   /**
@@ -68,12 +84,15 @@ export class UserService {
   }
 
   /**
-   * Header numbers, top tools, pages and API routes, activity per app and countries of one user.
-   * 404 when the user has no activity in the window.
+   * Header numbers, top tools, pages and API routes, activity per app, countries and the latest
+   * known browser facts (the identity card) of one user. 404 when the user has no activity in the
+   * window (and then no access-log row).
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getUserProfile
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getUserLatestContext
+   * @see ./person-access.recorder.ts PersonAccessRecorder.record
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listUserTopEndpoints
    */
-  async profile(userKey: string, query: UserProfileQuery): Promise<UserProfileDto> {
+  async profile(userKey: string, query: UserProfileQuery, viewer: Viewer): Promise<UserProfileDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
     const filter = currentFilter(
       window,
@@ -82,12 +101,20 @@ export class UserService {
     );
     const key = userKeyFromHex(userKey);
 
-    const [rows, topEndpoints] = await Promise.all([
+    const [rows, topEndpoints, latest] = await Promise.all([
       this.webEvents.getUserProfile(key, filter),
       this.requests.listUserTopEndpoints(key, filter, PROFILE_TOP_LIMIT),
+      this.webEvents.getUserLatestContext(key, filter),
     ]);
     if (!rows) throw new NotFoundError('No activity for this user in the selected window');
-    return mapUserProfile(rows, topEndpoints);
+    const body = mapUserProfile(rows, topEndpoints, latest);
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_profile',
+      filter,
+    });
+    return body;
   }
 
   /**
@@ -115,9 +142,10 @@ export class UserService {
     const counts = new Map(daily.map((row) => [row.day.toISOString(), row.users]));
     return {
       window: toTimeWindowDto(window),
-      points: fillCountGaps(counts, { from: window.from, to: window.to, grain: 'day' }).map(
-        (point) => ({ day: point.bucket, users: point.count }),
-      ),
+      points: fillCountGaps(counts, { ...window, grain: 'day' }).map((point) => ({
+        day: point.bucket,
+        users: point.count,
+      })),
       wau,
       mau,
     };
@@ -140,17 +168,90 @@ export class UserService {
       environmentsOf(query.env),
     );
     const after = parseKeysetCursor(query.cursor);
+    const key = userKeyFromHex(userKey);
 
-    const rows = await this.webEvents.listUserTimeline(userKeyFromHex(userKey), filter, {
+    const rows = await this.webEvents.listUserTimeline(key, filter, {
       after,
       limit: pageFetchSize(query.limit),
     });
-    return toCursorPage(
+    const page = toCursorPage(
       rows,
       query.limit,
       (row) => mapTimelineItem(row, viewer),
       (last) => encodeKeysetCursor(last.occurred_at_key, last.event_id),
     );
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_timeline',
+      filter,
+    });
+    return page;
+  }
+
+  /**
+   * The (device type, browser, OS) combinations one user was seen on, most recently used first
+   * (at most USER_DEVICES_LIMIT) — the Devices tab only (the identity card's latest facts come with
+   * the profile, so opening the page does not record a Devices view). An empty list, not a 404,
+   * when the user did nothing in the window (the profile answers the 404).
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDevices
+   */
+  async devices(userKey: string, query: UserDevicesQuery, viewer: Viewer): Promise<UserDevicesDto> {
+    const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
+    const key = userKeyFromHex(userKey);
+
+    const devices = await this.webEvents.listUserDevices(key, filter, USER_DEVICES_LIMIT);
+    const body = { window: toTimeWindowDto(window), items: devices.map(mapUserDevice) };
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_devices',
+      filter,
+    });
+    return body;
+  }
+
+  /**
+   * One item per IST calendar day on which the user was active, newest first (idle days are
+   * absent): first / last activity, tab-visible time and counts. The window is widened to WHOLE
+   * IST days (wholeReportingDays) and echoed widened: a rolling range (24h at 15:00) would
+   * otherwise cut its oldest day at 15:00 and report that cut as the day's first activity. The day
+   * still running is flagged `inProgress`. Counts only → MAX_COUNT_RANGE_MS (checked on the range
+   * asked for; widening adds at most one day).
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
+   */
+  async daily(
+    userKey: string,
+    query: UserDailyQuery,
+    viewer: Viewer,
+  ): Promise<UserDailyActivityDto> {
+    const now = this.clock.now();
+    const asked = resolveQueryWindow(query, now, MAX_COUNT_RANGE_MS);
+    const window = { ...asked, ...wholeReportingDays(asked) };
+    const filter = currentFilter(
+      window,
+      await this.appSlugs.resolve(query.app),
+      environmentsOf(query.env),
+    );
+    const key = userKeyFromHex(userKey);
+
+    const rows = await this.webEvents.listUserDailyActivity(key, filter);
+    const body = {
+      window: toTimeWindowDto(window),
+      items: rows.map((row) => mapUserDayActivity(row, now)),
+    };
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_daily',
+      filter,
+    });
+    return body;
   }
 
   /** The list + search body: window → app id → one page of users. */
