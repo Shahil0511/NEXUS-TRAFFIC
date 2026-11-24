@@ -20,6 +20,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { formatCountry, formatDateTime, formatDuration, formatInteger } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 import { SessionReplay } from './SessionReplay';
@@ -161,6 +162,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
         <KpiCard label="Duration" icon={Clock} value={formatDuration(summary.durationMs)} />
         <KpiCard
           label="Visible time"
+          info={metricInfo('visibleTime')}
           icon={Hourglass}
           value={formatDuration(summary.visibleMs)}
           hint="tab in foreground"

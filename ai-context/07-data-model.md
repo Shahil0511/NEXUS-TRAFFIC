@@ -137,7 +137,7 @@ IP, geo and client columns as `api_requests`, plus:
 | `referrer_path` | previous in-app path; `referrer_host` the external site's host only (never a full URL). |
 | `nav` | `load` (full page load) or `route` (client-side navigation). |
 | `page_view_id` | for `page_time`: the `event_id` of the page view it belongs to. **Required** for `page_time`. |
-| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. Summed per IST day and app for one person = the person page's "Tab visible time" (`listUserDailyActivity`, [ADR 0017](decisions/0017-person-daily-depth.md)). |
+| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. Stored as sent; every read that sums it for a shown time credits one row at most `VISIBLE_DELTA_CREDIT_CAP_MS` (60 s = 12 browser flush ticks; NULL stays NULL) via `creditedVisibleMs` (`apps/api/src/db/sql.ts`) — the page view's time, the visit, the page stats and the person day. Summed per IST day and app for one person = the person page's "Tab visible time" (`listUserDailyActivity`, [ADR 0017](decisions/0017-person-daily-depth.md)). |
 | `is_final`, `time_reason` | for `page_time`: whether this was the last delta of the view, and why it was sent (`hidden`, `route`, `pagehide`, `idle`). Required for `page_time`. |
 | `tool` | for `tool_use`: the UI tool, e.g. `audits.export-csv` (`^[a-z0-9][a-z0-9_.:-]{0,63}$`). Required for `tool_use`. |
 | `action` | optional verb: `click`, `open`, `submit`, `export`, `toggle`, `search`, `other`. |
@@ -156,10 +156,12 @@ then slug, at most `USER_DAILY_APP_ROWS_LIMIT` + 1 rows (the extra row means the
 `dropTruncatedOldestDay` drops it). `foldUserDays` (`apps/api/src/domain/mappers.ts`) folds them into one
 `UserDayActivityDto` per day: counts and tab visible time are the Σ of the apps, first / last activity their
 min / max, `apps` the sorted slugs, and `perApp` keeps the first-activity order (never sorted by time or counts).
-Per app: tab visible time = Σ `visible_ms` of its `page_time` rows (0 for an app that only sends API calls —
+Per app: tab visible time = Σ credited `visible_ms` of its `page_time` rows (0 for an app that only sends API calls —
 shown as "no browser time"); visits = distinct `session_id` of its browser rows (a visit is (app, session), so the
-day's visits are the Σ). Credited visible time (the per-tick cap), activity blocks and time in app (the union of
-visible intervals) come with later steps of ADR 0017.
+day's visits are the Σ). *Credited* visible time: each `page_time` row counts at most `VISIBLE_DELTA_CREDIT_CAP_MS`
+(a longer delta means the tracker's tick did not run, e.g. a sleeping laptop); the CASE keeps NULL as NULL, so API
+rows of the UNION add nothing. Activity blocks and time in app (the union of visible intervals) come with later
+steps of ADR 0017.
 
 ## `ingest_counters` — ingest health
 

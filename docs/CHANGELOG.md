@@ -15,6 +15,29 @@ The public contract other teams integrate against (`docs/integration/`, publishe
 
 Format: newest first. Dates are IST.
 
+## v1 — 2026-11-24 (dashboard read change)
+
+Nothing changes on the wire: every field, limit and response stays as it was, and stored events are
+not rewritten. What changes is how the dashboard counts time on page, so the guide now spells out the
+recipe a hand-written tracker needs.
+
+**Changed**
+
+- The guide's time-on-page recipe (chapter 3) now lists the **visible tick**: while the tab stays
+  visible, send a `page_time` delta every 5 s with `reason: "idle"`, `final: false`. The reference
+  React tracker has always done this on its flush tick (1.0.0 and 1.1.0).
+
+**Dashboard (not part of the wire contract)**
+
+- Each `page_time` row is credited **at most 60 s** of visible time (`VISIBLE_DELTA_CREDIT_CAP_MS`
+  in `packages/shared`) wherever the dashboard adds up visible time: person days and timeline, the
+  Visits list and visit header, visit steps, and the Pages average / median. The stored `visibleMs`
+  is kept as sent. A much longer delta means the tick did not run (a sleeping laptop, a frozen tab),
+  so the old numbers that credited it in full go down.
+- Apps on the reference SDK (1.0.0 and 1.1.0) are unaffected apart from such gaps. A tracker that
+  sends one long delta per view (only on hidden, route change or `pagehide`) is now credited at most
+  60 s per delta: add the visible tick to keep its numbers.
+
 ## v1 additive — 2026-11 (data quality, "Phase A")
 
 Everything below is **optional for senders and additive**: an integration built against the

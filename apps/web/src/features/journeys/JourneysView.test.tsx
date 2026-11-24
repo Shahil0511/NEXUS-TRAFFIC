@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { METRIC_COPY } from '@/lib/metricCopy';
 import { CLAIMED_SESSION, SESSION_ID, sessionSummary, TOP_PATHS, USER_KEY } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
@@ -45,6 +46,17 @@ describe('JourneysView', () => {
     expect(within(table).getByText(/203\.0\.113\.9/)).toBeInTheDocument();
     expect(within(table).getAllByText('12m 0s')).toHaveLength(2);
     expect(within(table).getByRole('columnheader', { name: 'Person' })).toBeInTheDocument();
+  });
+
+  it('explains the Visible column, including the 1-minute credit per delta (ADR 0017)', async () => {
+    useJourneyHandlers();
+    const user = userEvent.setup();
+    renderWithProviders(<JourneysView />);
+    const table = await screen.findByRole('table', { name: 'Visits' });
+    await user.click(within(table).getByRole('button', { name: 'What is Visible?' }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent(METRIC_COPY.visibleTime.short);
+    expect(tip).toHaveTextContent('counts at most 1 minute');
   });
 
   it('narrows to one user from ?userKey= and can clear it', async () => {

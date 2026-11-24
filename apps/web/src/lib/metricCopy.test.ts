@@ -84,6 +84,11 @@ ${copy.long}`),
     expect(METRIC_COPY.activeTime.long).toMatch(/not keyboard or mouse use/);
   });
 
+  it('states the per-stretch credit cap wherever tab visible time is defined (ADR 0017)', () => {
+    expect(METRIC_COPY.activeTime.long).toMatch(/without a tick\b.* counts at most 1 minute/);
+    expect(METRIC_COPY.visibleTime.long).toMatch(/without a tick\b.* counts at most 1 minute/);
+  });
+
   it('explains 4xx versus 5xx under error rate', () => {
     expect(METRIC_COPY.errorRate.long).toMatch(/4xx/);
     expect(METRIC_COPY.errorRate.long).toMatch(/5xx/);

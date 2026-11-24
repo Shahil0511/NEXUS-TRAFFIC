@@ -94,13 +94,20 @@ are).
 **How time on page is computed.** We add up all `visibleMs` deltas of one `pageViewId`. So:
 
 1. On `page_view`, start a visible-time counter (only while `document.visibilityState === 'visible'`).
-2. When the tab becomes hidden → send `page_time` with the time since the last send,
+2. While the tab stays visible → every {{BROWSER_TICK_SECONDS}} s send `page_time` with the time since the last
+   send, `reason: "idle"`, `final: false` (the reference SDK does this on its flush tick).
+3. When the tab becomes hidden → send `page_time` with the time since the last send,
    `reason: "hidden"`, `final: false`, and reset the counter. Resume counting when visible again.
-3. On route change → send the remainder with `reason: "route"`, `final: true`.
-4. On `pagehide` → send the remainder with `reason: "pagehide"`, `final: true` (use `sendBeacon`, the
+4. On route change → send the remainder with `reason: "route"`, `final: true`.
+5. On `pagehide` → send the remainder with `reason: "pagehide"`, `final: true` (use `sendBeacon`, the
    page is going away).
 
 Deltas make lost beacons harmless: a missing one loses a few seconds, never double-counts.
+
+**One delta counts at most {{VISIBLE_CREDIT_CAP_SECONDS}} s.** The dashboard credits each `page_time` row at most
+{{VISIBLE_CREDIT_CAP_SECONDS}} s of visible time (the stored value is kept as sent). A much longer delta means the
+counter kept running while the tick did not (a sleeping laptop, a frozen tab), so it is not time on page. Keep
+the tick of step 2 and your numbers are unaffected.
 
 ### `tool_use` — a feature of your UI was used
 

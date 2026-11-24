@@ -100,7 +100,7 @@ export const METRIC_COPY = {
   visibleTime: {
     label: 'Visible time',
     short: 'How long the page was actually on screen (the tab in front).',
-    long: 'Time in a background tab or a minimised window is not counted, so it is closer to real reading time than “time open”.',
+    long: 'Time in a background tab or a minimised window is not counted. One stretch without a tick, for example a sleeping laptop, counts at most 1 minute.',
   },
   exitRate: {
     label: 'Exit rate',
@@ -156,9 +156,8 @@ export const METRIC_COPY = {
   // ─── One person, per day ─────────────────────────────────────────────────────
   activeTime: {
     label: 'Tab visible time',
-    short:
-      'How long an app page was on screen in a browser tab in front, added up over the day (India time).',
-    long: 'It is not keyboard or mouse use: a tab left open on screen keeps counting. Two visible tabs both count. API calls alone add no time.',
+    short: 'How long an app page was on screen in a front tab, added up over the day (India time).',
+    long: 'It is not keyboard or mouse use: a tab left open keeps counting and two visible tabs both count. One stretch without a tick (a sleeping laptop) counts at most 1 minute.',
   },
   firstActivity: {
     label: 'First activity',

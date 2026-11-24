@@ -17,6 +17,7 @@ import {
   ROUTES,
   SDK_DEFAULTS,
   SDK_KILL_ERROR_CODES,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
 } from '@nexus/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -101,6 +102,8 @@ describe('docs:build rendering', () => {
     expect(tokens['COVERAGE_TARGET']).toBe(String(Math.round(COVERAGE_TARGET_RATIO * 100)));
     expect(tokens['AGGREGATE_RETENTION_DAYS']).toBe(String(AGGREGATE_RETENTION_DAYS));
     expect(tokens['SDK_RETRY_MAX_REPLAYS']).toBe(String(SDK_DEFAULTS.browser.retryQueueMaxReplays));
+    expect(tokens['BROWSER_TICK_SECONDS']).toBe(String(SDK_DEFAULTS.browser.flushIntervalMs / 1000));
+    expect(tokens['VISIBLE_CREDIT_CAP_SECONDS']).toBe(String(VISIBLE_DELTA_CREDIT_CAP_MS / 1000));
   });
 
   it('names the SDK tarballs after the packages that sdk:pack builds', () => {

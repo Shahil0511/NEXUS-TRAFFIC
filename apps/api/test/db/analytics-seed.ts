@@ -839,3 +839,74 @@ export async function seedUserDailyApps(
   ]);
   return { now, appIds };
 }
+
+// ─── S5: credited tab visible time (ADR 0017) ───────────────────────────────
+
+/** The person of `seedVisibleCreditCap`; nobody else is seeded in that database. */
+export const USER_E = 'e@libas.in';
+
+/** A `page_time` delta far above the per-row credit cap (3 h: the tick timer did not run). */
+export const SLEEP_DELTA_MS = 3 * HOUR;
+
+export interface VisibleCreditCapSeed {
+  now: Date;
+  appIds: AnalyticsSeed['appIds'];
+  sessionId: string;
+  pageViewId: string;
+}
+
+/**
+ * S5 (its own database). One ebo-sales visit of USER_E today:
+ * - page_view /home at −60 min;
+ * - page_time 3 h (SLEEP_DELTA_MS) at −59 min, then page_time 4000 ms at −58 min (same view);
+ * - one storeLookup 200 in the same session at −57 min (an API row: visible_ms is NULL).
+ * Credited tab visible time = 60 000 + 4000 = 64 000 ms on every screen (person day, visit, page,
+ * timeline). The plain sum would be 10 804 000; crediting the NULL API row as the cap would be 124 000.
+ */
+export async function seedVisibleCreditCap(
+  db: TestDatabase,
+  now: Date = seedNow(),
+): Promise<VisibleCreditCapSeed> {
+  const appIds = await createSeedApps(db);
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  const visit = { appId: appIds.sales, sessionId: randomUUID(), user: USER_E };
+  const pageViewId = await insertWebEvent(db, {
+    ...visit,
+    at: ago(60 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+  await insertWebEvent(db, {
+    ...visit,
+    at: ago(59 * MINUTE),
+    seq: 1,
+    type: 'page_time',
+    path: '/home',
+    pageViewId,
+    visibleMs: SLEEP_DELTA_MS,
+  });
+  await insertWebEvent(db, {
+    ...visit,
+    at: ago(58 * MINUTE),
+    seq: 2,
+    type: 'page_time',
+    path: '/home',
+    pageViewId,
+    visibleMs: 4000,
+  });
+  await new ApiRequestIngestRepository(db.appPool).insertBatch([
+    toInsert(
+      {
+        route: 'storeLookup',
+        at: ago(57 * MINUTE),
+        status: 200,
+        durationMs: 10,
+        user: USER_E,
+        sessionId: visit.sessionId,
+      },
+      appIds,
+    ),
+  ]);
+  return { now, appIds, sessionId: visit.sessionId, pageViewId };
+}

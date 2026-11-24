@@ -16,8 +16,10 @@
  * - Coverage KPIs (identified) come ONLY from ./coverage-predicates.ts.
  * - A "user" is a VERIFIED identity only: `user_key IS NOT NULL` ⇔ identity_source ∈
  *   IDENTIFIED_SOURCE_VALUES (the CHECKs of 0004/0005 guarantee it). Claims never count.
- * - `page_time` rows carry visible-ms DELTAS; the time of a page view is Σ visible_ms of the
- *   page_time rows whose page_view_id = that page view's event_id (`pageViewVisibleMs`).
+ * - `page_time` rows carry visible-ms DELTAS; the time of a page view is Σ credited visible_ms
+ *   (creditedVisibleMs: at most VISIBLE_DELTA_CREDIT_CAP_MS per row, NULL-safe) of the page_time
+ *   rows whose page_view_id = that page view's event_id (`pageViewVisibleMs`). EVERY sum of
+ *   visible_ms that feeds a shown time goes through creditedVisibleMs (a unit test checks it).
  * - Session order is (seq, occurred_at, event_id) — `SESSION_ORDER`.
  * - Enum literals in SQL come from typed constants (BROWSER_EVENT_TYPE_VALUES, TimelineItemKind,
  *   IDENTITY_SOURCE_VALUES), never from input; values always go through `$n` placeholders.
@@ -25,6 +27,8 @@
  * @see ../../migrations/0007_event_environment_and_client_context.sql (environment, client_tz, …)
  * @see ../../migrations/0004_api_requests.sql (users, timeline, sessions and geo also read api_requests)
  * @see ../../migrations/0002_apps_and_api_keys.sql (traffic.apps, joined for the public slug)
+ * @see ../db/sql.ts creditedVisibleMs
+ * @see ../../../../ai-context/decisions/0017-person-daily-depth.md (the credit cap per delta)
  */
 import {
   IDENTITY_SOURCE_VALUES,
@@ -38,7 +42,14 @@ import {
 import type { Pool } from 'pg';
 
 import type { Executor } from '../db/executor';
-import { bucketExpr, keysetTimeExpr, likeContains, orderByClause, ParamList } from '../db/sql';
+import {
+  bucketExpr,
+  creditedVisibleMs,
+  keysetTimeExpr,
+  likeContains,
+  orderByClause,
+  ParamList,
+} from '../db/sql';
 import type {
   EventKeyset,
   SessionListOptions,
@@ -165,13 +176,15 @@ function olderThan(alias: string, after: EventKeyset, params: ParamList): string
 }
 
 /**
- * Σ visible_ms of the page view in row `w` (NULL for other event types or when no page_time
+ * Σ credited visible_ms (creditedVisibleMs: at most VISIBLE_DELTA_CREDIT_CAP_MS per row,
+ * NULL-safe) of the page view in row `w` (NULL for other event types or when no page_time
  * arrived). The page_time rows are bounded by the same window (partition pruning) and found via
  * idx_web_events_page_view_id.
+ * @see ../db/sql.ts creditedVisibleMs
  */
 function pageViewVisibleMs(filter: TrafficFilter, params: ParamList): string {
   return `CASE WHEN ${IS_PAGE_VIEW} THEN (
-      SELECT sum(pt.visible_ms)
+      SELECT sum(${creditedVisibleMs('pt')})
         FROM traffic.web_events pt
        WHERE ${[
          `pt.event_type = '${PAGE_TIME}'`,
@@ -260,7 +273,8 @@ interface SessionStatsQuery extends SessionListOptions {
 
 /**
  * One row per (app, session_id) of browser events: list and replay header. Identity = the
- * strongest source seen (`IDENTITY_RANKS`); entry/exit = first/last page view in SESSION_ORDER.
+ * strongest source seen (`IDENTITY_RANKS`); entry/exit = first/last page view in SESSION_ORDER;
+ * visible_ms = Σ credited visible_ms of the session's page_time rows (creditedVisibleMs).
  */
 function sessionStatsStatement(
   filter: TrafficFilter,
@@ -281,7 +295,7 @@ function sessionStatsStatement(
            extract(epoch FROM max(w.occurred_at) - min(w.occurred_at)) * 1000 AS duration_ms,
            count(*) FILTER (WHERE ${IS_PAGE_VIEW}) AS page_views,
            count(*) FILTER (WHERE w.event_type = '${TOOL_USE}') AS tool_uses,
-           coalesce(sum(w.visible_ms) FILTER (WHERE w.event_type = '${PAGE_TIME}'), 0) AS visible_ms,
+           coalesce(sum(${creditedVisibleMs('w')}) FILTER (WHERE w.event_type = '${PAGE_TIME}'), 0) AS visible_ms,
            ${firstOf('w.user_key', 'w.occurred_at DESC')} AS user_key,
            ${firstOf('w.user_email', 'w.occurred_at DESC')} AS user_email,
            ${firstOf('w.claimed_email', 'w.occurred_at DESC')} AS claimed_email,
@@ -320,7 +334,7 @@ function pageStatsStatement(
          FROM traffic.web_events w
         WHERE ${views}
      ), visible AS (
-       SELECT w.page_view_id, sum(w.visible_ms) AS visible_ms
+       SELECT w.page_view_id, sum(${creditedVisibleMs('w')}) AS visible_ms
          FROM traffic.web_events w
         WHERE ${times}
         GROUP BY w.page_view_id
@@ -962,9 +976,11 @@ export class WebEventQueryRepository {
    * One row per (IST calendar day, app) on which one user was active (same day bucket as
    * listDailyUsers); days without activity are left out. Ordered newest day first, then by the app's
    * first activity, then slug — the order foldUserDays keeps for `perApp`. First / last activity
-   * span BOTH tables; `active_ms` = Σ visible_ms of the app's page_time rows that day (tab-visible
-   * time; 0 for an API-only app). At most USER_DAILY_APP_ROWS_LIMIT + 1 rows: the extra row tells
-   * the caller the oldest day may be cut (dropTruncatedOldestDay).
+   * span BOTH tables; `active_ms` = Σ credited visible_ms (creditedVisibleMs: at most
+   * VISIBLE_DELTA_CREDIT_CAP_MS per row, NULL-safe) of the app's page_time rows that day
+   * (tab-visible time; 0 for an API-only app). At most USER_DAILY_APP_ROWS_LIMIT + 1 rows: the
+   * extra row tells the caller the oldest day may be cut (dropTruncatedOldestDay).
+   * @see ../db/sql.ts creditedVisibleMs
    */
   async listUserDailyActivity(
     userKey: Buffer,
@@ -978,7 +994,7 @@ export class WebEventQueryRepository {
     const { rows } = await exec.query<UserDayAppActivityRow>(
       `SELECT ${bucketExpr('day', 'h.occurred_at')} AS day, a.slug AS app,
               min(h.occurred_at) AS first_activity_at, max(h.occurred_at) AS last_activity_at,
-              coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = '${PAGE_TIME}'), 0)::int8 AS active_ms,
+              coalesce(sum(${creditedVisibleMs('h')}) FILTER (WHERE h.kind = '${PAGE_TIME}'), 0)::int8 AS active_ms,
               count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
               count(*) FILTER (WHERE h.kind = '${API_KIND}') AS requests,
               count(*) FILTER (WHERE h.failed) AS failed_requests,
@@ -1080,7 +1096,8 @@ export class WebEventQueryRepository {
 
   /**
    * Per (app, path template): page views, distinct sessions and verified users, avg/p50 of Σ
-   * visible_ms per page view (page views without any page_time are left out of avg/p50) and exits
+   * credited visible_ms per page view (creditedVisibleMs: at most VISIBLE_DELTA_CREDIT_CAP_MS per
+   * row, NULL-safe; page views without any page_time are left out of avg/p50) and exits
    * (sessions whose LAST page view in the window was this page). Most viewed first.
    */
   async listPageStats(

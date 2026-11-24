@@ -234,4 +234,11 @@ describe('AboutTheseNumbers', () => {
     expect(day.length).toBeGreaterThan(days.length);
     expect(days.join(' ')).not.toMatch(/Time in app/);
   });
+
+  it('states the credit cap of one stretch without a tick on both views (ADR 0017)', () => {
+    const cap =
+      'One stretch without a tick (for example a sleeping laptop) counts at most 1 minute.';
+    expect(aboutTheseNumbersLines('days')).toContain(cap);
+    expect(aboutTheseNumbersLines('day')).toContain(cap);
+  });
 });

@@ -40,9 +40,10 @@
        admin-only and recorded as `person_visits` (ADR 0015), so the link adds no new kind of read.
      - The list visibly ends ("End of list · N days"), and every per-day view closes with a static panel,
        "About these numbers" (`apps/web/src/features/users/AboutTheseNumbers.tsx`): IST days, tab visible
-       time is screen time of a front tab and not input, two visible tabs both count, server-only apps add
-       no time, only verified activity is shown and a shared login mixes people, first / last activity are
-       recorded events and not sign-in or sign-out times, raw data is kept about 6 months.
+       time is screen time of a front tab and not input, two visible tabs both count, one stretch without a
+       tick counts at most 1 minute (added in step 3), server-only apps add no time, only verified
+       activity is shown and a shared login mixes people, first / last activity are recorded events and
+       not sign-in or sign-out times, raw data is kept about 6 months.
      - The identity card says First activity / Last activity (in the selected range); the visit page heads
        its steps "Visit steps", and the person timeline links to them by that name.
   4. **Definitions (fixed now, built in later steps).**
@@ -60,11 +61,35 @@
        through API calls shows "no browser time" instead of 0; at most three lines, then "+N more" (local).
      - "Tab visible time per day" is one bar per IST day of the range in one colour, idle days drawn as 0,
        with no average, target or reference line.
+  6. **Credit cap on one `page_time` delta (shipped in step 3).**
+     - A browser tracker sends a `page_time` delta on every flush tick while the page is visible
+       (`SDK_DEFAULTS.browser.flushIntervalMs`, 5 s). A delta far longer than a tick means the tick did not
+       run (a sleeping laptop, a frozen tab) while the visible counter kept going, so it is not time the page
+       was seen. Reads credit one row at most `VISIBLE_DELTA_CREDIT_CAP_MS` = 12 ticks = 60 s
+       (`packages/shared/src/constants/traffic.ts`). The stored value is unchanged; only reads apply the cap.
+     - ONE helper, `creditedVisibleMs(alias)` in `apps/api/src/db/sql.ts`, renders
+       `CASE WHEN visible_ms > cap THEN cap ELSE visible_ms END`. It is a CASE and not LEAST because
+       PostgreSQL's LEAST ignores NULL and would credit the cap to every API row of the person UNION and to
+       every other event type.
+     - It is applied at all four places a shown visible time is summed, so person, visit and page numbers
+       agree on the same visit: the page view's time (`pageViewVisibleMs`: person timeline and visit steps),
+       the visit stats (`sessionStatsStatement`: Visits list and visit header), the page stats
+       (`pageStatsStatement`: avg / p50 on Pages and one page) and the person day (`listUserDailyActivity`).
+       A unit test pins the CASE at each site and, in every read, fails on any aggregate (sum, avg, min,
+       max, percentile) or LEAST / GREATEST over a raw `visible_ms`; only avg / p50 over the page stats CTE
+       of already credited sums is allowed.
+     - This changes shipped numbers: tab visible time on the person, visit and page screens drops where
+       sleep gaps used to be credited. Trackers that tick normally are unaffected. The public browser guide
+       states the tick and the cap (`docs/integration/03-browser-contract.md`, noted in `docs/CHANGELOG.md`);
+       the Visible time tooltip (`METRIC_COPY.visibleTime`: Pages, one page, the Visits list and the visit
+       header), the person tab visible time (`METRIC_COPY.activeTime`) and "About these numbers" say "one
+       stretch without a tick counts at most 1 minute".
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
   - The one-day Visits link opens a list read that writes a `person_visits` access-log row, like "View visits".
-  - Still to come, each recorded here when it ships: a read-side credit cap on long
-    `page_time` deltas (it lowers some shipped tab-visible numbers), the one-day view and its access-log
-    surface, making the visit steps of a verified person admin-only (this changes the ADR 0015 line that kept
+  - A new read that sums `visible_ms` for a shown time must go through `creditedVisibleMs`; the
+    repository test fails otherwise.
+  - Still to come, each recorded here when it ships: the one-day view and its access-log surface, making
+    the visit steps of a verified person admin-only (this changes the ADR 0015 line that kept
     `journeys.session` open to every viewer), and usual activity hours.

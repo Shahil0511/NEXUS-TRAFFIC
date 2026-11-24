@@ -7,6 +7,7 @@
  * parity test in apps/api (`schema-parity.integration.test.ts`) fails the build if a CHECK list
  * ever drifts from these arrays. NEVER add a value here without a migration that widens the CHECK.
  */
+import { SDK_DEFAULTS } from './ingest';
 
 // ─── Browser (frontend tracker) events ──────────────────────────────────────
 
@@ -241,3 +242,11 @@ export const PERSON_ACCESS_COALESCE_MS = 10 * 60 * 1000;
  * partial) day is dropped rather than shown with apps missing.
  */
 export const USER_DAILY_APP_ROWS_LIMIT = 3000;
+
+/**
+ * WHY: a `page_time` delta normally covers one flush tick (~5 s). A much longer one means the tick
+ * timer did not run (a sleeping laptop, a frozen tab), so the delta is not time the page was seen.
+ * Every read that sums `visible_ms` credits at most 12 ticks per row (`creditedVisibleMs`,
+ * apps/api/src/db/sql.ts); the stored value is unchanged. @see ADR 0017
+ */
+export const VISIBLE_DELTA_CREDIT_CAP_MS = 12 * SDK_DEFAULTS.browser.flushIntervalMs; // 60_000

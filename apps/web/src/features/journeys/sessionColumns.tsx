@@ -6,6 +6,7 @@ import { ActorCell } from '@/components/ActorCell';
 import type { DataTableColumn } from '@/components/DataTable';
 import { filterLinkQuery } from '@/features/filters/useGlobalFilters';
 import { EMPTY_VALUE, formatDateTime, formatDuration, formatInteger } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 import { sessionActor } from './sessionSteps';
@@ -68,6 +69,8 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
     {
       id: 'visible',
       header: 'Visible',
+      // One delta counts at most 1 minute (ADR 0017): the tooltip says so where the number is shown.
+      hint: metricInfo('visibleTime'),
       align: 'right',
       cell: (row) => formatDuration(row.visibleMs),
     },

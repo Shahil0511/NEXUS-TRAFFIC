@@ -13,6 +13,7 @@ import {
   SSO_COOKIE_OUTCOME_VALUES,
   type SsoCookieOutcome,
   USER_DAILY_APP_ROWS_LIMIT,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
 } from './constants';
 import { toEndpointId, uuidV5 } from './endpoint-id';
 import {
@@ -264,6 +265,11 @@ describe('Phase A contract invariants', () => {
     const widestDays = Math.ceil(MAX_COUNT_RANGE_MS / 86_400_000) + 1;
     expect(Number.isInteger(USER_DAILY_APP_ROWS_LIMIT)).toBe(true);
     expect(USER_DAILY_APP_ROWS_LIMIT).toBeGreaterThanOrEqual(widestDays * 30);
+  });
+
+  it('a page_time delta is credited at most 12 browser flush ticks (60 s, ADR 0017)', () => {
+    expect(VISIBLE_DELTA_CREDIT_CAP_MS).toBe(60_000);
+    expect(VISIBLE_DELTA_CREDIT_CAP_MS).toBe(12 * SDK_DEFAULTS.browser.flushIntervalMs);
   });
 
   it('the environment filter is the environments plus all', () => {

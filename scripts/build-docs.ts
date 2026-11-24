@@ -48,6 +48,7 @@ import {
   SDK_KILL_ERROR_CODES,
   SDK_MODULE_SWITCH_MIN_VERSION,
   SERVER_BATCH_EXAMPLE,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
 } from '@nexus/shared';
 import { Marked, type Tokens } from 'marked';
 
@@ -146,6 +147,9 @@ export const TOKENS: Readonly<Record<string, string>> = {
   SDK_RETRY_MAX_KB: String(SDK_DEFAULTS.browser.retryQueueMaxBytes / KIB),
   SDK_INGEST_TIMEOUT: String(SDK_DEFAULTS.browser.ingestTimeoutMs / 1000),
   SDK_MAX_PENDING_BATCHES: String(SDK_DEFAULTS.browser.maxPendingBatches),
+  // ─── Read side: how much of one page_time delta is credited (ADR 0017) ───
+  BROWSER_TICK_SECONDS: String(SDK_DEFAULTS.browser.flushIntervalMs / 1000),
+  VISIBLE_CREDIT_CAP_SECONDS: String(VISIBLE_DELTA_CREDIT_CAP_MS / 1000),
   PII_KINDS: codeList(PII_KIND_VALUES),
   COVERAGE_TARGET: percentOf(COVERAGE_TARGET_RATIO),
   RELEASE_TARGET: percentOf(RELEASE_COVERAGE_TARGET),

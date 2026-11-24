@@ -311,11 +311,11 @@ apps/api/src/domain/mappers.ts                         mapSessionSummary (IP adm
 | `users.profile` | `.profile` | `getUserProfile` + `ApiRequestQueryRepository.listUserTopEndpoints` + `getUserLatestContext` | **admin-only** (`...admin`); by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows; per-app activity (`listUserApps`); `latest` = the newest browser event's device / tz / lang / release (identity card) |
 | `users.timeline` | `.timeline` | `listUserTimeline` | **admin-only**; API ∪ browser, keyset `(occurred_at, event_id)` DESC |
 | `users.devices` | `.devices` | `listUserDevices` | **admin-only**; both tables grouped by `ua_device, ua_browser, ua_os` (newest first, `USER_DEVICES_LIMIT`); empty (not 404) without activity; read by the Devices tab only |
-| `users.daily` | `.daily` | `listUserDailyActivity` | **admin-only**; window widened to whole IST days (`wholeReportingDays`), one SQL row per (IST day, app) (same day bucket as DAU, `USER_DAILY_APP_ROWS_LIMIT` + 1), folded by `foldUserDays` into one item per day with `perApp` in first-activity order (`dropTruncatedOldestDay` drops a day cut by the cap), newest first, idle days left out, today `inProgress`; first / last activity over both tables, tab visible time = Σ `page_time.visible_ms` |
+| `users.daily` | `.daily` | `listUserDailyActivity` | **admin-only**; window widened to whole IST days (`wholeReportingDays`), one SQL row per (IST day, app) (same day bucket as DAU, `USER_DAILY_APP_ROWS_LIMIT` + 1), folded by `foldUserDays` into one item per day with `perApp` in first-activity order (`dropTruncatedOldestDay` drops a day cut by the cap), newest first, idle days left out, today `inProgress`; first / last activity over both tables, tab visible time = Σ credited `page_time.visible_ms` (`creditedVisibleMs`) |
 | `journeys.sessions` | `JourneyController.sessions` / `JourneyService.sessions` | `listSessions` | strongest identity (`IDENTITY_RANKS`), entry/exit page, optional `userKey` (then admin-only + `person_visits`), offset cursor |
 | `journeys.session` | `.session` | `getSession` | see above |
 | `journeys.topPaths` | `.topPaths` | `listTopPaths` | 3-step `lead()` over page views, reloads collapsed; 31-day cap |
-| `pages.list` | `PageController.list` / `PageService.list` | `listPageStats` | Σ `visible_ms` per page view → avg / p50 (31-day cap), exits, distinct users; `pageId` = `toPageId` |
+| `pages.list` | `PageController.list` / `PageService.list` | `listPageStats` | Σ credited `visible_ms` per page view → avg / p50 (31-day cap), exits, distinct users; `pageId` = `toPageId` |
 | `pages.detail` | `.detail` | `listPageTemplates` → `getPageDetail` + `ApiRequestQueryRepository.listPageApiCalls` | opaque `pageId` resolved in the service ([ADR 0007](decisions/0007-page-and-tool-ids-and-drill-downs.md)); trend, viewers, tools, came from / went to |
 | `tools.usage` | `ToolController.usage` / `ToolService.usage` | `listToolUsage` | top tools + trend of those tools; gaps → `fillToolTrendGaps`; `toolId` = `toToolId` |
 | `tools.detail` | `.detail` | `listToolNames` → `getToolDetail` | opaque `toolId` resolved in the service; users, pages, actions |
@@ -345,7 +345,9 @@ widens its window to whole IST days (`wholeReportingDays`, `packages/shared/src/
 Non-paged lists (top paths, pages, tools, geo) return `WindowedListDto<T>` = `{ window, items }`.
 `page_time` rows carry visible-ms DELTAS: the time of a page view is Σ `visible_ms` of the `page_time`
 rows whose `page_view_id` is its `event_id` (`pageViewVisibleMs`); timelines and replays fold them into
-the page view and never list them.
+the page view and never list them. Every such sum (page view, visit stats, page stats, person day) credits
+one row at most `VISIBLE_DELTA_CREDIT_CAP_MS` through `creditedVisibleMs` (`apps/api/src/db/sql.ts`, a
+NULL-safe CASE, never LEAST; [ADR 0017](decisions/0017-person-daily-depth.md)).
 
 Web half (page → View → hook → `api.*`; every View reads the global filters from `useGlobalFilters`):
 

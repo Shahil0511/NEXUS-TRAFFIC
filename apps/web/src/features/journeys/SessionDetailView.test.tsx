@@ -1,9 +1,11 @@
 import { ROUTES } from '@nexus/shared';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CLAIMED_SESSION, SESSION_DETAIL, SESSION_ID, USER_KEY } from '@/test/fixtures';
+import { METRIC_COPY } from '@/lib/metricCopy';
 import { PAGES } from '@/lib/pages';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
@@ -62,6 +64,20 @@ describe('SessionDetailView', () => {
     expect((await screen.findByRole('link', { name: /person page/i })).getAttribute('href')).toBe(
       `/users/${USER_KEY}?app=ebo-sales`,
     );
+  });
+
+  it('explains the Visible time card, including the 1-minute credit per delta (ADR 0017)', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.journeys.session), () => HttpResponse.json(SESSION_DETAIL)),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<SessionDetailView app="ebo-sales" sessionId={SESSION_ID} />);
+    await screen.findByRole('list', { name: 'Visit steps' });
+    const metrics = screen.getByRole('region', { name: 'Visit metrics' });
+    await user.click(within(metrics).getByRole('button', { name: 'What is Visible time?' }));
+    const tip = await screen.findByRole('tooltip');
+    expect(tip).toHaveTextContent(METRIC_COPY.visibleTime.short);
+    expect(tip).toHaveTextContent('counts at most 1 minute');
   });
 
   it("scopes the trail and every link to the session's app, even under another app's filter", async () => {

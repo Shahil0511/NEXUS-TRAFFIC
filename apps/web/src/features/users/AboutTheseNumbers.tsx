@@ -10,6 +10,7 @@ const COMMON_LINES = [
   'Days and hours are India time (IST).',
   'Tab visible time is how long an app page was on screen in a front tab. It is not keyboard or mouse use: a tab left open on screen keeps counting.',
   'Two visible windows or tabs both count in Tab visible time.',
+  'One stretch without a tick (for example a sleeping laptop) counts at most 1 minute.',
   'Apps that send only server calls (no browser tracker) move first and last activity but add no time.',
   'Only signed-in (verified) activity is shown. If a login is shared, this activity may belong to several people.',
   'First and last activity are recorded events, not sign-in or sign-out times.',

@@ -2,7 +2,12 @@
  * Small SQL-building helpers. Values ALWAYS go through `$n` placeholders; identifiers and
  * ORDER BY columns come only from frozen whitelists — never from user input.
  */
-import { REPORTING_UTC_OFFSET, REPORTING_TIME_ZONE, type Grain } from '@nexus/shared';
+import {
+  REPORTING_UTC_OFFSET,
+  REPORTING_TIME_ZONE,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
+  type Grain,
+} from '@nexus/shared';
 
 /** Collects positional parameters: `where.push(\`app_id = ${p.add(appId)}\`)`. */
 export class ParamList {
@@ -44,6 +49,19 @@ const DATE_BIN_STRIDE: Record<Exclude<Grain, 'day'>, string> = {
 export function bucketExpr(grain: Grain, column = 'occurred_at'): string {
   if (grain === 'day') return `date_trunc('day', ${column}, '${REPORTING_TIME_ZONE}')`;
   return `date_bin('${DATE_BIN_STRIDE[grain]}', ${column}, TIMESTAMPTZ '${BUCKET_ORIGIN_ISO}')`;
+}
+
+/**
+ * Credited tab-visible ms of one `page_time` row of `alias`: the stored delta, at most
+ * VISIBLE_DELTA_CREDIT_CAP_MS (a longer delta means the tracker's tick did not run, e.g. a sleeping
+ * laptop). NULL stays NULL, so API rows and other event types add nothing — which is why this is a
+ * CASE and not LEAST (LEAST ignores NULL and would credit the cap). Every SUM of visible_ms that
+ * feeds a shown time goes through it, so person, visit and page numbers agree. `alias` MUST be a
+ * trusted identifier.
+ * @see ../../../../ai-context/decisions/0017-person-daily-depth.md
+ */
+export function creditedVisibleMs(alias: string): string {
+  return `(CASE WHEN ${alias}.visible_ms > ${VISIBLE_DELTA_CREDIT_CAP_MS} THEN ${VISIBLE_DELTA_CREDIT_CAP_MS} ELSE ${alias}.visible_ms END)`;
 }
 
 /** Opaque offset cursor for aggregate lists (keyset is not meaningful over GROUP BY results). */

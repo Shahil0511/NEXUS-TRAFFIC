@@ -3,7 +3,11 @@
  * users are verified identities only, partial-index predicates are literal, values are parameters.
  * Results are covered by test/db/analytics-queries.integration.test.ts.
  */
-import { BREAKDOWN_DIMENSION_VALUES, USER_DAILY_APP_ROWS_LIMIT } from '@nexus/shared';
+import {
+  BREAKDOWN_DIMENSION_VALUES,
+  USER_DAILY_APP_ROWS_LIMIT,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
+} from '@nexus/shared';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
@@ -17,6 +21,9 @@ const FILTER: TrafficFilter = {
   appId: '11111111-1111-4111-8111-111111111111',
   environments: null,
 };
+/** The credited (capped, NULL-safe) visible ms of one row of `alias` — spelled out, not imported (ADR 0017). */
+const CAPPED = (alias: string): string =>
+  `(CASE WHEN ${alias}.visible_ms > ${VISIBLE_DELTA_CREDIT_CAP_MS} THEN ${VISIBLE_DELTA_CREDIT_CAP_MS} ELSE ${alias}.visible_ms END)`;
 /** The same scope with an environment filter (ADR 0008). */
 const STAGING: TrafficFilter = { ...FILTER, environments: ['staging'] };
 const USER_KEY = Buffer.alloc(32, 0xab);
@@ -170,7 +177,7 @@ describe('WebEventQueryRepository person reads (devices, daily)', () => {
       "date_trunc('day', h.occurred_at, 'Asia/Kolkata') AS day, a.slug AS app",
     );
     expect(text).toContain(
-      "coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms",
+      `coalesce(sum(${CAPPED('h')}) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms`,
     );
     expect(text).toContain('(r.status_code >= 400) AS failed');
     expect(text).toContain('GROUP BY 1, 2');
@@ -332,4 +339,98 @@ describe('WebEventQueryRepository breakdown and devices', () => {
       `FILTER (WHERE ${IDENTIFIED_SQL('h')}) AS identified`,
     );
   });
+});
+
+/** One credited row (the CAPPED shape, any alias and number): stripped before looking for raw sums. */
+const CREDITED_ROW = /\(CASE WHEN (\w+)\.visible_ms > \d+ THEN \d+ ELSE \1\.visible_ms END\)/g;
+/** Calls whose argument must never be a raw visible_ms: aggregates, ordered-set groups, LEAST / GREATEST. */
+const VISIBLE_CALL =
+  /\b(?:sum|avg|min|max|percentile_cont|percentile_disc|least|greatest)\s*\(|\bWITHIN\s+GROUP\s*\(/gi;
+/**
+ * The only allowed raw arguments: avg / p50 over the page stats `visible` CTE (alias `t`), whose
+ * rows are already Σ credited visible_ms per page view.
+ */
+const OVER_CREDITED_CTE = new Set(['t.visible_ms', 'ORDER BY t.visible_ms']);
+
+/** The argument text of every VISIBLE_CALL in `sql` that reads a raw (uncredited) visible_ms. */
+function rawVisibleArguments(sql: string): string[] {
+  const text = sql.replace(CREDITED_ROW, 'credited');
+  const found: string[] = [];
+  for (const match of text.matchAll(VISIBLE_CALL)) {
+    const start = match.index + match[0].length;
+    let depth = 1;
+    let end = start;
+    for (; end < text.length && depth > 0; end++) {
+      if (text[end] === '(') depth++;
+      else if (text[end] === ')') depth--;
+    }
+    const argument = text
+      .slice(start, end - 1)
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (/\bvisible_ms\b/i.test(argument) && !OVER_CREDITED_CTE.has(argument)) found.push(argument);
+  }
+  return found;
+}
+
+describe('WebEventQueryRepository credited visible time (ADR 0017)', () => {
+  /** Every statement of every method below, joined: the four places a shown visible time is summed. */
+  async function statementsOf(read: (repo: WebEventQueryRepository) => Promise<unknown>) {
+    const { exec, repo } = build();
+    exec.rows = [{}];
+    await read(repo);
+    return exec.statements.map((statement) => statement.text).join(' ');
+  }
+
+  it('caps each page_time delta at all four sum sites (page view, visit, page stats, daily)', async () => {
+    // pageViewVisibleMs (`pt`), via the person timeline and the visit steps.
+    const timeline = await statementsOf((r) =>
+      r.listUserTimeline(USER_KEY, FILTER, { after: null, limit: 3 }),
+    );
+    expect(timeline).toContain(`SELECT sum(${CAPPED('pt')})`);
+    const session = await statementsOf((r) => r.getSession('app-id', SESSION_ID, FILTER));
+    expect(session).toContain(`SELECT sum(${CAPPED('pt')})`);
+    // sessionStatsStatement (`w`), the Visits list and the visit header.
+    const visitStat = `coalesce(sum(${CAPPED('w')}) FILTER (WHERE w.event_type = 'page_time'), 0) AS visible_ms`;
+    expect(await statementsOf((r) => r.listSessions(FILTER, { limit: 3, offset: 0 }))).toContain(
+      visitStat,
+    );
+    expect(session).toContain(visitStat);
+    // pageStatsStatement (`w`), the Pages list and one page.
+    const pageStat = `SELECT w.page_view_id, sum(${CAPPED('w')}) AS visible_ms`;
+    expect(await statementsOf((r) => r.listPageStats(FILTER, 5))).toContain(pageStat);
+    expect(
+      await statementsOf((r) => r.getPageDetail('/ebo-sales/stores/:id', FILTER, 'hour')),
+    ).toContain(pageStat);
+    // listUserDailyActivity (`h`).
+    expect(await statementsOf((r) => r.listUserDailyActivity(USER_KEY, FILTER))).toContain(
+      `sum(${CAPPED('h')})`,
+    );
+  });
+
+  it('the raw-visible_ms guard catches every spelling and lets the credited shapes through', () => {
+    for (const raw of [
+      'SELECT sum(visible_ms) FROM t',
+      'SELECT sum(w.visible_ms::int8) FROM t',
+      'SELECT sum(coalesce(w.visible_ms, 0)) FROM t',
+      'SELECT avg(w.visible_ms), max( w.visible_ms ) FROM t',
+      'SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY w.visible_ms) FROM t',
+      'SELECT sum(least(w.visible_ms, 60000)) FROM t',
+    ]) {
+      expect(rawVisibleArguments(raw), raw).not.toEqual([]);
+    }
+    expect(
+      rawVisibleArguments(
+        `SELECT coalesce(sum(${CAPPED('w')}) FILTER (WHERE w.event_type = 'page_time'), 0) AS visible_ms,
+                avg(t.visible_ms), percentile_cont(0.5) WITHIN GROUP (ORDER BY t.visible_ms)`,
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(Object.entries(READS))(
+    '%s never aggregates a raw visible_ms and never uses LEAST on it (NULL would become the cap)',
+    async (_name, read) => {
+      expect(rawVisibleArguments(await statementsOf(read))).toEqual([]);
+    },
+  );
 });

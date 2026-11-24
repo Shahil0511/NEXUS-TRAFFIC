@@ -18,6 +18,57 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-24 — Person 360 daily depth, step 3: credit cap on one `page_time` delta (ADR 0017)
+
+Read-side change only: no contract field, no migration, no new route leaf. **It changes shipped numbers:** tab
+visible time on the person, visit and page screens drops wherever a sleep gap (one huge `page_time` delta) was
+credited before. Brief the owner before pushing.
+
+**Done**
+- **Shared** (`constants/traffic.ts`): `VISIBLE_DELTA_CREDIT_CAP_MS = 12 * SDK_DEFAULTS.browser.flushIntervalMs`
+  (60 000). `contracts.test.ts` pins it. The `@nexus/react/early` bundle still tree-shakes `SDK_DEFAULTS` away
+  (checked with a scratch build: 8043 B, no `flushIntervalMs` in it).
+- **API:** `creditedVisibleMs(alias)` in `apps/api/src/db/sql.ts` — `CASE WHEN visible_ms > cap THEN cap ELSE
+  visible_ms END` (NULL stays NULL; LEAST would credit the cap to API rows). Applied at all four sum sites of
+  `WebEventQueryRepository` (a grep found no other `sum(… visible_ms …)` in any repository): `pageViewVisibleMs`
+  (`pt`; person timeline, visit steps), `sessionStatsStatement` (`w`; Visits list, visit header),
+  `pageStatsStatement` (`w`; Pages avg / p50, one page), `listUserDailyActivity` (`h`). The stored value is not
+  changed.
+- **Web:** `METRIC_COPY.activeTime` and `METRIC_COPY.visibleTime` say one stretch without a tick counts at most 1
+  minute (`activeTime` short / long reworded to stay within the 260-character tooltip limit; "API calls add no
+  time" stays in "About these numbers"); "About these numbers" gains the line on both views. The visit screens
+  now show that tooltip too: `info={metricInfo('visibleTime')}` on the visit header's Visible time card
+  (`SessionDetailView.tsx`) and `hint` on the Visits list's Visible column (`sessionColumns.tsx`), as on Pages and
+  one page.
+- **Public guide** (`docs/integration/03-browser-contract.md`): the page-time recipe now lists the visible tick
+  (`reason: "idle"` every `{{BROWSER_TICK_SECONDS}}` s, what the reference SDK does) and states that one delta
+  counts at most `{{VISIBLE_CREDIT_CAP_SECONDS}}` s. Both tokens come from the shared constants
+  (`scripts/build-docs.ts`, checked in `test/docs-build.test.ts`). `docs/CHANGELOG.md` gains a dated
+  "dashboard read change" entry (the guide's visible tick; the 60 s credit, stored values unchanged, reference SDK
+  1.0.0 / 1.1.0 unaffected, a tracker sending one long delta per view now credited at most 60 s per delta).
+- **Tests:** `db/sql.test.ts` (new: exact CASE, NULL-safe shape, no LEAST); repository test pins the CASE at all
+  four sites (timeline, visit list + header, page list + detail, daily), and for EVERY read fails on any
+  sum / avg / min / max / percentile / LEAST / GREATEST whose argument reads a raw `visible_ms` once the credited
+  CASE is stripped (`rawVisibleArguments`: balanced-paren argument scan, so `sum(visible_ms)`, casts and
+  `coalesce(…)` are caught; only avg / p50 over the page stats CTE `t` is allowed; a self-test pins those
+  spellings); the pinned daily `active_ms` string updated. Web: metric copy, the caveat line on both views, and the
+  Visible time tooltip (with the 1-minute line) on the visit header and the Visits list. DB (CI / owner only,
+  `RUN_DB_TESTS=1`): new `test/db/visible-credit-cap.integration.test.ts` with the S5 seed (`seedVisibleCreditCap`: a 3 h delta + a 4 s
+  tick + an API row in one visit → 64 000 ms on the person day, visit list, visit header and page view, page avg /
+  p50; the API row is not credited).
+- Docs: ADR 0017 (point 6, consequences; "About these numbers" bullet re-wrapped), `07-data-model.md`,
+  `03-code-navigation.md`, `GLOSSARY.md`, `docs/CHANGELOG.md`. Repository doc comments (file header,
+  `pageViewVisibleMs`, `sessionStatsStatement`, `listUserDailyActivity`, `listPageStats`) now say Σ credited
+  visible_ms with `@see ../db/sql.ts creditedVisibleMs` (header also links ADR 0017).
+- **Gates:** `npm run typecheck` and `npm test` green (DB suites skipped without `RUN_DB_TESTS`).
+
+**Next / known issues**
+- Owner brief (Hinglish) before the push: sleep gaps no longer count as tab visible time, so some older person,
+  visit and page numbers go down; trackers that tick normally are unaffected.
+- A hand-rolled browser tracker that skips the visible tick (one delta per view) is now credited at most 60 s per
+  delta; the guide says so. Apps on the reference SDK tick every 5 s.
+- Step 4: migration 0014 + the visit-steps guard.
+
 ## 2026-11-24 — Person 360 daily depth, step 2: per-app split of each day and a per-day chart (ADR 0017)
 
 Contract change, no migration, no new route leaf. Tab visible time is still the plain Σ of `visible_ms` (the
