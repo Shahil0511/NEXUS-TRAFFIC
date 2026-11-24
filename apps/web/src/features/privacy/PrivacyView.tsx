@@ -113,7 +113,7 @@ function PrivacyAdmin() {
         <Panel
           title="Who opened a person's page"
           icon={Eye}
-          description={`Newest first. A part is a tab of the person page, or the Visits or Failed requests list narrowed to that person. The same admin, person and part is recorded at most once every ${COALESCE_MINUTES} minutes; pages left open do not add entries on their own.`}
+          description={`Newest first. A part is a tab of the person page or a part of one (such as one day), the Visits or Failed requests list narrowed to that person, or the steps of one of their visits. The same admin, person and part is recorded at most once every ${COALESCE_MINUTES} minutes; pages left open do not add entries on their own.`}
           contentClassName="px-0 pb-0"
           aside={
             userKey ? (

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { isForbidden } from '@/components/PersonAdminOnly';
 import { ApiError } from '@/lib/apiError';
 import {
   APPS,
@@ -18,7 +19,7 @@ import {
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
-import { isForbidden, isNoActivity, UserDetailView } from './UserDetailView';
+import { isNoActivity, UserDetailView } from './UserDetailView';
 
 const NOBODY_ONLINE: OnlineNowDto = {
   asOf: '2026-10-01T08:00:00.000Z',

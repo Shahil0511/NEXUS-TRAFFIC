@@ -39,15 +39,27 @@ const PERSON_USER_LEAVES: ReadonlySet<unknown> = new Set(
 );
 
 /**
+ * The second key part of the single-visit read (`journeys.session`, "Visit steps"). WHY: for a
+ * verified person's visit it is a person-level read, recorded as `person_visit_steps` (ADR 0017),
+ * and whether a visit is verified is known only from its answer, not from its key. So the whole
+ * leaf stays out of traffic refresh: an anonymous visit refreshes on a real action only, and a
+ * verified one (or a refused 403) is never re-sent because traffic arrived.
+ * @see ../../../../../ai-context/decisions/0017-person-daily-depth.md
+ */
+const VISIT_STEPS_LEAF: unknown = qk.journeys.session('', '', { range: 'today' })[1];
+
+/**
  * True for query keys whose data changes when new traffic arrives — EXCEPT person-level reads
- * (a person's page, or any list narrowed to one person by `userKey`): each of those answers is
- * recorded in the person access log, so a background refetch would read as the admin opening
- * the person again. They refresh only on a real action (open, tab, focus, retry).
+ * (a person's page, the steps of one visit, or any list narrowed to one person by `userKey`):
+ * each of those answers is (or may be) recorded in the person access log, so a background
+ * refetch would read as the admin opening the person again. They refresh only on a real action
+ * (open, tab, focus, retry).
  */
 export function isTrafficDrivenKey(queryKey: QueryKey): boolean {
   const group = queryKey[0];
   if (typeof group !== 'string' || NOT_TRAFFIC_DRIVEN.has(group)) return false;
   if (group === qk.users.all[0] && PERSON_USER_LEAVES.has(queryKey[1])) return false;
+  if (group === qk.journeys.all[0] && queryKey[1] === VISIT_STEPS_LEAF) return false;
   return !queryKey.some(isNarrowedToOnePerson);
 }
 

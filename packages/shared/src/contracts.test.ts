@@ -8,6 +8,7 @@ import {
   MAX_COUNT_RANGE_MS,
   PERSON_ACCESS_COALESCE_MS,
   PERSON_ACCESS_SURFACE_VALUES,
+  type PersonAccessSurface,
   SDK_DEFAULTS,
   SERVER_BREAKDOWN_DIMENSION_VALUES,
   SSO_COOKIE_OUTCOME_VALUES,
@@ -100,8 +101,39 @@ describe('ROUTES', () => {
       const [, leaf] = id.split('.') as [string, keyof typeof ROUTES.users];
       expect(ROUTES.users[leaf].path).toMatch(/^\/v1\/users\/:userKey(\/[a-z]+)?$/);
     }
-    // + person_visits and person_failures (the lists narrowed to one person by ?userKey=).
-    expect(PERSON_ACCESS_SURFACE_VALUES).toHaveLength(PERSON_ROUTE_LEAVES.length + 2);
+    // One per person leaf, + person_visits and person_failures (the lists narrowed to one person by
+    // ?userKey=), + the ADR 0017 surfaces: one day, usual activity hours (their leaves come in
+    // later steps) and the visit steps of a verified person (journeys.session, guarded by data).
+    expect(PERSON_ACCESS_SURFACE_VALUES).toEqual([
+      'person_profile',
+      'person_timeline',
+      'person_devices',
+      'person_daily',
+      'person_visits',
+      'person_failures',
+      'person_day',
+      'person_pattern',
+      'person_visit_steps',
+    ]);
+    // Each person leaf has its own surface (the Record makes a new leaf without one a type error).
+    // What is left is exactly: the two narrowed lists, the visit steps of a verified person, and the
+    // surfaces of person leaves still to come (users.day in step 5, users.pattern in step 6; move
+    // each into SURFACE_OF_LEAF when its leaf lands).
+    const SURFACE_OF_LEAF: Record<(typeof PERSON_ROUTE_LEAVES)[number], PersonAccessSurface> = {
+      'users.profile': 'person_profile',
+      'users.timeline': 'person_timeline',
+      'users.devices': 'person_devices',
+      'users.daily': 'person_daily',
+    };
+    const SURFACES_OF_LEAVES_TO_COME: PersonAccessSurface[] = ['person_day', 'person_pattern'];
+    const leafSurfaces: PersonAccessSurface[] = PERSON_ROUTE_LEAVES.map((id) => SURFACE_OF_LEAF[id]);
+    expect(new Set(leafSurfaces).size).toBe(PERSON_ROUTE_LEAVES.length);
+    for (const surface of leafSurfaces) expect(PERSON_ACCESS_SURFACE_VALUES).toContain(surface);
+    expect(
+      PERSON_ACCESS_SURFACE_VALUES.filter((surface) => !leafSurfaces.includes(surface)).sort(),
+    ).toEqual(
+      ['person_visits', 'person_failures', 'person_visit_steps', ...SURFACES_OF_LEAVES_TO_COME].sort(),
+    );
     for (const id of PERSON_FILTERED_ROUTE_LEAVES) expect(known.has(id), id).toBe(true);
     const narrowable = [
       sessionListQuerySchema,

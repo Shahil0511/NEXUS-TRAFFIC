@@ -35,6 +35,8 @@ describe('isTrafficDrivenKey', () => {
       qk.users.devices(key, { range: '24h' }),
       qk.users.daily(key, { range: '24h' }),
       qk.journeys.sessions({ range: '24h', limit: 50, userKey: key }),
+      // A verified visit's steps are access-logged (ADR 0017); the key cannot tell, so never.
+      qk.journeys.session('ebo-sales', '0b0c7f43-5a4e-4d0e-9a68-3f2a1b7c9d10', { range: '24h' }),
       qk.privacy.accessLog({ limit: 50 }),
     ]) {
       expect(isTrafficDrivenKey(personKey), String(personKey[1])).toBe(false);

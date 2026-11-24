@@ -1017,6 +1017,52 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
       });
     });
 
+    it('session: a verified visit is admin-only and logged as person_visit_steps (0014 CHECK)', async () => {
+      const STEPS_ADMIN: Viewer = { email: 'steps-admin@libas.in', isAdmin: true };
+      const guarded = new JourneyService(
+        webEvents,
+        appSlugs,
+        clock,
+        new PersonAccessRecorder(
+          new PersonAccessLogRepository(db.appPool),
+          webEvents,
+          clock,
+          quietLogger,
+        ),
+      );
+      // J1 is USER_A's (sso_cookie): a viewer gets 403, an admin the steps and one row.
+      await expect(
+        guarded.session(SALES_SLUG, seed.sessions.j1, { range: '24h' }, VIEWER),
+      ).rejects.toMatchObject({ statusCode: 403 });
+      const dto = await guarded.session(
+        SALES_SLUG,
+        seed.sessions.j1,
+        { range: '24h' },
+        STEPS_ADMIN,
+      );
+      expect(dto.summary.userKey).toBe(userKeyHex(USER_A));
+      // J2 is claimed only: open to a viewer, nothing logged.
+      const claimed = await guarded.session(SALES_SLUG, seed.sessions.j2, { range: '24h' }, VIEWER);
+      expect(claimed.summary.userKey).toBeNull();
+
+      const { rows } = await db.ownerPool.query<{
+        viewer_email: string;
+        surface: string;
+        subject_email_masked: string;
+      }>(
+        `SELECT viewer_email, surface, subject_email_masked FROM traffic.person_access_log
+          WHERE surface = 'person_visit_steps' AND viewer_email IN ($1, $2) ORDER BY id`,
+        [STEPS_ADMIN.email, VIEWER.email],
+      );
+      expect(rows).toEqual([
+        {
+          viewer_email: STEPS_ADMIN.email,
+          surface: 'person_visit_steps',
+          subject_email_masked: 'a***@libas.in',
+        },
+      ]);
+    });
+
     it('topPaths: reloads collapse, so both sales sessions share one 3-step path', async () => {
       const dto = await journeys.topPaths({ range: '24h', limit: 20 });
       expect(dto.items).toEqual(JOURNEY_EXPECTED.topPaths);

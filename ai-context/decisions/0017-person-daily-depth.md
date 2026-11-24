@@ -84,12 +84,46 @@
        the Visible time tooltip (`METRIC_COPY.visibleTime`: Pages, one page, the Visits list and the visit
        header), the person tab visible time (`METRIC_COPY.activeTime`) and "About these numbers" say "one
        stretch without a tick counts at most 1 minute".
+  7. **Visit steps of a verified person are admin-only; three more access-log surfaces (shipped in step 4).**
+     - This changes ADR 0015, which kept the single-visit read (`journeys.session`) open to every viewer.
+       A visit that has a verified person (`user_key`) is part of that person's data:
+       `JourneyService.session` throws `ForbiddenError` (403 `FORBIDDEN`) to a non-admin and, for an admin,
+       records `person_visit_steps` through `PersonAccessRecorder` (same coalescing). Anonymous and
+       claimed-only visits stay open to every viewer and write no row.
+     - "Verified" does not depend on the window the viewer picked. The summary's `user_key` covers that
+       window only, so when it is empty the service probes the same session again over the window widened
+       by `MAX_COUNT_RANGE_MS` on each side (`WebEventQueryRepository.findSessionUserKey`, one indexed
+       probe per partition, same app and environment; one tab's events all carry one environment). A narrow
+       custom range over the steps before sign-in therefore still gets 403, and an admin's row is named
+       from that wider window.
+     - The single-visit query is never refetched because of live traffic (`isTrafficDrivenKey`,
+       `apps/web/src/features/live/autoRefreshPolicy.ts`): its key cannot tell a verified visit from an
+       anonymous one, so the whole leaf refreshes on a real action only (open, focus, retry). A page left
+       open adds no access-log row and a refused read is not re-sent.
+     - The check lives in the service, not in the route table, because it depends on the data: the route
+       stays `...dashboard` (`apps/api/test/person-access.routes.test.ts` pins that it reaches the
+       controller for a viewer; `journey.service.test.ts` pins the 403 and the row).
+     - `PERSON_ACCESS_SURFACE_VALUES` gains `person_day` and `person_pattern` (their reads ship in later
+       steps) and `person_visit_steps`. Migration
+       `apps/api/migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql` swaps
+       `person_access_log_surface_check` under the same name (widening only, `NOT VALID` then `VALIDATE`);
+       0013 is applied and is not edited. The enum and the migration ship in the same deploy (migrate
+       before the API).
+     - Web: the visit page shows `PersonAdminOnly` with the visit's own trail on a 403
+       (`apps/web/src/features/journeys/SessionDetailView.tsx`; the state and `isForbidden` live in
+       `apps/web/src/components/PersonAdminOnly.tsx`, shared with the person page), never a generic error; the
+       Privacy & access log names the parts "One day", "Usual activity hours" (both lead to the Daily
+       activity tab) and "Visit steps" (the row has no visit id, so it leads to the person's Visits list).
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
   - The one-day Visits link opens a list read that writes a `person_visits` access-log row, like "View visits".
   - A new read that sums `visible_ms` for a shown time must go through `creditedVisibleMs`; the
     repository test fails otherwise.
-  - Still to come, each recorded here when it ships: the one-day view and its access-log surface, making
-    the visit steps of a verified person admin-only (this changes the ADR 0015 line that kept
-    `journeys.session` open to every viewer), and usual activity hours.
+  - A viewer who follows a link to a verified person's visit sees the admins-only state; links to visits
+    of anonymous or claimed-only visitors keep working for everyone. Screens open to viewers still render
+    such links for verified visits: the Visits list (`features/journeys/sessionColumns.tsx`), Online now
+    (`features/live/OnlineNowPanel.tsx`) and request samples (`components/requestSampleColumns.tsx`).
+    Showing them as plain text for non-admins is follow-up work, pending the owner's go-ahead.
+  - Still to come, each recorded here when it ships: the one-day view (its `person_day` surface exists
+    already) and usual activity hours (`person_pattern`).

@@ -48,6 +48,7 @@ const ALL_MIGRATIONS = [
   '0011_pii_detections',
   '0012_sso_cookie_outcomes',
   '0013_person_access_log',
+  '0014_person_access_surfaces_day_pattern_visit_steps',
 ];
 
 /** The first version no real migration uses — temp test files take it, so they never collide. */

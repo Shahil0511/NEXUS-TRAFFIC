@@ -1053,6 +1053,37 @@ export class WebEventQueryRepository {
   }
 
   /**
+   * The newest verified user_key among the browser events of ONE session (app_id, session_id)
+   * inside the window; null when none of them carries one. WHY: JourneyService.session decides
+   * whether a visit is a verified person's over a window wider than the one the viewer picked, so
+   * a narrow window cannot cut the signed-in part of the visit away and skip the admin-only guard.
+   * One indexed probe per partition (idx_web_events_app_id_session_id_seq).
+   * @see ../services/journey.service.ts JourneyService.session
+   */
+  async findSessionUserKey(
+    appId: string,
+    sessionId: string,
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<Buffer | null> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', { ...filter, appId }, params),
+      `w.session_id = ${params.add(sessionId)}`,
+      'w.user_key IS NOT NULL',
+    ];
+    const { rows } = await exec.query<{ user_key: Buffer }>(
+      `SELECT w.user_key
+         FROM traffic.web_events w
+        WHERE ${where.join(' AND ')}
+        ORDER BY w.occurred_at DESC
+        LIMIT 1`,
+      params.values,
+    );
+    return rows[0]?.user_key ?? null;
+  }
+
+  /**
    * The most common 3-page sequences (path templates, consecutive page views of one session).
    * An immediate repeat of the same page (reload) is collapsed first, so A → A → B is A → B.
    */

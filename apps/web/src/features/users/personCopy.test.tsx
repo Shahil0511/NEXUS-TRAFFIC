@@ -8,6 +8,8 @@
  * @see ../../lib/neutralCopy.ts
  */
 import {
+  ERROR_CODES,
+  PERSON_ACCESS_SURFACE_VALUES,
   ROUTES,
   type CursorPage,
   type MeDto,
@@ -82,20 +84,13 @@ function servePersonReads(me: MeDto = ME): void {
 }
 
 function serveAccessLog(): void {
-  const entries: PersonAccessEntryDto[] = [
-    'person_profile',
-    'person_timeline',
-    'person_devices',
-    'person_daily',
-    'person_visits',
-    'person_failures',
-  ].map((surface, index) => ({
+  const entries: PersonAccessEntryDto[] = PERSON_ACCESS_SURFACE_VALUES.map((surface, index) => ({
     id: index + 1,
     viewedAt: '2026-10-01T08:00:00.000Z',
     viewerEmail: 'boss@libas.in',
     subjectUserKey: USER_KEY,
     subjectEmailMasked: 'b***@libas.in',
-    surface: surface as PersonAccessEntryDto['surface'],
+    surface,
   }));
   server.use(
     http.get(routeUrl(ROUTES.privacy.accessLog), () => {
@@ -164,12 +159,29 @@ describe('person pages use neutral words only (ADR 0017)', () => {
     expect(bannedOnScreen()).toEqual([]);
   });
 
+  it("the admins-only state of a verified person's visit", async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.journeys.session), () =>
+        HttpResponse.json(
+          { error: { code: ERROR_CODES.FORBIDDEN, message: 'no', requestId: 'r' } },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderWithProviders(<SessionDetailView app="ebo-sales" sessionId={SESSION_ID} />);
+    await screen.findByRole('heading', { name: 'Only admins can open this visit' });
+    expect(bannedOnScreen()).toEqual([]);
+  });
+
   it('the privacy and access log page, with every part label', async () => {
     servePersonReads();
     serveAccessLog();
     renderWithProviders(<PrivacyView />);
     const table = await screen.findByRole('table');
     await within(table).findByText('Identity card and Summary');
+    for (const label of ['One day', 'Usual activity hours', 'Visit steps']) {
+      expect(within(table).getByText(label)).toBeInTheDocument();
+    }
     expect(bannedOnScreen()).toEqual([]);
   });
 });

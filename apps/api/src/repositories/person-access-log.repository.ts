@@ -8,6 +8,7 @@
  * - The person is stored as user_key + an ALREADY-MASKED email; a CHECK refuses anything else.
  * - Reads are newest first on (viewed_at, id), keyset-paged; values always go through `$n`.
  * @see ../../migrations/0013_person_access_log.sql
+ * @see ../../migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql (surface CHECK widened)
  */
 import type { Pool } from 'pg';
 

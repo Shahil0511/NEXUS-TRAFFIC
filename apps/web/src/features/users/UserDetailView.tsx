@@ -12,12 +12,12 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-import { AdminOnly } from '@/components/AdminOnly';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { KpiCard } from '@/components/KpiCard';
 import { PageHeader } from '@/components/PageHeader';
+import { isForbidden, PersonAdminOnly } from '@/components/PersonAdminOnly';
 import { ListSkeleton, Panel } from '@/components/Panel';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -39,7 +39,6 @@ import { UserDevicesTab } from './UserDevicesTab';
 import { UserSummaryTab } from './UserSummaryTab';
 import { useUserProfile } from './useUserProfile';
 
-const HTTP_FORBIDDEN = 403;
 const HTTP_NOT_FOUND = 404;
 const SUMMARY_PANELS = ['Top pages', 'Top tools', 'Countries'] as const;
 
@@ -61,35 +60,13 @@ const TAB_ICONS = {
  * admin open in the person access log). Decided from the viewer (useMe) BEFORE any person read is
  * sent; a 403 from the API (e.g. the admin list changed) shows the same state. While the viewer is
  * unknown (loading) nothing about the person is requested.
+ * @see ../../components/PersonAdminOnly.tsx
  */
 export function UserDetailView({ userKey }: { userKey: string }) {
   const me = useMe();
   if (me.isPending) return <PersonPageSkeleton />;
   if (me.data && !me.data.isAdmin) return <PersonAdminOnly />;
   return <PersonDetail userKey={userKey} />;
-}
-
-/**
- * What a viewer who is not an admin sees instead of a person's page: the reason in plain words and
- * the way back to the People list (which stays open to every viewer).
- */
-export function PersonAdminOnly() {
-  const { filters } = useGlobalFilters();
-  const usersHref = withQuery(PAGES.users(), filterLinkQuery(filters));
-  return (
-    <AdminOnly
-      title="Person"
-      eyebrow={<Breadcrumbs items={[{ label: 'People', href: usersHref }, { label: 'Person' }]} />}
-      heading="Only admins can open a person's page"
-      description="A person's page shows one person's daily activity, devices and visits, so only dashboard admins can open it. The People list stays open to you."
-      hint={null}
-      action={
-        <Button asChild variant="outline">
-          <Link href={usersHref}>Back to People</Link>
-        </Button>
-      }
-    />
-  );
 }
 
 /**
@@ -220,15 +197,6 @@ function PersonDetail({ userKey }: { userKey: string }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/** Whether the API refused the read for this viewer (403 FORBIDDEN: not an admin). Pure. */
-export function isForbidden(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    error.status === HTTP_FORBIDDEN &&
-    error.code === ERROR_CODES.FORBIDDEN
   );
 }
 

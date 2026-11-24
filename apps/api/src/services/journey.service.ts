@@ -14,19 +14,22 @@ import {
   type WindowedListDto,
 } from '@nexus/shared';
 
-import { environmentsOf } from '../domain/filters';
+import { environmentsOf, type TrafficFilter } from '../domain/filters';
 import { decodeOffsetCursor, encodeOffsetCursor } from '../db/sql';
 import { mapSessionEvent, mapSessionSummary, mapTopPath } from '../domain/mappers';
 import { pageFetchSize, toCursorPage } from '../domain/pagination';
 import { interleaveByTime } from '../domain/session-replay';
 import type { Viewer } from '../domain/viewer';
 import { userKeyFromHex } from '../enrichment/user-key.hasher';
-import { NotFoundError } from '../errors/app-error';
+import { ForbiddenError, NotFoundError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
 import type { PersonAccessRecorder } from './person-access.recorder';
 import { currentFilter, resolveQueryWindow, toTimeWindowDto } from './query-window';
+
+/** The 403 message for a non-admin opening a verified person's visit (no person detail in it). */
+const VERIFIED_VISIT_ADMIN_ONLY = "Only admins can open the steps of a signed-in person's visit";
 
 /** WHY: orchestrates the Journeys queries (window → app id → repository → domain → mappers). */
 export class JourneyService {
@@ -77,10 +80,17 @@ export class JourneyService {
   }
 
   /**
-   * One session replay: header + browser events in (seq, occurred_at, event_id) order with the
-   * correlated API calls interleaved by time. The app comes from the PATH (an `app` query value is
-   * ignored). 404 when the app is unknown or the session has no events in the window.
+   * One session replay ("Visit steps"): header + browser events in (seq, occurred_at, event_id)
+   * order with the correlated API calls interleaved by time. The app comes from the PATH (an `app`
+   * query value is ignored). 404 when the app is unknown or the session has no events in the window.
+   * A visit of a VERIFIED person (summary user_key set) is a person-level read: 403 for a non-admin,
+   * recorded as `person_visit_steps` for an admin. Anonymous and claimed-only visits stay open to
+   * every viewer. WHY here and not in the route table: whether the visit is a person's depends on
+   * the data, so the route stays `...dashboard`. Whether it is verified does NOT depend on the
+   * window the viewer picked (verifiedSubjectOf).
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getSession
+   * @see ./person-access.recorder.ts PersonAccessRecorder.record
+   * @see ../../../../ai-context/decisions/0017-person-daily-depth.md
    */
   async session(
     app: string,
@@ -91,12 +101,19 @@ export class JourneyService {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
     const appId = await this.resolveApp(app);
 
-    const rows = await this.webEvents.getSession(
-      appId,
-      sessionId,
-      currentFilter(window, appId, environmentsOf(query.env)),
-    );
+    const filter = currentFilter(window, appId, environmentsOf(query.env));
+    const rows = await this.webEvents.getSession(appId, sessionId, filter);
     if (!rows) throw new NotFoundError('No events for this session in the selected window');
+    const subject = await this.verifiedSubjectOf(appId, sessionId, rows.summary.user_key, filter);
+    if (subject) {
+      if (!viewer.isAdmin) throw new ForbiddenError(VERIFIED_VISIT_ADMIN_ONLY);
+      await this.personAccess.record({
+        viewer,
+        subjectUserKey: subject.userKey,
+        surface: 'person_visit_steps',
+        filter: subject.filter,
+      });
+    }
     return {
       summary: mapSessionSummary(rows.summary, viewer),
       events: interleaveByTime(rows.browserEvents, rows.apiCalls).map(mapSessionEvent),
@@ -118,6 +135,31 @@ export class JourneyService {
 
     const rows = await this.webEvents.listTopPaths(filter, query.limit);
     return { window: toTimeWindowDto(window), items: rows.map(mapTopPath) };
+  }
+
+  /**
+   * The verified person a visit belongs to, and the window to name them in; null for an anonymous
+   * or claimed-only visit. The summary's user_key covers only the viewer's window, so when it is
+   * null the session is probed again over that window widened by MAX_COUNT_RANGE_MS on each side
+   * (a visit is one tab's run of activity, far shorter than that). The environment stays the
+   * viewer's: every event of one tab carries the same one. WHY: a narrow custom range over the
+   * steps before sign-in would otherwise skip the admin-only guard and the access-log row.
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.findSessionUserKey
+   */
+  private async verifiedSubjectOf(
+    appId: string,
+    sessionId: string,
+    summaryUserKey: Buffer | null,
+    filter: TrafficFilter,
+  ): Promise<{ userKey: Buffer; filter: TrafficFilter } | null> {
+    if (summaryUserKey !== null) return { userKey: summaryUserKey, filter };
+    const widened: TrafficFilter = {
+      ...filter,
+      from: new Date(filter.from.getTime() - MAX_COUNT_RANGE_MS),
+      to: new Date(filter.to.getTime() + MAX_COUNT_RANGE_MS),
+    };
+    const userKey = await this.webEvents.findSessionUserKey(appId, sessionId, widened);
+    return userKey === null ? null : { userKey, filter: widened };
   }
 
   /** The path's app slug → internal id (an unknown slug is a 404 from the resolver). */

@@ -23,8 +23,8 @@ export interface PersonAccess {
 }
 
 /**
- * WHY: one place decides what an access-log row is. UserService, JourneyService.sessions and
- * ErrorService.summary/.list call `record` after each
+ * WHY: one place decides what an access-log row is. UserService, JourneyService.sessions /
+ * .session (a verified person's visit steps) and ErrorService.summary/.list call `record` after each
  * person-level read and before returning it:
  * - COALESCED: the same viewer + person + surface at most once per PERSON_ACCESS_COALESCE_MS
  *   (PersonAccessCoalescer, in memory — see there for why).

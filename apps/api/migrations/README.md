@@ -66,7 +66,7 @@ Flags: `--status` (report only), `--dry` (show what would be applied). Exit code
 | `traffic.ingest_rejections` | [0010](0010_ingest_rejections.sql) | no | nexus_app (ingest) | hourly refused events per source, SDK, code and normalised schema path (codes only, never messages) |
 | `traffic.pii_detections` | [0011](0011_pii_detections.sql) | no | nexus_app (ingest) | hourly PII redactions per source, field and kind (counts only, never values) |
 | `traffic.sso_cookie_outcomes` | [0012](0012_sso_cookie_outcomes.sql) | no | nexus_app (browser ingest) | hourly SSO cookie verification outcomes per beacon origin |
-| `traffic.person_access_log` | [0013](0013_person_access_log.sql) | no | nexus_app, **append-only** (person-level reads) | which admin opened which part of whose person page, when; person = `user_key` + masked email |
+| `traffic.person_access_log` | [0013](0013_person_access_log.sql), surface CHECK widened by [0014](0014_person_access_surfaces_day_pattern_visit_steps.sql) | no | nexus_app, **append-only** (person-level reads) | which admin opened which part of whose person page, when; person = `user_key` + masked email |
 
 Column additions: [0007](0007_event_environment_and_client_context.sql) adds `environment`
 (both event tables, default `'prod'`) and `client_tz`, `client_lang`, `release` (`web_events`);
@@ -75,7 +75,10 @@ Column additions: [0007](0007_event_environment_and_client_context.sql) adds `en
 `sdk_config_updated_at` to `apps` and swaps `admin_audit_log_action_check` (same name) to allow
 `APP_SDK_CONFIG_UPDATE`. [0013](0013_person_access_log.sql) also adds the trigger function
 `traffic.reject_person_access_log_change()` and two triggers that refuse UPDATE / DELETE (per row) and
-TRUNCATE (per statement) on `person_access_log` for every role, the owner included. The three aggregate tables of 0010–0012 are pruned after
+TRUNCATE (per statement) on `person_access_log` for every role, the owner included;
+[0014](0014_person_access_surfaces_day_pattern_visit_steps.sql) swaps `person_access_log_surface_check`
+(same name, widening only, added `NOT VALID` then validated) to allow `person_day`, `person_pattern` and
+`person_visit_steps` (ADR 0017). The three aggregate tables of 0010–0012 are pruned after
 `AGGREGATE_RETENTION_DAYS` (90) by the retention job.
 
 ## Functions ([0001](0001_helpers_and_partitions.sql))

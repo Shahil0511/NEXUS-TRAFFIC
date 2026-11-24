@@ -193,6 +193,7 @@ type WebQueryMethods =
   | 'listUserDailyActivity'
   | 'listSessions'
   | 'getSession'
+  | 'findSessionUserKey'
   | 'listTopPaths'
   | 'listPageStats'
   | 'listToolUsage'
@@ -223,6 +224,8 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   userDays: UserDayAppActivityRow[] = [];
   sessions: SessionSummaryRow[] = [];
   session: SessionRows | null = null;
+  /** The session's verified user_key over the WIDENED window (findSessionUserKey). */
+  sessionUserKey: Buffer | null = null;
   topPaths: TopPathRow[] = [];
   pageStats: PageStatsRow[] = [];
   toolUsage: ToolUsageRows = { tools: [], trend: [] };
@@ -365,6 +368,15 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   ): Promise<SessionRows | null> {
     this.calls.push({ method: 'getSession', args: [appId, sessionId, filter] });
     return this.session;
+  }
+
+  async findSessionUserKey(
+    appId: string,
+    sessionId: string,
+    filter: TrafficFilter,
+  ): Promise<Buffer | null> {
+    this.calls.push({ method: 'findSessionUserKey', args: [appId, sessionId, filter] });
+    return this.sessionUserKey;
   }
 
   async listTopPaths(filter: TrafficFilter, limit: number): Promise<TopPathRow[]> {

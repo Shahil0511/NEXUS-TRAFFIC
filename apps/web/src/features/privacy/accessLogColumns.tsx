@@ -10,10 +10,11 @@ import { formatDateTime } from '@/lib/format';
 import { PAGES, withQuery } from '@/lib/pages';
 
 /**
- * Which part was opened, in the words of the page that shows it: a person-page tab, or a list
- * narrowed to the person (Visits, Failed requests). `person_profile` is the profile read, which
- * the page ALWAYS sends (the header and identity card need it, whatever tab is open), so it is
- * named for everything that read shows, not only the Summary tab (ADR 0015 §4).
+ * Which part was opened, in the words of the page that shows it: a person-page tab, a part of the
+ * Daily activity tab (One day, Usual activity hours), a list narrowed to the person (Visits,
+ * Failed requests) or the steps of one of the person's visits. `person_profile` is the profile
+ * read, which the page ALWAYS sends (the header and identity card need it, whatever tab is open),
+ * so it is named for everything that read shows, not only the Summary tab (ADR 0015 §4, ADR 0017).
  */
 export const SURFACE_LABELS: Record<PersonAccessSurface, string> = {
   person_profile: 'Identity card and Summary',
@@ -22,9 +23,16 @@ export const SURFACE_LABELS: Record<PersonAccessSurface, string> = {
   person_daily: 'Daily activity',
   person_visits: 'Visits',
   person_failures: 'Failed requests',
+  person_day: 'One day',
+  person_pattern: 'Usual activity hours',
+  person_visit_steps: 'Visit steps',
 };
 
-/** The person-page tab (`?tab=`) of each surface, or the list page narrowed by `?userKey=`. */
+/**
+ * The person-page tab (`?tab=`) of each surface, or the list page narrowed by `?userKey=`. One day
+ * and usual activity hours live on the Daily activity tab. A Visit steps row carries no visit id,
+ * so it leads to the person's Visits list, where the visit is one click away.
+ */
 const SURFACE_PLACES: Record<PersonAccessSurface, UserDetailTab | 'journeys' | 'errors'> = {
   person_profile: 'summary',
   person_timeline: 'activity',
@@ -32,6 +40,9 @@ const SURFACE_PLACES: Record<PersonAccessSurface, UserDetailTab | 'journeys' | '
   person_daily: 'daily',
   person_visits: 'journeys',
   person_failures: 'errors',
+  person_day: 'daily',
+  person_pattern: 'daily',
+  person_visit_steps: 'journeys',
 };
 
 /**

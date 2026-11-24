@@ -1,4 +1,4 @@
-import { ERROR_CODES, type SessionListQuery } from '@nexus/shared';
+import { ERROR_CODES, MAX_COUNT_RANGE_MS, type SessionListQuery } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -18,7 +18,7 @@ import {
   KNOWN_APP_SLUG,
 } from '../../test/fixtures/fake-query-repositories';
 import { decodeOffsetCursor } from '../db/sql';
-import { NotFoundError } from '../errors/app-error';
+import { ForbiddenError, NotFoundError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
 import type { AppSlugResolver } from './app-slug.resolver';
@@ -133,6 +133,94 @@ describe('JourneyService.session', () => {
     expect(dto.events.map((e) => e.eventId)).toEqual(['pv1', 'api', 'tool']);
     expect(dto.events[1]).toMatchObject({ kind: 'api', status: 200, durationMs: 12.35, seq: null });
     expect(dto.events[0]?.visibleMs).toBe(4000);
+  });
+
+  it('a verified visit: 403 for a viewer (nothing recorded), 200 for an admin with one person_visit_steps row', async () => {
+    const { service, webEvents, access } = build();
+    webEvents.session = { summary: sessionSummaryRow(), browserEvents: [], apiCalls: [] };
+    const query = { range: '24h' } as const;
+
+    const refused = service.session(KNOWN_APP_SLUG, SESSION_ID, query, PLAIN_VIEWER);
+    await expect(refused).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(refused).rejects.toMatchObject({
+      statusCode: 403,
+      code: ERROR_CODES.FORBIDDEN,
+    });
+    expect(access.accesses).toEqual([]);
+
+    const dto = await service.session(KNOWN_APP_SLUG, SESSION_ID, query, ADMIN_VIEWER);
+    expect(dto.summary.userKey).toBe(USER_KEY_HEX);
+    expect(access.accesses).toHaveLength(1);
+    expect(access.accesses[0]).toMatchObject({
+      viewer: ADMIN_VIEWER,
+      surface: 'person_visit_steps',
+      filter: { appId: KNOWN_APP_ID },
+    });
+    expect(access.accesses[0]?.subjectUserKey.equals(USER_KEY)).toBe(true);
+    // The summary already names the person: no second probe.
+    expect(webEvents.argsOf('findSessionUserKey')).toEqual([]);
+  });
+
+  it('verified OUTSIDE the chosen window (sign-in after it): still 403 for a viewer, logged for an admin', async () => {
+    const { service, webEvents, access } = build();
+    webEvents.session = {
+      summary: sessionSummaryRow({ user_key: null, user_email: null, identity_source: 'anonymous' }),
+      browserEvents: [],
+      apiCalls: [],
+    };
+    webEvents.sessionUserKey = USER_KEY;
+    const query = {
+      range: 'custom',
+      from: '2026-10-01T09:00:00.000Z',
+      to: '2026-10-01T09:05:00.000Z',
+    } as const;
+
+    await expect(
+      service.session(KNOWN_APP_SLUG, SESSION_ID, query, PLAIN_VIEWER),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(access.accesses).toEqual([]);
+    // The probe ran over the chosen window widened by MAX_COUNT_RANGE_MS on each side, same env.
+    const [appId, sessionId, widened] = (webEvents.argsOf('findSessionUserKey')[0] ?? []) as [
+      string,
+      string,
+      { from: Date; to: Date; environments: unknown },
+    ];
+    expect(appId).toBe(KNOWN_APP_ID);
+    expect(sessionId).toBe(SESSION_ID);
+    expect(widened.from.toISOString()).toBe(
+      new Date(Date.parse(query.from) - MAX_COUNT_RANGE_MS).toISOString(),
+    );
+    expect(widened.to.toISOString()).toBe(
+      new Date(Date.parse(query.to) + MAX_COUNT_RANGE_MS).toISOString(),
+    );
+    expect(widened.environments).toEqual(['prod']);
+
+    await service.session(KNOWN_APP_SLUG, SESSION_ID, query, ADMIN_VIEWER);
+    expect(access.accesses).toHaveLength(1);
+    expect(access.accesses[0]).toMatchObject({
+      surface: 'person_visit_steps',
+      filter: { from: widened.from, to: widened.to },
+    });
+    expect(access.accesses[0]?.subjectUserKey.equals(USER_KEY)).toBe(true);
+  });
+
+  it.each([
+    ['anonymous', { user_key: null, user_email: null, identity_source: 'anonymous' as const }],
+    [
+      'claimed only',
+      {
+        user_key: null,
+        user_email: null,
+        claimed_email: 'x@y.z',
+        identity_source: 'client_claimed' as const,
+      },
+    ],
+  ])('a %s visit stays open to a viewer and writes no access-log row', async (_label, row) => {
+    const { service, webEvents, access } = build();
+    webEvents.session = { summary: sessionSummaryRow(row), browserEvents: [], apiCalls: [] };
+    const dto = await service.session(KNOWN_APP_SLUG, SESSION_ID, { range: '24h' }, PLAIN_VIEWER);
+    expect(dto.summary.userKey).toBeNull();
+    expect(access.accesses).toEqual([]);
   });
 
   it('unknown app or empty session → 404', async () => {

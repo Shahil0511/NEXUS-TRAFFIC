@@ -214,8 +214,13 @@ export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
  * WHY: which person-level read an admin opened. One value per person-level read leaf
  * (ROUTES.users.profile / timeline / devices / daily, PERSON_ROUTE_LEAVES), plus one per list
  * narrowed to one person by `?userKey=` (PERSON_FILTERED_ROUTE_LEAVES): `person_visits` = the
- * sessions list, `person_failures` = the failed-request summary and list. Stored in
- * `traffic.person_access_log.surface` and mirrored by `person_access_log_surface_check` (0013).
+ * sessions list, `person_failures` = the failed-request summary and list. ADR 0017 adds
+ * `person_day` (one IST day of the Daily activity tab; its read, users.day, is added in a later
+ * step), `person_pattern` (usual activity hours; users.pattern, a later step) and
+ * `person_visit_steps` (the steps of ONE visit of a verified person, ROUTES.journeys.session,
+ * admin-only once the visit has a user_key). Stored in
+ * `traffic.person_access_log.surface` and mirrored by `person_access_log_surface_check` (0013,
+ * widened by 0014).
  */
 export const PERSON_ACCESS_SURFACE_VALUES = [
   'person_profile',
@@ -224,6 +229,9 @@ export const PERSON_ACCESS_SURFACE_VALUES = [
   'person_daily',
   'person_visits',
   'person_failures',
+  'person_day',
+  'person_pattern',
+  'person_visit_steps',
 ] as const;
 export type PersonAccessSurface = (typeof PERSON_ACCESS_SURFACE_VALUES)[number];
 

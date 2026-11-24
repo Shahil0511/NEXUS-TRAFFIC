@@ -129,8 +129,8 @@ component. The exact files are listed in [03-code-navigation.md](03-code-navigat
   the dashboard layout via `AutoRefresh.tsx`, off on the Live page): the same socket, scoped like the
   global app filter; every `traffic:events` batch (or a reconnect) invalidates the traffic-driven React
   Query keys (`autoRefreshPolicy.ts`: all except `me`, `apps`, `live`, `privacy` and the person-level
-  reads, i.e. the person page's keys and any key narrowed by `userKey`, whose answers are access-logged,
-  ADR 0015), throttled to one refresh per 5 s.
+  reads, i.e. the person page's keys, the single-visit key (a verified visit's steps, ADR 0017) and any
+  key narrowed by `userKey`, whose answers are access-logged, ADR 0015), throttled to one refresh per 5 s.
   Without it, pages kept their 60 s-stale data until the user navigated.
 - End-to-end delay is bounded by the SDK flush interval (`SDK_DEFAULTS.*.flushIntervalMs` = 5 s):
   measured 4.6 s from an EBO_SALES request to its `traffic:events` in dev.

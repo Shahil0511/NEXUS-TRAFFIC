@@ -852,6 +852,7 @@ export function mapSsoCookieOutcome(row: SsoCookieOutcomeRow): SsoCookieOutcomeD
  * WHY: the access log names the person by the MASKED email stored at write time (never the full
  * address); the hex user_key opens their page.
  * @see ../../migrations/0013_person_access_log.sql
+ * @see ../../migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql (surface CHECK widened)
  */
 export function mapPersonAccessEntry(row: PersonAccessLogRow): PersonAccessEntryDto {
   return {

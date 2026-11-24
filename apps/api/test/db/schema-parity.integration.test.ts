@@ -71,7 +71,7 @@ const ENUM_CHECKS: EnumCheck[] = [
     constraint: 'sso_cookie_outcomes_beacon_origin_check',
     values: BEACON_ORIGIN_VALUES,
   },
-  // ─── Phase B (0013) ───
+  // ─── Phase B (0013, widened by 0014) ───
   { table: 'person_access_log', constraint: 'person_access_log_surface_check', values: PERSON_ACCESS_SURFACE_VALUES },
 ];
 
@@ -164,6 +164,16 @@ describe.skipIf(!RUN_DB_TESTS)('schema parity with @nexus/shared (db)', () => {
 
   it.each(TEXT_CHECKS)('$constraint contains $contains', async ({ table, constraint, contains }) => {
     expect(await definitionOf(table, constraint)).toContain(contains);
+  });
+
+  it('person_access_log_surface_check is validated after the 0014 swap (NOT VALID, then VALIDATE)', async () => {
+    const { rows } = await db.ownerPool.query<{ validated: boolean }>(
+      `SELECT c.convalidated AS validated
+         FROM pg_catalog.pg_constraint c
+        WHERE c.conrelid = 'traffic.person_access_log'::regclass
+          AND c.conname = 'person_access_log_surface_check'`,
+    );
+    expect(rows).toEqual([{ validated: true }]);
   });
 
   it('the page_view_id index exists on api_requests and on its partitions (0008)', async () => {

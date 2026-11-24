@@ -774,6 +774,7 @@ export interface IngestHealthRows {
  * One row of the person access log. `viewed_at_key` is the µs-precision text of keysetTimeExpr
  * (the keyset cursor; a Date would truncate it to ms).
  * @see ../../migrations/0013_person_access_log.sql
+ * @see ../../migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql (surface CHECK widened)
  */
 export interface PersonAccessLogRow {
   id: number;

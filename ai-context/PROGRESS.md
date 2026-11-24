@@ -18,6 +18,62 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-24 — Person 360 daily depth, step 4: migration 0014 and the visit-steps guard (ADR 0017)
+
+Contract + migration + one service guard. The migration file is written only; deploy applies it (migrate before
+the API). Nothing was run against any database.
+
+**Done**
+- **Shared** (`constants/traffic.ts`): `PERSON_ACCESS_SURFACE_VALUES` gains `person_day`, `person_pattern` (their
+  reads ship in steps 5 and 6) and `person_visit_steps`. `contracts.test.ts` pins the full list.
+- **Migration** `apps/api/migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql`: drops and re-adds
+  `person_access_log_surface_check` under the same name with the three new values, `NOT VALID` then `VALIDATE`.
+  Widening only; 0013 untouched. Migrations README catalogue and table row updated; the `@see` breadcrumbs of
+  `person-access-log.repository.ts`, `domain/inserts.ts`, `rows.ts` and `mappers.ts` name 0014 next to 0013.
+- **API:** `JourneyService.session` — when the visit has a `user_key`, a non-admin gets `ForbiddenError`
+  (403 `FORBIDDEN`, message names no person) and an admin's read is recorded as `person_visit_steps` (coalesced
+  like every surface). "Has a `user_key`" does not depend on the viewer's window: when the summary has none,
+  `verifiedSubjectOf` probes the same session over the window widened by `MAX_COUNT_RANGE_MS` each side (new
+  repository read `WebEventQueryRepository.findSessionUserKey`, one indexed probe, same app and env), so a narrow
+  custom range over the steps before sign-in still gets 403; the admin's row is then named from that wider window.
+  Anonymous / claimed-only visits stay open and write no row. The route stays `...dashboard` (comment + `@see` in
+  `routes/index.ts`); `PersonAccessRecorder` doc lists the new caller.
+- **Web:** `SessionDetailView` shows `PersonAdminOnly` on a 403 (visit title and trail kept, "Only admins can open
+  this visit", Back to People); other errors still show `ErrorState`. `PersonAdminOnly` and `isForbidden` moved
+  from `UserDetailView` to `components/PersonAdminOnly.tsx` (shared by the person and visit pages); the state takes
+  optional title / eyebrow / heading / description (defaults = the person-page state). Live traffic no longer
+  refetches the single-visit key (`isTrafficDrivenKey` in `features/live/autoRefreshPolicy.ts`): its key cannot
+  tell a verified visit, so a visit page left open adds no access-log row and a refused read is not re-sent. Privacy & access: `SURFACE_LABELS` "One day",
+  "Usual activity hours", "Visit steps"; places `daily`, `daily`, `journeys` (a Visit steps row has no visit id, so
+  it leads to the person's Visits list); the log panel's description mentions visit steps.
+- **Tests:** `journey.service.test.ts` (verified visit: viewer 403 with no row, admin 200 with one
+  `person_visit_steps` row and no second probe; verified only outside the chosen window: still 403, probe over the
+  widened window, admin row named from it; anonymous and claimed-only visits open to a viewer, no row);
+  `web-event-query.repository.test.ts` (`findSessionUserKey` in the READS table: bounded, env-filtered);
+  `contracts.test.ts` (each person leaf maps to its own surface via a typed `SURFACE_OF_LEAF`; the leftovers are
+  exactly the two narrowed lists, `person_visit_steps` and the surfaces of leaves still to come);
+  `autoRefreshPolicy.test.ts` (the single-visit key is not traffic-driven);
+  `person-access.routes.test.ts` (journeys.session reaches the controller for a viewer: the guard is in the
+  service); web `SessionDetailView.test.tsx` (403 → admins-only state, 404 → error state), new
+  `accessLogColumns.test.ts` (3 labels and places), `personCopy.test.tsx` (every surface from the enum, the visit
+  admins-only state scanned). DB (CI / owner only, `RUN_DB_TESTS=1`, written, not run): schema-parity (the CHECK
+  equals the enum via the existing entry, plus `convalidated` after the swap), migration-runner ledger list +0014,
+  analytics-queries (J1 verified: viewer 403, admin row `person_visit_steps` with masked email; J2 claimed: open).
+- Docs: ADR 0017 point 7 (window-independent check, no live refetch) + consequences, ADR 0015 (cross-references:
+  the single-visit line and the no-refetch rule), `07-data-model.md`, `03-code-navigation.md`,
+  `02-architecture.md` (auto-refresh exclusions).
+- **Gates:** `npm run typecheck` and `npm test` green (DB suites skipped without `RUN_DB_TESTS`).
+
+**Next / known issues**
+- Deploy must run migrate (0014) before the new API: an old CHECK would refuse a `person_visit_steps` row (the
+  recorder only logs a warning; the read still succeeds).
+- Viewer-facing screens still link verified visits into the admins-only state: the Visits list
+  (`features/journeys/sessionColumns.tsx`), Online now (`features/live/OnlineNowPanel.tsx`) and request samples
+  (`components/requestSampleColumns.tsx`), plus any bookmarked link. Showing those links as plain text for
+  non-admins (`useCanOpenPersonPages` when the row has a `userKey`) is follow-up work and needs the owner's
+  go-ahead. (The person timeline's links are on an admin-only page.)
+- Step 5: the one-day view (`users.day`, surface `person_day`).
+
 ## 2026-11-24 — Person 360 daily depth, step 3: credit cap on one `page_time` delta (ADR 0017)
 
 Read-side change only: no contract field, no migration, no new route leaf. **It changes shipped numbers:** tab

@@ -14,6 +14,7 @@ import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { KpiCard } from '@/components/KpiCard';
 import { PageHeader } from '@/components/PageHeader';
 import { ListSkeleton, Panel } from '@/components/Panel';
+import { isForbidden, PersonAdminOnly } from '@/components/PersonAdminOnly';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -54,6 +55,18 @@ export function SessionDetailView({ app, sessionId }: { app: string; sessionId: 
     />
   );
 
+  // A visit of a verified person is admin-only (ADR 0017): the API answers 403 to anyone else.
+  // @see ../../components/PersonAdminOnly.tsx
+  if (detail.isError && isForbidden(detail.error)) {
+    return (
+      <PersonAdminOnly
+        title={title}
+        eyebrow={backLink}
+        heading="Only admins can open this visit"
+        description="This visit belongs to a signed-in person, so its steps are part of that person's data and only dashboard admins can open them. Visits without a signed-in person, and the People list, stay open to you."
+      />
+    );
+  }
   if (detail.isError) {
     return (
       <div className="space-y-6">

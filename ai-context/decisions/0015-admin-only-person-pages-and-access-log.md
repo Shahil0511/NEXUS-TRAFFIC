@@ -22,12 +22,16 @@
        after `validateQuery`).
      - `privacy.accessLog` (the log itself): admin-only.
      Lists of people (`users.list`, `users.search`, `users.activity`), the single-session replay
-     (`journeys.session`) and the aggregate pages stay open to every viewer.
+     (`journeys.session`) and the aggregate pages stay open to every viewer. *Changed by
+     [ADR 0017](0017-person-daily-depth.md):* the replay ("Visit steps") of a visit that has a verified
+     person (`user_key`) is now admin-only and recorded as `person_visit_steps`; anonymous and
+     claimed-only visits stay open.
   2. **The access log table.** `traffic.person_access_log`
      (`apps/api/migrations/0013_person_access_log.sql`): `id`, `viewed_at`, `viewer_email`,
      `subject_user_key` (32 bytes, same as the event tables), `subject_email_masked`, `surface`.
      `surface` is one of `PERSON_ACCESS_SURFACE_VALUES` (`packages/shared/src/constants/traffic.ts`:
-     one per person leaf, plus `person_visits` and `person_failures` for the narrowed lists); a CHECK
+     one per person leaf, plus `person_visits` and `person_failures` for the narrowed lists; ADR 0017
+     adds `person_day`, `person_pattern` and `person_visit_steps`, migration 0014); a CHECK
      mirrors the enum. `live.online?userKey=` is the person page's own "Online now" badge and is
      covered by that page's `person_profile` row. Append-only: triggers refuse UPDATE, DELETE and
      TRUNCATE for every role (the owner included), and `grants.ts` gives `nexus_app` SELECT + INSERT
@@ -35,7 +39,8 @@
      person, `Cache-Control: no-store` (`PrivacyController.accessLog` → `PrivacyService.accessLog` →
      `PersonAccessLogRepository.list`), shown on the Privacy & access page (`PAGES.privacy()`).
   3. **Recording.** `PersonAccessRecorder` (`apps/api/src/services/person-access.recorder.ts`) is called
-     after a successful person-level answer (`UserService`, `JourneyService.sessions`,
+     after a successful person-level answer (`UserService`, `JourneyService.sessions` and, since ADR 0017,
+     `JourneyService.session` for a verified person's visit,
      `ErrorService.summary` / `.list`). No row for a refused or failed read (403, 404 profile, unknown app,
      range too large). A failed INSERT never fails the read: it logs a warning with the surface and the
      pg error code only.
@@ -45,7 +50,8 @@
      on the safe side: a restart or a second replica adds a duplicate row, never loses one. A concurrent
      request with the same key waits for the running attempt and records itself if that attempt wrote
      nothing. The dashboard never refetches person-level queries because of live traffic
-     (`isTrafficDrivenKey`, `apps/web/src/features/live/autoRefreshPolicy.ts`), and each person-page tab
+     (`isTrafficDrivenKey`, `apps/web/src/features/live/autoRefreshPolicy.ts`; since ADR 0017 that
+     includes the single-visit read, whose key cannot tell a verified visit), and each person-page tab
      sends its read only while it is open, so a row is written only for a part that was actually shown.
      One exception, by design: the profile read (`person_profile`) feeds the page header and the
      identity card as well as the Summary tab, so it is sent on every open of the person page, on

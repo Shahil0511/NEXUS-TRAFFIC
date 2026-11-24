@@ -1,4 +1,4 @@
-import { ROUTES } from '@nexus/shared';
+import { ERROR_CODES, ROUTES } from '@nexus/shared';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -107,6 +107,59 @@ describe('SessionDetailView', () => {
         `${PAGES.endpointDetail(API_ENDPOINT_ID)}?app=ebo-sales&range=7d`,
       );
     }
+  });
+
+  it("a 403 (a verified person's visit, not an admin) shows the admins-only state, not an error", async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.journeys.session), () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: ERROR_CODES.FORBIDDEN,
+              message: 'Only admins can open the steps',
+              requestId: 'r',
+            },
+          },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderWithProviders(<SessionDetailView app="ebo-sales" sessionId={SESSION_ID} />, {
+      searchParams: '?range=7d',
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Only admins can open this visit' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
+      `Visit ${SESSION_ID.slice(0, 8)}`,
+    );
+    // The visit trail stays; the way out is the People list (open to every viewer).
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(trail).getByRole('link', { name: 'Visits' })).toHaveAttribute(
+      'href',
+      '/journeys?app=ebo-sales&range=7d',
+    );
+    expect(screen.getByRole('link', { name: 'Back to People' })).toHaveAttribute(
+      'href',
+      '/users?range=7d',
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Only admins can open the steps')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Visit steps' })).toBeNull();
+  });
+
+  it('a 404 still shows the error state (only a 403 means admins only)', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.journeys.session), () =>
+        HttpResponse.json(
+          { error: { code: ERROR_CODES.NOT_FOUND, message: 'No events', requestId: 'r' } },
+          { status: 404 },
+        ),
+      ),
+    );
+    renderWithProviders(<SessionDetailView app="ebo-sales" sessionId={SESSION_ID} />);
+    expect(await screen.findByText('No events')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Only admins can open this visit' })).toBeNull();
   });
 
   it('flags a claimed identity and offers no profile link', async () => {

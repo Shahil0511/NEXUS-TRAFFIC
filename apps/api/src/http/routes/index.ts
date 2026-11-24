@@ -288,6 +288,8 @@ export function buildRouter(c: Container): Router {
     mw.requireAdminForUserKey,
     ctl.journeys.sessions,
   );
+  // Open route; a visit of a VERIFIED person is admin-only and access-logged in the service
+  // (it depends on the data). @see ../../services/journey.service.ts JourneyService.session
   r.get(
     ROUTES.journeys.session.path,
     ...dashboard,

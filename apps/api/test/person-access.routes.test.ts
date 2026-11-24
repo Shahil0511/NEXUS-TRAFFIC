@@ -189,6 +189,18 @@ describe('the access log is admin-only, the lists of people are not', () => {
     expect(res.body).toEqual({ ran: id });
   });
 
+  it('journeys.session: the route lets a non-admin through; the service decides (verified visit → 403)', async () => {
+    // WHY: whether a visit belongs to a verified person depends on its data, so the 403 and the
+    // `person_visit_steps` row come from JourneyService.session (journey.service.test.ts).
+    const path = buildPath(ROUTES.journeys.session, {
+      app: 'ebo-sales',
+      sessionId: '0b0c7f43-5a4e-4d0e-9a68-3f2a1b7c9d10',
+    });
+    const res = await send(ROUTES.journeys.session, 'viewer', path);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ran: 'journeys.session' });
+  });
+
   it('users.search: 200 for a non-admin', async () => {
     const res = await send(ROUTES.users.search, 'viewer').send({ search: 'some' });
     expect(res.status).toBe(200);

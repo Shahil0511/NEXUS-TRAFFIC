@@ -174,6 +174,7 @@ export interface PiiDetectionIncrement {
  * One person-page open to append to the access log. `subjectEmailMasked` is ALREADY masked
  * (maskEmail, src/lib/redact.ts): the full address of the person is never written here.
  * @see ../../migrations/0013_person_access_log.sql
+ * @see ../../migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql (surface CHECK widened)
  */
 export interface PersonAccessInsert {
   viewerEmail: string;

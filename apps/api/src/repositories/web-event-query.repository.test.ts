@@ -229,6 +229,7 @@ const READS: Record<string, (repo: WebEventQueryRepository) => Promise<unknown>>
   listUserDailyActivity: (r) => r.listUserDailyActivity(USER_KEY, STAGING),
   listSessions: (r) => r.listSessions(STAGING, { userKey: USER_KEY, limit: 3, offset: 0 }),
   getSession: (r) => r.getSession('app-id', SESSION_ID, STAGING),
+  findSessionUserKey: (r) => r.findSessionUserKey('app-id', SESSION_ID, STAGING),
   listTopPaths: (r) => r.listTopPaths(STAGING, 5),
   listPageStats: (r) => r.listPageStats(STAGING, 5),
   listPageTemplates: (r) => r.listPageTemplates(STAGING),

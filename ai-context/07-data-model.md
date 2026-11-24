@@ -197,14 +197,15 @@ The three tables share the `bucket_hour` alignment of `ingest_counters`, an inde
 `apps/api/src/db/migration-runner/grants.ts`, and a `''`-means-none convention (a NULL cannot be in
 the primary key; the API maps `''` to `null`).
 
-## `person_access_log` — who opened whose person page (0013)
+## `person_access_log` — who opened whose person page (0013, surfaces widened by 0014)
 
 Append-only: `nexus_app` may insert and read only (`grants.ts`, which also REVOKEs UPDATE, DELETE and
 TRUNCATE), and triggers (`traffic.reject_person_access_log_change`) refuse UPDATE, DELETE and
 TRUNCATE for **every** role, the owner included. Written by `PersonAccessRecorder`
 (`apps/api/src/services/person-access.recorder.ts`) after a successful person-level read
 (`users.profile`, `users.timeline`, `users.devices`, `users.daily`, and `journeys.sessions` /
-`errors.summary` / `errors.list` narrowed by `?userKey=`; all admin-only, ADR 0015); read by
+`errors.summary` / `errors.list` narrowed by `?userKey=`; all admin-only, ADR 0015; and
+`journeys.session` when the visit has a `user_key`, admin-only in the service, ADR 0017); read by
 `ROUTES.privacy.accessLog` (admin-only, the Privacy & access page).
 
 | Column | Meaning |
@@ -214,7 +215,7 @@ TRUNCATE for **every** role, the owner included. Written by `PersonAccessRecorde
 | `viewer_email` | the admin who opened the page (1–254 chars). |
 | `subject_user_key` | the person's `user_key` (32 bytes, same as on the event tables). |
 | `subject_email_masked` | the person's email MASKED by the API (`s***@libas.in`); a CHECK refuses anything else. The full address is never stored here. |
-| `surface` | which part: `PERSON_ACCESS_SURFACE_VALUES` (`person_profile`, `person_timeline`, `person_devices`, `person_daily`, and `person_visits` / `person_failures` for the Journeys / Errors lists narrowed by `?userKey=`, ADR 0015). |
+| `surface` | which part: `PERSON_ACCESS_SURFACE_VALUES` (`person_profile`, `person_timeline`, `person_devices`, `person_daily`, and `person_visits` / `person_failures` for the Journeys / Errors lists narrowed by `?userKey=`, ADR 0015; `person_day` (one IST day), `person_pattern` (usual activity hours) and `person_visit_steps` (the steps of one visit of a verified person), ADR 0017, allowed by [0014](../apps/api/migrations/0014_person_access_surfaces_day_pattern_visit_steps.sql), which swapped the CHECK under the same name). |
 
 Coalescing: the same viewer + person + surface is recorded at most once per
 `PERSON_ACCESS_COALESCE_MS` (10 min), decided **in memory** per api process
