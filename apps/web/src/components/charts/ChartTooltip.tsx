@@ -15,6 +15,8 @@ export interface ChartTooltipProps {
   payload?: ReadonlyArray<{ payload?: unknown }>;
   series: readonly ChartTooltipSeries[];
   formatLabel: (label: string) => string;
+  /** Plain-text lines under the series (e.g. the hovered day's facts), muted; none by default. */
+  notes?: (datum: unknown) => readonly string[];
 }
 
 function valueOf(datum: unknown, key: string): number | null {
@@ -27,9 +29,17 @@ function valueOf(datum: unknown, key: string): number | null {
  * WHY: one tooltip look for every chart — bucket time in IST, then each series with its swatch
  * and a formatted value. Text uses text tokens; only the swatch carries the series colour.
  */
-export function ChartTooltip({ active, label, payload, series, formatLabel }: ChartTooltipProps) {
+export function ChartTooltip({
+  active,
+  label,
+  payload,
+  series,
+  formatLabel,
+  notes,
+}: ChartTooltipProps) {
   const datum = payload?.[0]?.payload;
   if (!active || datum === undefined) return null;
+  const lines = notes?.(datum) ?? [];
   return (
     <div className="min-w-36 rounded-lg bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg ring-1 ring-foreground/10">
       <p className="mb-1.5 font-medium text-muted-foreground">{formatLabel(String(label))}</p>
@@ -48,6 +58,13 @@ export function ChartTooltip({ active, label, payload, series, formatLabel }: Ch
           </li>
         ))}
       </ul>
+      {lines.length > 0 ? (
+        <ul className="mt-1.5 space-y-0.5 border-t border-border pt-1.5 text-muted-foreground">
+          {lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@
  */
 import {
   MAX_COUNT_RANGE_MS,
+  USER_DAILY_APP_ROWS_LIMIT,
   USER_DEVICES_LIMIT,
   type CursorPage,
   type UserActivityDto,
@@ -26,8 +27,9 @@ import {
 import { environmentsOf, type TrafficFilter } from '../domain/filters';
 import { decodeOffsetCursor, encodeKeysetCursor, encodeOffsetCursor } from '../db/sql';
 import {
+  dropTruncatedOldestDay,
+  foldUserDays,
   mapTimelineItem,
-  mapUserDayActivity,
   mapUserDevice,
   mapUserProfile,
   mapUserSummary,
@@ -217,12 +219,14 @@ export class UserService {
   }
 
   /**
-   * One item per IST calendar day on which the user was active, newest first (idle days are
-   * absent): first / last activity, tab-visible time and counts. The window is widened to WHOLE
-   * IST days (wholeReportingDays) and echoed widened: a rolling range (24h at 15:00) would
-   * otherwise cut its oldest day at 15:00 and report that cut as the day's first activity. The day
-   * still running is flagged `inProgress`. Counts only → MAX_COUNT_RANGE_MS (checked on the range
-   * asked for; widening adds at most one day).
+   * One item per IST calendar day on which the user was active, newest first (idle days are left
+   * out): first / last activity, tab-visible time and counts, plus the same facts per app
+   * (`perApp`, in first-activity order). The repository answers one row per (day, app);
+   * foldUserDays folds them, after dropTruncatedOldestDay drops a day cut by the row cap. The
+   * window is widened to WHOLE IST days (wholeReportingDays) and echoed widened: a rolling range
+   * (24h at 15:00) would otherwise cut its oldest day at 15:00 and report that cut as the day's
+   * first activity. The day still running is flagged `inProgress`. Counts only →
+   * MAX_COUNT_RANGE_MS (checked on the range asked for; widening adds at most one day).
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
    */
   async daily(
@@ -243,7 +247,7 @@ export class UserService {
     const rows = await this.webEvents.listUserDailyActivity(key, filter);
     const body = {
       window: toTimeWindowDto(window),
-      items: rows.map((row) => mapUserDayActivity(row, now)),
+      items: foldUserDays(dropTruncatedOldestDay(rows, USER_DAILY_APP_ROWS_LIMIT), now),
     };
     await this.personAccess.record({
       viewer,

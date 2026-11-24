@@ -264,7 +264,8 @@ describe('UserDetailView', () => {
     useProfileHandlers();
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=daily' });
     const table = await screen.findByRole('table', { name: 'Daily activity' });
-    await within(table).findByText('3 h 12 min');
+    // The day's tab visible time and its one app line (ebo-sales).
+    expect(await within(table).findAllByText('3 h 12 min')).toHaveLength(2);
     const rows = within(table).getAllByRole('row');
     // header + two days, newest first
     expect(rows).toHaveLength(3);

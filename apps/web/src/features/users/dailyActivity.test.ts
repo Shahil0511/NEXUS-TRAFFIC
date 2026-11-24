@@ -1,22 +1,29 @@
 import type { UserDayActivityDto } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { USER_DAILY } from '@/test/fixtures';
+import { USER_DAILY, userDayApp } from '@/test/fixtures';
 
 import { EMPTY_VALUE } from '@/lib/format';
 
 import {
+  appClockSpan,
+  appTimeLabel,
   averageLastLabel,
   averageTimeIntoDay,
   countLabel,
+  DAY_APP_LINES_SHOWN,
   DAY_MS,
   dayStripSpan,
   dayVisitsQuery,
   dayWindowQuery,
   MIN_STRIP_WIDTH_PCT,
   msIntoDay,
+  fillReportingDays,
+  NO_BROWSER_TIME,
   NOT_ENDED_YET,
   summarizeDays,
+  trendPointNotes,
+  visibleAppLines,
 } from './dailyActivity';
 
 /** IST midnight of 1 Oct 2026 (= 30 Sep 18:30 UTC). */
@@ -138,5 +145,78 @@ describe('countLabel', () => {
     expect(countLabel(1, 'page view', 'page views')).toBe('1 page view');
     expect(countLabel(0, 'page view', 'page views')).toBe('0 page views');
     expect(countLabel(1234, 'API call', 'API calls')).toBe('1,234 API calls');
+  });
+});
+
+describe('per-app lines of a day', () => {
+  const day = (count: number): UserDayActivityDto => {
+    const [first] = USER_DAILY.items;
+    if (!first) throw new Error('fixture');
+    const perApp = Array.from({ length: count }, (_, i) => userDayApp(`app-${i}`));
+    return { ...first, apps: perApp.map((app) => app.app), perApp };
+  };
+
+  it('shows the first three apps in the API order and counts the rest', () => {
+    const lines = visibleAppLines(day(5));
+    expect(DAY_APP_LINES_SHOWN).toBe(3);
+    expect(lines.shown.map((app) => app.app)).toEqual(['app-0', 'app-1', 'app-2']);
+    expect(lines.hidden).toBe(2);
+    expect(visibleAppLines(day(2))).toMatchObject({ hidden: 0 });
+    expect(visibleAppLines(day(5), 1).hidden).toBe(4);
+  });
+
+  it('labels an app line with its time, "no browser time" for API calls only, else 0 min', () => {
+    expect(appTimeLabel(userDayApp('a', { activeMs: 9_600_000 }))).toBe('2 h 40 min');
+    expect(appTimeLabel(userDayApp('a', { activeMs: 0, requests: 3, visits: 0 }))).toBe(
+      NO_BROWSER_TIME,
+    );
+    expect(NO_BROWSER_TIME).toBe('no browser time');
+    // Opened in a browser but no visible time yet: a real 0, not "no browser time".
+    expect(appTimeLabel(userDayApp('a', { activeMs: 0, requests: 3, visits: 1 }))).toBe('0 min');
+    expect(appTimeLabel(userDayApp('a', { activeMs: 0, requests: 0, visits: 0 }))).toBe('0 min');
+  });
+
+  it("reads an app's first and last event as IST clock times", () => {
+    expect(appClockSpan(userDayApp('a'))).toBe('09:10–18:40');
+  });
+});
+
+describe('per-day chart points', () => {
+  const WINDOW = { from: '2026-09-27T18:30:00.000Z', to: '2026-10-01T18:30:00.000Z' };
+
+  it('gives one point per IST day of the window, oldest first, 0 on days without activity', () => {
+    const points = fillReportingDays(USER_DAILY.items, WINDOW);
+    expect(points.map((point) => point.day)).toEqual([
+      '2026-09-27T18:30:00.000Z',
+      '2026-09-28T18:30:00.000Z',
+      '2026-09-29T18:30:00.000Z',
+      '2026-09-30T18:30:00.000Z',
+    ]);
+    expect(points.map((point) => point.activeMs)).toEqual([0, 0, 2_880_000, 11_520_000]);
+    expect(points[0]?.activity).toBeNull();
+    expect(points[3]?.activity).toBe(USER_DAILY.items[0]);
+  });
+
+  it('fills the whole window even without any activity, and nothing for an empty window', () => {
+    expect(fillReportingDays([], WINDOW).every((point) => point.activeMs === 0)).toBe(true);
+    expect(fillReportingDays([], { from: WINDOW.to, to: WINDOW.to })).toEqual([]);
+  });
+
+  it('describes a day in the tooltip: first – last activity and apps, or no activity', () => {
+    const [point] = fillReportingDays(USER_DAILY.items, {
+      from: '2026-09-30T18:30:00.000Z',
+      to: '2026-10-01T18:30:00.000Z',
+    });
+    if (!point) throw new Error('point');
+    expect(trendPointNotes(point)).toEqual([
+      'First – last activity 09:10 – 18:40',
+      'Apps: ebo-sales',
+    ]);
+    const running = {
+      ...point,
+      activity: point.activity && { ...point.activity, inProgress: true },
+    };
+    expect(trendPointNotes(running)[0]).toBe('First – last activity 09:10 – 18:40 so far');
+    expect(trendPointNotes({ ...point, activity: null })).toEqual(['No activity']);
   });
 });

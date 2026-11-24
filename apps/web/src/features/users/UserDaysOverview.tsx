@@ -1,9 +1,10 @@
 'use client';
 
 import type { TimeWindowQuery } from '@nexus/shared';
-import { CalendarDays, Clock, Sunrise, Sunset } from 'lucide-react';
+import { CalendarDays, ChartColumn, Clock, Sunrise, Sunset } from 'lucide-react';
 import { useMemo } from 'react';
 
+import { DailyBarChart } from '@/components/charts/DailyBarChart';
 import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -15,17 +16,24 @@ import { formatClockOffset, formatHoursMinutes, formatInteger, withUnit } from '
 import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 
 import { AboutTheseNumbers } from './AboutTheseNumbers';
-import { averageLastLabel, countLabel, summarizeDays } from './dailyActivity';
+import {
+  averageLastLabel,
+  countLabel,
+  fillReportingDays,
+  summarizeDays,
+  trendPointNotes,
+} from './dailyActivity';
 import { dailyColumns } from './userDailyColumns';
 import { useUserDaily } from './useUserDaily';
 
 /**
  * WHY: every day (India time) with any activity in the global range, as plain facts of this one
  * person — when activity started and ended, how long an app page was on screen, which apps, how
- * many pages, features, calls and visits — plus the totals of the range. Days without activity are
- * left out. The list visibly ends ("End of list · N days") and the limits of the numbers are
- * stated under it (AboutTheseNumbers). Tab visible time is added up over days; nothing here
- * compares this person with anyone else (ADR 0017).
+ * many pages, features, calls and visits, per app in first-use order — plus the totals of the
+ * range and one bar per day of the tab visible time (idle days drawn as 0). Days without activity
+ * are left out of the table. The list visibly ends ("End of list · N days") and the limits of the
+ * numbers are stated under it (AboutTheseNumbers). Tab visible time is added up over days;
+ * nothing here compares this person with anyone else (ADR 0017).
  */
 export function UserDaysOverview({
   userKey,
@@ -37,6 +45,11 @@ export function UserDaysOverview({
   const daily = useUserDaily(userKey, filters);
   const days = daily.data?.items;
   const totals = useMemo(() => summarizeDays(days ?? []), [days]);
+  const dayWindow = daily.data?.window;
+  const trend = useMemo(
+    () => (days && dayWindow ? fillReportingDays(days, dayWindow) : []),
+    [days, dayWindow],
+  );
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => dailyColumns(userKey, linkQuery), [userKey, linkQuery]);
   const loading = daily.isPending;
@@ -80,6 +93,21 @@ export function UserDaysOverview({
           loading={loading}
         />
       </section>
+
+      {days && days.length > 0 ? (
+        <Panel
+          title="Tab visible time per day"
+          icon={ChartColumn}
+          description="How long app pages were on screen in a front browser tab, per day (India time)."
+        >
+          <DailyBarChart
+            points={trend}
+            label={METRIC_COPY.activeTime.label}
+            format={formatHoursMinutes}
+            notes={trendPointNotes}
+          />
+        </Panel>
+      ) : null}
 
       <Panel
         title="Daily activity"

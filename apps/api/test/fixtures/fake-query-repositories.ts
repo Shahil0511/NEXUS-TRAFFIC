@@ -38,7 +38,7 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   TrafficSummaryRow,
-  UserDayActivityRow,
+  UserDayAppActivityRow,
   UserDeviceRow,
   UserEndpointRow,
   UserLatestContextRow,
@@ -219,7 +219,8 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   timeline: TimelineEventRow[] = [];
   userDevices: UserDeviceRow[] = [];
   latestContext: UserLatestContextRow | null = null;
-  userDays: UserDayActivityRow[] = [];
+  /** Per-app day rows (newest day first, then first activity), as the SQL answers them. */
+  userDays: UserDayAppActivityRow[] = [];
   sessions: SessionSummaryRow[] = [];
   session: SessionRows | null = null;
   topPaths: TopPathRow[] = [];
@@ -344,7 +345,7 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   async listUserDailyActivity(
     userKey: Buffer,
     filter: TrafficFilter,
-  ): Promise<UserDayActivityRow[]> {
+  ): Promise<UserDayAppActivityRow[]> {
     this.calls.push({ method: 'listUserDailyActivity', args: [userKey, filter] });
     return this.userDays;
   }

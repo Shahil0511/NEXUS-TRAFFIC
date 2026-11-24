@@ -23,13 +23,15 @@ import {
   toolUsageRow,
   trafficBucketRow,
   USER_KEY_HEX,
-  userDayActivityRow,
+  userDayAppActivityRow,
   userDeviceRow,
   userLatestContextRow,
   userSummaryRow,
 } from '../../test/fixtures/analytics-rows';
 import { apiKeyRow, appRow, CREATED_AT } from '../../test/fixtures/app-rows';
 import {
+  dropTruncatedOldestDay,
+  foldUserDays,
   mapActor,
   mapApiKey,
   mapApp,
@@ -54,7 +56,7 @@ import {
   mapTimeseriesPoint,
   mapToolUsage,
   mapTopPath,
-  mapUserDayActivity,
+  mapUserDayAppActivity,
   mapUserDevice,
   mapUserLatestContext,
   mapUserProfile,
@@ -301,7 +303,7 @@ describe('mapUserSummary / mapUserProfile', () => {
   });
 });
 
-describe('mapUserDevice / mapUserLatestContext / mapUserDayActivity', () => {
+describe('mapUserDevice / mapUserLatestContext / mapUserDayAppActivity', () => {
   it('maps a device group with ISO times and a copy of the apps', () => {
     const row = userDeviceRow({ os: null });
     const dto = mapUserDevice(row);
@@ -332,13 +334,9 @@ describe('mapUserDevice / mapUserLatestContext / mapUserDayActivity', () => {
     });
   });
 
-  it('maps one IST day (day = the instant of IST midnight)', () => {
-    // The day (1 Oct IST) has ended by 2 Oct 00:00 IST; one minute earlier it is still running.
-    const dayEnd = new Date('2026-10-01T18:30:00.000Z');
-    const running = mapUserDayActivity(userDayActivityRow(), new Date(dayEnd.getTime() - 60_000));
-    expect(running.inProgress).toBe(true);
-    expect(mapUserDayActivity(userDayActivityRow(), dayEnd)).toEqual({
-      day: '2026-09-30T18:30:00.000Z',
+  it('maps one app of one IST day with ISO times', () => {
+    expect(mapUserDayAppActivity(userDayAppActivityRow())).toEqual({
+      app: 'ebo-sales',
       firstActivityAt: '2026-10-01T03:40:00.000Z',
       lastActivityAt: OCCURRED_AT.toISOString(),
       activeMs: 11_520_000,
@@ -347,9 +345,100 @@ describe('mapUserDevice / mapUserLatestContext / mapUserDayActivity', () => {
       failedRequests: 2,
       toolUses: 3,
       visits: 2,
-      apps: ['ebo-sales', 'hr-portal'],
+    });
+  });
+});
+
+describe('foldUserDays / dropTruncatedOldestDay', () => {
+  /** 1 Oct IST (day of userDayAppActivityRow) and 30 Sep IST. */
+  const OCT_1 = new Date('2026-09-30T18:30:00.000Z');
+  const SEP_30 = new Date('2026-09-29T18:30:00.000Z');
+  /** 2 Oct 00:00 IST: 1 Oct has ended. */
+  const DAY_END = new Date('2026-10-01T18:30:00.000Z');
+
+  /** The SQL order: newest day first; within a day by first activity, then slug. */
+  const rows = () => [
+    userDayAppActivityRow({
+      app: 'hr-portal',
+      first_activity_at: new Date('2026-10-01T02:00:00.000Z'),
+      last_activity_at: new Date('2026-10-01T05:00:00.000Z'),
+      active_ms: 1_000,
+      page_views: 1,
+      requests: 0,
+      failed_requests: 0,
+      tool_uses: 1,
+      visits: 1,
+    }),
+    userDayAppActivityRow(),
+    userDayAppActivityRow({
+      day: SEP_30,
+      app: 'ebo-sales',
+      first_activity_at: new Date('2026-09-30T04:00:00.000Z'),
+      last_activity_at: new Date('2026-09-30T06:00:00.000Z'),
+    }),
+  ];
+
+  it('sums two apps of a day, takes min first and max last, keeps perApp in first-activity order', () => {
+    const [day] = foldUserDays(rows(), DAY_END);
+    expect(day).toMatchObject({
+      day: OCT_1.toISOString(),
+      firstActivityAt: '2026-10-01T02:00:00.000Z',
+      lastActivityAt: OCCURRED_AT.toISOString(),
+      activeMs: 11_521_000,
+      pageViews: 6,
+      requests: 12,
+      failedRequests: 2,
+      toolUses: 4,
+      visits: 3,
       inProgress: false,
     });
+    expect(day?.perApp.map((app) => app.app)).toEqual(['hr-portal', 'ebo-sales']);
+  });
+
+  it('lists apps sorted by slug, whatever the first-activity order', () => {
+    expect(foldUserDays(rows(), DAY_END)[0]?.apps).toEqual(['ebo-sales', 'hr-portal']);
+  });
+
+  it('keeps the days newest first, one item per day', () => {
+    expect(foldUserDays(rows(), DAY_END).map((d) => d.day)).toEqual([
+      OCT_1.toISOString(),
+      SEP_30.toISOString(),
+    ]);
+  });
+
+  it('flags only the day still running as in progress', () => {
+    const running = foldUserDays(rows(), new Date(DAY_END.getTime() - 60_000));
+    expect(running.map((d) => d.inProgress)).toEqual([true, false]);
+  });
+
+  it('an API-only app adds no tab visible time', () => {
+    const [day] = foldUserDays(
+      [userDayAppActivityRow({ active_ms: 0, page_views: 0, tool_uses: 0, visits: 0 })],
+      DAY_END,
+    );
+    expect(day?.activeMs).toBe(0);
+    expect(day?.perApp[0]).toMatchObject({ activeMs: 0, requests: 12 });
+  });
+
+  it('gives no days for no rows', () => {
+    expect(foldUserDays([], DAY_END)).toEqual([]);
+  });
+
+  it('keeps every row when the cap was not hit', () => {
+    expect(dropTruncatedOldestDay(rows(), 3)).toHaveLength(3);
+  });
+
+  it('drops the oldest day group when the extra row came back', () => {
+    const kept = dropTruncatedOldestDay(rows(), 2);
+    expect(kept.map((row) => row.day.getTime())).toEqual([OCT_1.getTime(), OCT_1.getTime()]);
+  });
+
+  it('drops a cut oldest day even when it has rows inside the limit', () => {
+    const cut = [...rows(), userDayAppActivityRow({ day: SEP_30, app: 'hr-portal' })];
+    expect(dropTruncatedOldestDay(cut, 3).map((row) => row.app)).toEqual([
+      'hr-portal',
+      'ebo-sales',
+    ]);
   });
 });
 

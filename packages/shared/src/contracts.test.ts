@@ -5,12 +5,14 @@ import {
   ENVIRONMENT_VALUES,
   EVENT_CLOCK_POLICY,
   BREAKDOWN_DIMENSION_VALUES,
+  MAX_COUNT_RANGE_MS,
   PERSON_ACCESS_COALESCE_MS,
   PERSON_ACCESS_SURFACE_VALUES,
   SDK_DEFAULTS,
   SERVER_BREAKDOWN_DIMENSION_VALUES,
   SSO_COOKIE_OUTCOME_VALUES,
   type SsoCookieOutcome,
+  USER_DAILY_APP_ROWS_LIMIT,
 } from './constants';
 import { toEndpointId, uuidV5 } from './endpoint-id';
 import {
@@ -256,6 +258,12 @@ describe('time windows', () => {
 describe('Phase A contract invariants', () => {
   it('the retry queue TTL keeps replays well inside the event clock window', () => {
     expect(SDK_DEFAULTS.browser.retryQueueTtlMs).toBeLessThan(EVENT_CLOCK_POLICY.maxBackdateMs / 2);
+  });
+
+  it('the per-app daily row cap leaves room for every day of the widest window × many apps', () => {
+    const widestDays = Math.ceil(MAX_COUNT_RANGE_MS / 86_400_000) + 1;
+    expect(Number.isInteger(USER_DAILY_APP_ROWS_LIMIT)).toBe(true);
+    expect(USER_DAILY_APP_ROWS_LIMIT).toBeGreaterThanOrEqual(widestDays * 30);
   });
 
   it('the environment filter is the environments plus all', () => {

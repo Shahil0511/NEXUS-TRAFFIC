@@ -1,16 +1,24 @@
 /**
  * Pure helpers of the person page's "Daily activity" tab: where a day's activity sits on the
  * 00:00-24:00 IST strip, the window totals (active days, average first / last activity, tab
- * visible time) and the one-day link query of a row's Visits count.
+ * visible time), the per-app lines of a day, the gap-filled points of the per-day chart and the
+ * one-day link query of a row's Visits count.
  *
  * WHY HERE: the arithmetic is the part that can be wrong silently (a strip drawn an hour off, an
  * average that mixes days), so it lives outside the components and is unit-tested.
  * Every `day` is the instant of an IST midnight (UserDayActivityDto.day), so "time into the day"
  * is a plain subtraction — no time-zone maths in the browser.
  */
-import type { UserDayActivityDto } from '@nexus/shared';
+import type { UserDayActivityDto, UserDayAppActivityDto } from '@nexus/shared';
 
-import { EMPTY_VALUE, formatClockOffset, formatInteger, withUnit } from '@/lib/format';
+import {
+  EMPTY_VALUE,
+  formatClockOffset,
+  formatClockTime,
+  formatHoursMinutes,
+  formatInteger,
+  withUnit,
+} from '@/lib/format';
 
 export const DAY_MS = 86_400_000;
 const PERCENT = 100;
@@ -126,4 +134,89 @@ export function dayVisitsQuery(
 /** "1 page view", "38 page views", "1,234 API calls": a count with its noun. Pure. */
 export function countLabel(count: number, one: string, many: string): string {
   return `${formatInteger(count)} ${count === 1 ? one : many}`;
+}
+
+// ─── Per-app lines of a day ─────────────────────────────────────────────────
+
+/** App lines per day row before "+N more": a day rarely touches more apps. */
+export const DAY_APP_LINES_SHOWN = 3;
+
+/** The app lines a day row shows first, and how many more sit behind "+N more". */
+export interface VisibleAppLines {
+  shown: readonly UserDayAppActivityDto[];
+  hidden: number;
+}
+
+/**
+ * The first `max` apps of a day in the API's order (first activity of the day, then slug: the
+ * order the apps were used in, never by time or counts) and the count of the rest. Pure.
+ */
+export function visibleAppLines(
+  day: UserDayActivityDto,
+  max: number = DAY_APP_LINES_SHOWN,
+): VisibleAppLines {
+  const shown = day.perApp.slice(0, max);
+  return { shown, hidden: day.perApp.length - shown.length };
+}
+
+/** What an app line shows instead of a time when the app sent API calls only. */
+export const NO_BROWSER_TIME = 'no browser time';
+
+/**
+ * The time of one app line: "2 h 40 min" when a page of it was on screen; NO_BROWSER_TIME for an
+ * app seen only through API calls that day (no browser tracker, so "0 min" would read as "opened
+ * but not looked at"); otherwise "0 min". Pure.
+ */
+export function appTimeLabel(app: UserDayAppActivityDto): string {
+  if (app.activeMs > 0) return formatHoursMinutes(app.activeMs);
+  if (app.requests > 0 && app.visits === 0) return NO_BROWSER_TIME;
+  return formatHoursMinutes(0);
+}
+
+/** "09:41–13:10": an app's first and last recorded event of the day, India time. Pure. */
+export function appClockSpan(app: UserDayAppActivityDto): string {
+  return `${formatClockTime(app.firstActivityAt)}–${formatClockTime(app.lastActivityAt)}`;
+}
+
+// ─── Per-day chart ──────────────────────────────────────────────────────────
+
+/** One IST day of the "Tab visible time per day" chart; `activity` is null on a day without any. */
+export interface DailyTrendPoint {
+  /** The instant of the day's IST midnight (ISO), like UserDayActivityDto.day. */
+  day: string;
+  activeMs: number;
+  activity: UserDayActivityDto | null;
+}
+
+/**
+ * One point per IST day of the window, oldest first, with 0 on the days without activity (the
+ * API leaves them out). The window is the daily answer's (whole IST days: `from` is an IST
+ * midnight), so stepping 24 h lands on every midnight; India keeps no daylight saving. Pure.
+ */
+export function fillReportingDays(
+  items: readonly UserDayActivityDto[],
+  window: { from: string; to: string },
+): DailyTrendPoint[] {
+  const byDay = new Map(items.map((item) => [Date.parse(item.day), item]));
+  const points: DailyTrendPoint[] = [];
+  const end = Date.parse(window.to);
+  for (let at = Date.parse(window.from); at < end; at += DAY_MS) {
+    const activity = byDay.get(at) ?? null;
+    points.push({ day: new Date(at).toISOString(), activeMs: activity?.activeMs ?? 0, activity });
+  }
+  return points;
+}
+
+/**
+ * The tooltip lines of one chart day under its tab visible time: "First – last activity 09:41 –
+ * 18:03" (+ " so far" today) and "Apps: ebo-sales, hr-portal"; "No activity" on an empty day. Pure.
+ */
+export function trendPointNotes(point: DailyTrendPoint): string[] {
+  const day = point.activity;
+  if (day === null) return ['No activity'];
+  const span = `${formatClockTime(day.firstActivityAt)} – ${formatClockTime(day.lastActivityAt)}`;
+  return [
+    `First – last activity ${span}${day.inProgress ? ' so far' : ''}`,
+    `Apps: ${day.apps.join(', ')}`,
+  ];
 }

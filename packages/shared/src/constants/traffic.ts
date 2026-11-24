@@ -232,3 +232,12 @@ export type PersonAccessSurface = (typeof PERSON_ACCESS_SURFACE_VALUES)[number];
  * whose page", not as a request log.
  */
 export const PERSON_ACCESS_COALESCE_MS = 10 * 60 * 1000;
+
+// ─── Person daily activity (ADR 0017) ───────────────────────────────────────
+
+/**
+ * WHY: ROUTES.users.daily returns one (IST day, app) row per app used that day. Safety cap on those
+ * rows: 94 days × the registered apps stays far below it. When it is hit, the oldest (possibly
+ * partial) day is dropped rather than shown with apps missing.
+ */
+export const USER_DAILY_APP_ROWS_LIMIT = 3000;

@@ -114,9 +114,29 @@ export interface UserLatestContextDto {
 export type UserDevicesDto = WindowedListDto<UserDeviceDto>;
 
 /**
+ * One app on one IST day of one person: the day's facts narrowed to that app. First / last
+ * activity span BOTH tables; `activeMs` = Σ visible_ms of the app's page_time rows that day (tab
+ * visible time), 0 for an app that sends only API calls (no browser tracker).
+ */
+export interface UserDayAppActivityDto {
+  app: string;
+  firstActivityAt: string;
+  lastActivityAt: string;
+  activeMs: number;
+  pageViews: number;
+  requests: number;
+  /** API calls answered with status >= 400. */
+  failedRequests: number;
+  toolUses: number;
+  /** Distinct (app, session) of the app's BROWSER rows that day. */
+  visits: number;
+}
+
+/**
  * One IST calendar day (REPORTING_TIME_ZONE) on which the user was active. `day` is the instant of
  * that day's IST midnight (ISO, like UserActivityDto points). First / last activity span BOTH
- * tables; `activeMs` = Σ visible_ms of the day's page_time rows (tab-visible time).
+ * tables; `activeMs` = Σ visible_ms of the day's page_time rows (tab-visible time). Every count
+ * and `activeMs` is the Σ of `perApp`; first / last are its min / max.
  */
 export interface UserDayActivityDto {
   day: string;
@@ -128,15 +148,20 @@ export interface UserDayActivityDto {
   /** API calls answered with status >= 400. */
   failedRequests: number;
   toolUses: number;
-  /** Distinct BROWSER sessions of the day. */
+  /** Distinct BROWSER sessions of the day, one per (app, session): the Σ of perApp visits. */
   visits: number;
-  /** App slugs, sorted. */
+  /** App slugs, sorted (the slugs of `perApp`). */
   apps: string[];
   /**
    * The day has not ended yet (today): its last activity is "so far", so it is left out of the
    * average last activity.
    */
   inProgress: boolean;
+  /**
+   * The day per app, ordered by the app's first activity (then slug): the order the apps were
+   * used in, NEVER by time or counts.
+   */
+  perApp: UserDayAppActivityDto[];
 }
 
 /**

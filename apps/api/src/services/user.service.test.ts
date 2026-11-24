@@ -1,5 +1,6 @@
 import {
   ERROR_CODES,
+  USER_DAILY_APP_ROWS_LIMIT,
   USER_DEVICES_LIMIT,
   type UserListQuery,
   type UserTimelineQuery,
@@ -12,7 +13,7 @@ import {
   timelineEventRow,
   USER_KEY,
   USER_KEY_HEX,
-  userDayActivityRow,
+  userDayAppActivityRow,
   userDeviceRow,
   userLatestContextRow,
   userSummaryRow,
@@ -334,8 +335,8 @@ describe('UserService.daily', () => {
   it('maps the active days newest first over WHOLE IST days; today is in progress', async () => {
     const { service, webEvents } = build();
     webEvents.userDays = [
-      userDayActivityRow(),
-      userDayActivityRow({ day: new Date('2026-09-29T18:30:00.000Z'), active_ms: 0 }),
+      userDayAppActivityRow(),
+      userDayAppActivityRow({ day: new Date('2026-09-29T18:30:00.000Z'), active_ms: 0 }),
     ];
     const dto = await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
     const [userKey, filter] = webEvents.argsOf('listUserDailyActivity')[0] ?? [];
@@ -352,6 +353,44 @@ describe('UserService.daily', () => {
       '2026-09-29T18:30:00.000Z',
     ]);
     expect(dto.items[0]).toMatchObject({ activeMs: 11_520_000, failedRequests: 2, visits: 2 });
+    expect(dto.items[0]?.perApp.map((app) => app.app)).toEqual(['ebo-sales']);
+  });
+
+  it('folds the per-app rows of one day into one item, apps in first-activity order', async () => {
+    const { service, webEvents } = build();
+    webEvents.userDays = [
+      userDayAppActivityRow({
+        app: 'hr-portal',
+        first_activity_at: new Date('2026-10-01T02:00:00.000Z'),
+        active_ms: 0,
+        visits: 1,
+      }),
+      userDayAppActivityRow(),
+    ];
+    const dto = await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    expect(dto.items).toHaveLength(1);
+    expect(dto.items[0]).toMatchObject({
+      firstActivityAt: '2026-10-01T02:00:00.000Z',
+      activeMs: 11_520_000,
+      visits: 3,
+      apps: ['ebo-sales', 'hr-portal'],
+    });
+    expect(dto.items[0]?.perApp.map((app) => app.app)).toEqual(['hr-portal', 'ebo-sales']);
+  });
+
+  it('drops the oldest day when the row cap was hit (no day shown with apps missing)', async () => {
+    const { service, webEvents } = build();
+    const today = new Date('2026-09-30T18:30:00.000Z');
+    const older = new Date('2026-09-29T18:30:00.000Z');
+    webEvents.userDays = [
+      ...Array.from({ length: USER_DAILY_APP_ROWS_LIMIT }, (_, i) =>
+        userDayAppActivityRow({ day: today, app: `app-${i}` }),
+      ),
+      userDayAppActivityRow({ day: older }),
+    ];
+    const dto = await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    expect(dto.items.map((d) => d.day)).toEqual([today.toISOString()]);
+    expect(dto.items[0]?.perApp).toHaveLength(USER_DAILY_APP_ROWS_LIMIT);
   });
 
   it('an unknown app is a 404; a too-long window is refused', async () => {

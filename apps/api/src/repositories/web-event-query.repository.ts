@@ -28,6 +28,7 @@
  */
 import {
   IDENTITY_SOURCE_VALUES,
+  USER_DAILY_APP_ROWS_LIMIT,
   type BreakdownDimension,
   type BrowserEventType,
   type Grain,
@@ -72,7 +73,7 @@ import type {
   ToolUsageRows,
   TopPathRow,
   UserAppRow,
-  UserDayActivityRow,
+  UserDayAppActivityRow,
   UserDeviceRow,
   UserLatestContextRow,
   UserPageCountRow,
@@ -958,29 +959,31 @@ export class WebEventQueryRepository {
   }
 
   /**
-   * One row per IST calendar day (same bucket as listDailyUsers) on which one user was active,
-   * newest first; days without activity are absent. First / last activity span BOTH tables;
-   * `active_ms` = Σ visible_ms of the day's page_time rows (tab-visible time).
+   * One row per (IST calendar day, app) on which one user was active (same day bucket as
+   * listDailyUsers); days without activity are left out. Ordered newest day first, then by the app's
+   * first activity, then slug — the order foldUserDays keeps for `perApp`. First / last activity
+   * span BOTH tables; `active_ms` = Σ visible_ms of the app's page_time rows that day (tab-visible
+   * time; 0 for an API-only app). At most USER_DAILY_APP_ROWS_LIMIT + 1 rows: the extra row tells
+   * the caller the oldest day may be cut (dropTruncatedOldestDay).
    */
   async listUserDailyActivity(
     userKey: Buffer,
     filter: TrafficFilter,
     exec: Executor = this.db,
-  ): Promise<UserDayActivityRow[]> {
+  ): Promise<UserDayAppActivityRow[]> {
     const params = new ParamList();
     const key = params.add(userKey);
     const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
     const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
-    const { rows } = await exec.query<UserDayActivityRow>(
-      `SELECT ${bucketExpr('day', 'h.occurred_at')} AS day,
+    const { rows } = await exec.query<UserDayAppActivityRow>(
+      `SELECT ${bucketExpr('day', 'h.occurred_at')} AS day, a.slug AS app,
               min(h.occurred_at) AS first_activity_at, max(h.occurred_at) AS last_activity_at,
               coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = '${PAGE_TIME}'), 0)::int8 AS active_ms,
               count(*) FILTER (WHERE h.kind = '${PAGE_VIEW}') AS page_views,
               count(*) FILTER (WHERE h.kind = '${API_KIND}') AS requests,
               count(*) FILTER (WHERE h.failed) AS failed_requests,
               count(*) FILTER (WHERE h.kind = '${TOOL_USE}') AS tool_uses,
-              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS visits,
-              array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps
+              count(DISTINCT h.session_id) FILTER (WHERE h.kind <> '${API_KIND}') AS visits
          FROM (
            SELECT r.app_id, r.session_id, r.occurred_at, '${API_KIND}'::text AS kind,
                   (${FAILURE_PREDICATES.all}) AS failed, NULL::int AS visible_ms
@@ -990,8 +993,9 @@ export class WebEventQueryRepository {
              FROM traffic.web_events w WHERE ${web}
          ) h
          JOIN traffic.apps a ON a.id = h.app_id
-        GROUP BY 1
-        ORDER BY 1 DESC`,
+        GROUP BY 1, 2
+        ORDER BY 1 DESC, 3 ASC, 2 ASC
+        LIMIT ${params.add(USER_DAILY_APP_ROWS_LIMIT + 1)}`,
       params.values,
     );
     return rows;

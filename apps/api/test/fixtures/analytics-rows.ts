@@ -18,7 +18,7 @@ import type {
   ToolUsageRow,
   TrafficBucketRow,
   TrafficSummaryRow,
-  UserDayActivityRow,
+  UserDayAppActivityRow,
   UserDeviceRow,
   UserLatestContextRow,
   UserSummaryRow,
@@ -145,12 +145,13 @@ export function userLatestContextRow(
   };
 }
 
-/** 1 Oct 2026 in IST: the day starts at 30 Sep 18:30 UTC. */
-export function userDayActivityRow(
-  overrides: Partial<UserDayActivityRow> = {},
-): UserDayActivityRow {
+/** One app (ebo-sales) on 1 Oct 2026 in IST: the day starts at 30 Sep 18:30 UTC. */
+export function userDayAppActivityRow(
+  overrides: Partial<UserDayAppActivityRow> = {},
+): UserDayAppActivityRow {
   return {
     day: new Date('2026-09-30T18:30:00.000Z'),
+    app: 'ebo-sales',
     first_activity_at: new Date('2026-10-01T03:40:00.000Z'),
     last_activity_at: OCCURRED_AT,
     active_ms: 11_520_000,
@@ -159,7 +160,6 @@ export function userDayActivityRow(
     failed_requests: 2,
     tool_uses: 3,
     visits: 2,
-    apps: ['ebo-sales', 'hr-portal'],
     ...overrides,
   };
 }

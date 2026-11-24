@@ -29,6 +29,8 @@ import type {
   ToolUsageDto,
   TopPathDto,
   UserDailyActivityDto,
+  UserDayActivityDto,
+  UserDayAppActivityDto,
   UserDevicesDto,
   UserProfileDto,
   UserSummaryDto,
@@ -354,38 +356,86 @@ export const USER_DEVICES: UserDevicesDto = {
 };
 
 /**
+ * The whole IST days of USER_DAILY's 7d window (the API widens it: 24 Sep 00:00 → 2 Oct 00:00
+ * IST).
+ */
+const DAILY_WINDOW = {
+  from: '2026-09-23T18:30:00.000Z',
+  to: '2026-10-01T18:30:00.000Z',
+  grain: 'hour',
+} as const;
+
+/** One app of one day (UserDayActivityDto.perApp line); the defaults are 1 Oct's ebo-sales. */
+export function userDayApp(
+  app: string,
+  overrides: Partial<UserDayAppActivityDto> = {},
+): UserDayAppActivityDto {
+  return {
+    app,
+    firstActivityAt: '2026-10-01T03:40:00.000Z',
+    lastActivityAt: '2026-10-01T13:10:00.000Z',
+    activeMs: 11_520_000,
+    pageViews: 40,
+    requests: 900,
+    failedRequests: 3,
+    toolUses: 5,
+    visits: 4,
+    ...overrides,
+  };
+}
+
+/**
+ * One day built from its app lines the way the API folds it (foldUserDays): perApp in first-use
+ * order (then slug), the counts and tab visible time their Σ, first / last their min / max, apps
+ * the sorted slugs. Fixtures use it so a day can never disagree with its own apps.
+ */
+export function userDayFrom(
+  day: string,
+  apps: readonly UserDayAppActivityDto[],
+  inProgress = false,
+): UserDayActivityDto {
+  const perApp = [...apps].sort(
+    (a, b) => a.firstActivityAt.localeCompare(b.firstActivityAt) || a.app.localeCompare(b.app),
+  );
+  const sum = (pick: (app: UserDayAppActivityDto) => number): number =>
+    perApp.reduce((total, app) => total + pick(app), 0);
+  const times = (pick: (app: UserDayAppActivityDto) => string): string[] => perApp.map(pick).sort();
+  return {
+    day,
+    firstActivityAt: times((app) => app.firstActivityAt)[0] ?? day,
+    lastActivityAt: times((app) => app.lastActivityAt).at(-1) ?? day,
+    activeMs: sum((app) => app.activeMs),
+    pageViews: sum((app) => app.pageViews),
+    requests: sum((app) => app.requests),
+    failedRequests: sum((app) => app.failedRequests),
+    toolUses: sum((app) => app.toolUses),
+    visits: sum((app) => app.visits),
+    apps: perApp.map((app) => app.app).sort(),
+    inProgress,
+    perApp,
+  };
+}
+
+/**
  * Two IST days, newest first. 1 Oct: 09:10 → 18:40 IST, 3 h 12 min visible. 30 Sep: 10:00 →
  * 13:20 IST, 48 min visible. Averages: first 09:35, last 16:00; total 4 h.
  */
 export const USER_DAILY: UserDailyActivityDto = {
-  window: PERSON_WINDOW,
+  window: DAILY_WINDOW,
   items: [
-    {
-      day: '2026-09-30T18:30:00.000Z',
-      firstActivityAt: '2026-10-01T03:40:00.000Z',
-      lastActivityAt: '2026-10-01T13:10:00.000Z',
-      activeMs: 11_520_000,
-      pageViews: 40,
-      requests: 900,
-      failedRequests: 3,
-      toolUses: 5,
-      visits: 4,
-      apps: ['ebo-sales'],
-      inProgress: false,
-    },
-    {
-      day: '2026-09-29T18:30:00.000Z',
-      firstActivityAt: '2026-09-30T04:30:00.000Z',
-      lastActivityAt: '2026-09-30T07:50:00.000Z',
-      activeMs: 2_880_000,
-      pageViews: 16,
-      requests: 334,
-      failedRequests: 0,
-      toolUses: 4,
-      visits: 3,
-      apps: ['ebo-sales'],
-      inProgress: false,
-    },
+    userDayFrom('2026-09-30T18:30:00.000Z', [userDayApp('ebo-sales')]),
+    userDayFrom('2026-09-29T18:30:00.000Z', [
+      userDayApp('ebo-sales', {
+        firstActivityAt: '2026-09-30T04:30:00.000Z',
+        lastActivityAt: '2026-09-30T07:50:00.000Z',
+        activeMs: 2_880_000,
+        pageViews: 16,
+        requests: 334,
+        failedRequests: 0,
+        toolUses: 4,
+        visits: 3,
+      }),
+    ]),
   ],
 };
 

@@ -38,6 +38,7 @@ import type {
   TopPathDto,
   UserAppUsageDto,
   UserDayActivityDto,
+  UserDayAppActivityDto,
   UserDeviceDto,
   UserEndpointUsageDto,
   UserLatestContextDto,
@@ -84,7 +85,7 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   UserAppRow,
-  UserDayActivityRow,
+  UserDayAppActivityRow,
   UserDeviceRow,
   UserEndpointRow,
   UserLatestContextRow,
@@ -452,13 +453,10 @@ export function mapUserLatestContext(row: UserLatestContextRow): UserLatestConte
   };
 }
 
-/**
- * WHY: one IST day of a user's activity ("Daily activity" tab). `now` decides whether the day is
- * still running (`inProgress`: its last activity is only "so far").
- */
-export function mapUserDayActivity(row: UserDayActivityRow, now: Date): UserDayActivityDto {
+/** WHY: one app on one IST day of a user's activity (a `perApp` line of the "Daily activity" tab). */
+export function mapUserDayAppActivity(row: UserDayAppActivityRow): UserDayAppActivityDto {
   return {
-    day: row.day.toISOString(),
+    app: row.app,
     firstActivityAt: row.first_activity_at.toISOString(),
     lastActivityAt: row.last_activity_at.toISOString(),
     activeMs: row.active_ms,
@@ -467,8 +465,70 @@ export function mapUserDayActivity(row: UserDayActivityRow, now: Date): UserDayA
     failedRequests: row.failed_requests,
     toolUses: row.tool_uses,
     visits: row.visits,
-    apps: [...row.apps],
-    inProgress: row.day.getTime() + REPORTING_DAY_MS > now.getTime(),
+  };
+}
+
+/**
+ * WHY: the daily read asks for one row more than `limit` (newest day first). When that extra row
+ * came back, the OLDEST day in the answer may be missing some of its apps, so that whole day group
+ * is dropped: a day is shown complete or not at all. At most `limit` rows remain.
+ */
+export function dropTruncatedOldestDay(
+  rows: readonly UserDayAppActivityRow[],
+  limit: number,
+): UserDayAppActivityRow[] {
+  if (rows.length <= limit) return [...rows];
+  const oldest = rows[rows.length - 1]?.day.getTime();
+  return rows.filter((row) => row.day.getTime() !== oldest).slice(0, limit);
+}
+
+/**
+ * WHY: folds the (day, app) rows of the daily read into one item per IST day, keeping the SQL
+ * order (newest day first; within a day, apps by first activity). The day's counts and tab visible
+ * time are the Σ of its apps, first / last activity their min / max, `apps` the sorted slugs. A
+ * visit is (app, session), so Σ of per-app visits is the day's visits. `now` decides whether the
+ * day is still running (`inProgress`: its last activity is only "so far").
+ */
+export function foldUserDays(
+  rows: readonly UserDayAppActivityRow[],
+  now: Date,
+): UserDayActivityDto[] {
+  const groups: { day: Date; rows: UserDayAppActivityRow[] }[] = [];
+  for (const row of rows) {
+    const current = groups[groups.length - 1];
+    if (current !== undefined && current.day.getTime() === row.day.getTime()) {
+      current.rows.push(row);
+    } else {
+      groups.push({ day: row.day, rows: [row] });
+    }
+  }
+  return groups.map((group) => foldUserDay(group.day, group.rows, now));
+}
+
+/** WHY: one day of foldUserDays — the non-empty app rows of ONE day, in SQL order. */
+function foldUserDay(
+  day: Date,
+  rows: readonly UserDayAppActivityRow[],
+  now: Date,
+): UserDayActivityDto {
+  const perApp = rows.map(mapUserDayAppActivity);
+  const sum = (pick: (app: UserDayAppActivityDto) => number): number =>
+    perApp.reduce((total, app) => total + pick(app), 0);
+  const first = Math.min(...rows.map((row) => row.first_activity_at.getTime()));
+  const last = Math.max(...rows.map((row) => row.last_activity_at.getTime()));
+  return {
+    day: day.toISOString(),
+    firstActivityAt: new Date(first).toISOString(),
+    lastActivityAt: new Date(last).toISOString(),
+    activeMs: sum((app) => app.activeMs),
+    pageViews: sum((app) => app.pageViews),
+    requests: sum((app) => app.requests),
+    failedRequests: sum((app) => app.failedRequests),
+    toolUses: sum((app) => app.toolUses),
+    visits: sum((app) => app.visits),
+    apps: perApp.map((app) => app.app).sort(),
+    inProgress: day.getTime() + REPORTING_DAY_MS > now.getTime(),
+    perApp,
   };
 }
 

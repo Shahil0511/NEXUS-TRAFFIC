@@ -5,10 +5,11 @@ import {
   type UserDayActivityDto,
 } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { USER_DAILY, USER_KEY } from '@/test/fixtures';
+import { USER_DAILY, USER_KEY, userDayApp, userDayFrom } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -17,14 +18,45 @@ import { UserDailyActivityTab } from './UserDailyActivityTab';
 
 const FILTERS: TimeWindowQuery = { range: '7d', app: 'ebo-sales', env: 'staging' };
 
-/** The first fixture day with two apps; the second with API calls only (no visit). */
+/**
+ * The first fixture day with two apps — vendor-portal (API calls only) used FIRST, at 07:30 IST,
+ * so first-use order differs from slug order; the second day without a visit. Both are folded from
+ * their app lines (userDayFrom), like the API does.
+ */
 function days(): UserDayActivityDto[] {
   const [today, yesterday] = USER_DAILY.items;
   if (!today || !yesterday) throw new Error('fixture');
+  const vendor = userDayApp('vendor-portal', {
+    firstActivityAt: '2026-10-01T02:00:00.000Z',
+    lastActivityAt: '2026-10-01T02:30:00.000Z',
+    activeMs: 0,
+    pageViews: 0,
+    requests: 12,
+    failedRequests: 0,
+    toolUses: 0,
+    visits: 0,
+  });
+  const quiet = { pageViews: 1, toolUses: 1, requests: 1, visits: 0 };
   return [
-    { ...today, apps: ['ebo-sales', 'vendor-portal'] },
-    { ...yesterday, pageViews: 1, toolUses: 1, requests: 1, visits: 0 },
+    userDayFrom(today.day, [...today.perApp, vendor]),
+    userDayFrom(
+      yesterday.day,
+      yesterday.perApp.map((app) => ({ ...app, ...quiet })),
+    ),
   ];
+}
+
+/** A day with `count` apps (a-app, b-app, …), each with browser time, in that first-use order. */
+function dayWithApps(count: number): UserDayActivityDto {
+  const [today] = USER_DAILY.items;
+  if (!today) throw new Error('fixture');
+  const perApp = Array.from({ length: count }, (_, i) =>
+    userDayApp(`${String.fromCharCode(97 + i)}-app`, {
+      activeMs: (i + 1) * 60_000,
+      visits: i === 0 ? 1 : 0,
+    }),
+  );
+  return userDayFrom(today.day, perApp);
 }
 
 function serveDaily(items: UserDayActivityDto[]): URLSearchParams[] {
@@ -68,7 +100,8 @@ describe('UserDailyActivityTab — all days', () => {
   it('shows each day as facts: apps as chips, pages / features / calls, and the tab visible time', async () => {
     await renderTab();
     const table = await screen.findByRole('table', { name: 'Daily activity' });
-    await within(table).findByText('3 h 12 min');
+    // The day's tab visible time and ebo-sales' own line (the only app with browser time).
+    expect(await within(table).findAllByText('3 h 12 min')).toHaveLength(2);
     const rows = within(table).getAllByRole('row');
     expect(rows).toHaveLength(3);
     const first = rows[1] as HTMLElement;
@@ -79,7 +112,7 @@ describe('UserDailyActivityTab — all days', () => {
     expect(within(first).getByRole('link', { name: 'vendor-portal' })).toBeInTheDocument();
     expect(first).toHaveTextContent('40 page views');
     expect(first).toHaveTextContent('5 feature uses');
-    expect(first).toHaveTextContent('900 API calls · 3 failed');
+    expect(first).toHaveTextContent('912 API calls · 3 failed');
     const second = rows[2] as HTMLElement;
     expect(second).toHaveTextContent('1 page view');
     expect(second).toHaveTextContent('1 feature use');
@@ -107,19 +140,58 @@ describe('UserDailyActivityTab — all days', () => {
     expect(within(rows[2] as HTMLElement).queryByRole('link', { name: /visits on/ })).toBeNull();
   });
 
-  it('caps the app chips at three with a "+N" that names the rest, and reads one visit as "visit"', async () => {
-    const [today] = days();
-    if (!today) throw new Error('fixture');
-    await renderTab([{ ...today, apps: ['a-app', 'b-app', 'c-app', 'd-app'], visits: 1 }]);
+  it('lists one line per app in first-use order: its time and first – last event (IST)', async () => {
+    await renderTab();
     const table = await screen.findByRole('table', { name: 'Daily activity' });
-    const more = await within(table).findByText('+1');
+    await within(table).findAllByText('no browser time');
+    const row = within(table).getAllByRole('row')[1] as HTMLElement;
+    const lines = within(row).getAllByRole('listitem');
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'vendor-portalno browser time07:30–08:00',
+      'ebo-sales3 h 12 min09:10–18:40',
+    ]);
+  });
+
+  it('caps the app lines at three with a "+N more" button that expands in place', async () => {
+    const user = userEvent.setup();
+    const { queries } = await renderTab([dayWithApps(4)]);
+    const table = await screen.findByRole('table', { name: 'Daily activity' });
+    const more = await within(table).findByRole('button', { name: '+1 more' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
     const row = within(table).getAllByRole('row')[1] as HTMLElement;
     for (const app of ['a-app', 'b-app', 'c-app']) {
       expect(within(row).getByRole('link', { name: app })).toBeInTheDocument();
     }
     expect(within(row).queryByRole('link', { name: 'd-app' })).toBeNull();
-    expect(more).toHaveTextContent('more: d-app');
+    await user.click(more);
+    expect(within(row).getByRole('link', { name: 'd-app' })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Show fewer' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    // Local state only: expanding sends no read.
+    expect(queries).toHaveLength(1);
     expect(within(row).getByRole('link', { name: /^1 visit on / })).toBeInTheDocument();
+  });
+
+  it('shows no "+N more" when a day has three apps or fewer', async () => {
+    await renderTab([dayWithApps(3)]);
+    const table = await screen.findByRole('table', { name: 'Daily activity' });
+    await within(table).findByRole('link', { name: 'c-app' });
+    expect(within(table).queryByRole('button', { name: /more/ })).toBeNull();
+  });
+
+  it('charts the tab visible time per day over the range, and hides the chart without days', async () => {
+    await renderTab();
+    expect(
+      await screen.findByRole('heading', { name: 'Tab visible time per day' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('figure', { name: 'Tab visible time per day' })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'How long app pages were on screen in a front browser tab, per day (India time).',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('ends the list visibly and states the limits of the numbers under it', async () => {
@@ -139,6 +211,7 @@ describe('UserDailyActivityTab — all days', () => {
     expect(await screen.findByText('No activity in this range')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Show the last/ })).toBeInTheDocument();
     expect(screen.queryByText(/End of list/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Tab visible time per day' })).toBeNull();
     // The caveats stay: they are about the view, not about rows.
     expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
   });

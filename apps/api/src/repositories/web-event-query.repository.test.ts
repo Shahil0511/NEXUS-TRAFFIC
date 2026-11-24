@@ -3,7 +3,7 @@
  * users are verified identities only, partial-index predicates are literal, values are parameters.
  * Results are covered by test/db/analytics-queries.integration.test.ts.
  */
-import { BREAKDOWN_DIMENSION_VALUES } from '@nexus/shared';
+import { BREAKDOWN_DIMENSION_VALUES, USER_DAILY_APP_ROWS_LIMIT } from '@nexus/shared';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 
@@ -160,17 +160,25 @@ describe('WebEventQueryRepository person reads (devices, daily)', () => {
     expect(text).toContain('LIMIT 1');
   });
 
-  it('listUserDailyActivity buckets by IST day, newest first, active time from page_time only', async () => {
+  it('listUserDailyActivity answers one row per IST day and app, newest day first, then first activity', async () => {
     const { exec, repo } = build();
     await repo.listUserDailyActivity(USER_KEY, FILTER);
     const [statement] = exec.statements;
+    const text = statement?.text ?? '';
     expectKeyedOnBothTables(statement);
-    expect(statement?.text).toContain("date_trunc('day', h.occurred_at, 'Asia/Kolkata') AS day");
-    expect(statement?.text).toContain(
+    expect(text).toContain(
+      "date_trunc('day', h.occurred_at, 'Asia/Kolkata') AS day, a.slug AS app",
+    );
+    expect(text).toContain(
       "coalesce(sum(h.visible_ms) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms",
     );
-    expect(statement?.text).toContain('(r.status_code >= 400) AS failed');
-    expect(statement?.text).toContain('ORDER BY 1 DESC');
+    expect(text).toContain('(r.status_code >= 400) AS failed');
+    expect(text).toContain('GROUP BY 1, 2');
+    expect(text).toContain('ORDER BY 1 DESC, 3 ASC, 2 ASC');
+    expect(text).not.toContain('array_agg');
+    const limit = /LIMIT \$(\d+)\s*$/.exec(text);
+    expect(limit).not.toBeNull();
+    expect(statement?.values[Number(limit?.[1]) - 1]).toBe(USER_DAILY_APP_ROWS_LIMIT + 1);
   });
 });
 

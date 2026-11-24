@@ -184,8 +184,9 @@ export const METRIC_COPY = {
   },
   dayApps: {
     label: 'Apps',
-    short: 'Each app with at least one API call or browser event that day, India time.',
-    long: 'An app that sends only server calls still appears here, from its API calls.',
+    short:
+      'Each app used that day, India time: how long a page of it was on screen in a front tab, and its first and last recorded event.',
+    long: 'Apps without the browser tracker show no time. They are listed in the order they were first used that day.',
   },
   dayCounts: {
     label: 'Pages and calls',

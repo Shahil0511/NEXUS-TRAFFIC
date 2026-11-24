@@ -51,11 +51,20 @@
      - *Time in app* = the length of the union of page-visible intervals: overlapping tabs count once.
      - *Activity block* = a stretch of browser events whose gaps are all under a fixed join gap; a block's
        length is end − start and lengths are never summed on screen.
+  5. **Per-app split and per-day chart (shipped in step 2).**
+     - `users.daily` groups by (IST day, app) in SQL and folds the rows into days in TypeScript
+       (`foldUserDays`); each day carries `perApp` (`UserDayAppActivityDto`) and its totals are the Σ of the
+       apps. A row cap (`USER_DAILY_APP_ROWS_LIMIT`) drops a whole oldest day rather than show it with apps
+       missing. Same single scan, same access-log surface (`person_daily`).
+     - Apps are listed in the order they were first used that day, never by time or counts; an app seen only
+       through API calls shows "no browser time" instead of 0; at most three lines, then "+N more" (local).
+     - "Tab visible time per day" is one bar per IST day of the range in one colour, idle days drawn as 0,
+       with no average, target or reference line.
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
   - The one-day Visits link opens a list read that writes a `person_visits` access-log row, like "View visits".
-  - Still to come, each recorded here when it ships: the per-app split of a day, a read-side credit cap on long
+  - Still to come, each recorded here when it ships: a read-side credit cap on long
     `page_time` deltas (it lowers some shipped tab-visible numbers), the one-day view and its access-log
     surface, making the visit steps of a verified person admin-only (this changes the ADR 0015 line that kept
     `journeys.session` open to every viewer), and usual activity hours.

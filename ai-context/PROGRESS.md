@@ -18,6 +18,48 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-24 — Person 360 daily depth, step 2: per-app split of each day and a per-day chart (ADR 0017)
+
+Contract change, no migration, no new route leaf. Tab visible time is still the plain Σ of `visible_ms` (the
+per-tick credit cap is step 3).
+
+**Done**
+- **Shared contract** (`packages/shared`): new `UserDayAppActivityDto`; `UserDayActivityDto.perApp` (ordered by the
+  app's first activity, then slug; the day's counts and tab visible time are its Σ, `apps` its sorted slugs). New
+  `USER_DAILY_APP_ROWS_LIMIT = 3000` in `constants/traffic.ts` (`contracts.test.ts` checks it covers the widest
+  window × many apps).
+- **API:** `WebEventQueryRepository.listUserDailyActivity` keeps the same bounded, keyed UNION ALL but groups by
+  `(day, app)` (`GROUP BY 1, 2`, `ORDER BY 1 DESC, 3 ASC, 2 ASC`, no `array_agg`), `LIMIT` bound to the cap + 1.
+  `domain/rows.ts`: `UserDayAppActivityRow` replaces `UserDayActivityRow`. `domain/mappers.ts`:
+  `mapUserDayAppActivity`, `dropTruncatedOldestDay` (drops the whole oldest day when the extra row came back),
+  `foldUserDays` (replaces `mapUserDayActivity`). `UserService.daily` only changes its mapping line; window
+  widening, 93-day cap and the `person_daily` access-log row are unchanged.
+- **Web** (`features/users/`): new `DayAppList.tsx` — one line per app in first-use order (AppChip, its tab visible
+  time or "no browser time" for an app seen only through API calls, muted first–last clock), at most three lines,
+  then a `+N more` button (`aria-expanded`, local state, no fetch). New `components/charts/DailyBarChart.tsx` and the
+  "Tab visible time per day" panel in `UserDaysOverview.tsx` (one bar per IST day of the window, gap-filled with 0,
+  one colour, no reference line; tooltip: date, tab visible time, first – last activity, apps; hidden without
+  active days). `ChartTooltip` takes optional `notes` lines. `dailyActivity.ts`: `visibleAppLines`,
+  `appTimeLabel`, `appClockSpan`, `fillReportingDays`, `trendPointNotes`. `metricCopy.dayApps` explains the per-app
+  lines.
+- **Tests:** mapper fold / truncation cases, service fold + cap, repository SQL shape (`GROUP BY 1, 2`, limit
+  value, no `array_agg`, pinned `active_ms`), web helpers, the tab (app order, "no browser time", `+1 more`
+  expands without a read, chart shown / hidden), `ChartTooltip` renders the hovered day's notes (none without
+  `notes`). Web fixtures build every day with `userDayFrom` (`src/test/fixtures.ts`), which folds a day from its
+  `perApp` the way `foldUserDays` does, so a test day can never disagree with its own apps. DB (CI / owner only,
+  `RUN_DB_TESTS=1`): new `test/db/user-daily.integration.test.ts` with the S4 seed (`seedUserDailyApps`: two apps
+  in first-use order ≠ slug order, per-app visits, an API-only day, the app filter); the S3 daily expectation
+  gains `perApp`.
+- Docs: `07-data-model.md` (per-person daily rows), `03-code-navigation.md`, `GLOSSARY.md`, ADR 0017 (point 5).
+- **Gates:** `npm run typecheck` and `npm test` green (DB suites skipped without `RUN_DB_TESTS`).
+
+**Next / known issues**
+- Step 3: the read-side credit cap on long `page_time` deltas at all four sum sites (brief the owner before
+  pushing: some shipped tab-visible numbers drop).
+- `appTimeLabel` shows "no browser time" only for an app with API calls and NO browser visit that day; an app
+  with visits but no `page_time` yet shows "0 min" (it does have the browser tracker).
+- Not yet checked in the running app at 1280 px with several app lines per row, or on a phone.
+
 ## 2026-11-24 — Person 360 daily depth, step 1: neutral labels, one-day Visits link, stated limits (ADR 0017)
 
 Web and shared tests only; no API, contract or database change.

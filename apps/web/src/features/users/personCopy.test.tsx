@@ -28,6 +28,8 @@ import {
   SESSION_ID,
   timelineItem,
   USER_DAILY,
+  userDayApp,
+  userDayFrom,
   USER_DEVICES,
   USER_KEY,
   USER_PROFILE,
@@ -57,7 +59,12 @@ function servePersonReads(me: MeDto = ME): void {
       HttpResponse.json({
         ...USER_DAILY,
         items: USER_DAILY.items.map((day, index) =>
-          index === 0 ? { ...day, apps: ['ebo-sales', 'vendor-portal'] } : day,
+          index === 0
+            ? userDayFrom(day.day, [
+                ...day.perApp,
+                userDayApp('vendor-portal', { activeMs: 0, pageViews: 0, visits: 0 }),
+              ])
+            : day,
         ),
       }),
     ),

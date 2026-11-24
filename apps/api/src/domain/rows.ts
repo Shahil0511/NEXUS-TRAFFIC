@@ -422,11 +422,13 @@ export interface UserLatestContextRow {
 }
 
 /**
- * One IST day of a user's activity over both tables.
+ * One app on one IST day of a user's activity over both tables (rows come newest day first, then
+ * by the app's first activity, then slug; foldUserDays folds them into days).
  * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
  */
-export interface UserDayActivityRow {
+export interface UserDayAppActivityRow {
   day: Date;
+  app: string;
   first_activity_at: Date;
   last_activity_at: Date;
   active_ms: number;
@@ -435,8 +437,6 @@ export interface UserDayActivityRow {
   failed_requests: number;
   tool_uses: number;
   visits: number;
-  /** App slugs, sorted. */
-  apps: string[];
 }
 
 /**

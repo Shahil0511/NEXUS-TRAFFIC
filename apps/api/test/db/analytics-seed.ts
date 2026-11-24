@@ -743,3 +743,99 @@ export const JOURNEY_EXPECTED = {
     { country: null, requests: 1, pageViews: 1, users: 2 },
   ],
 } as const;
+
+// ─── S4: one person across two apps and two IST days (users.daily per app) ───
+
+/** The person of `seedUserDailyApps`; nobody else is seeded in that database. */
+export const USER_D = 'd@libas.in';
+
+export interface UserDailyAppsSeed {
+  now: Date;
+  appIds: AnalyticsSeed['appIds'];
+}
+
+/**
+ * S4 (its own database). `now` = 12:00 IST, so today (IST) began 12 h earlier.
+ * - TODAY, hr-portal (browser, 2 visits): session H1 page_view −120 min + page_time 2000 ms
+ *   −119 min; session H2 page_view −110 min.
+ * - TODAY, ebo-sales (browser + API): session S1 page_view −60 min + page_time 4000 ms −59 min +
+ *   tool export-csv −58 min; one storeLookup 500 without a session at −30 min.
+ * - YESTERDAY (−20 h), hr-portal API only: one leaves 200 (no browser time, no visit).
+ * So today's apps in first-activity order are hr-portal then ebo-sales (not the slug order).
+ */
+export async function seedUserDailyApps(
+  db: TestDatabase,
+  now: Date = seedNow(),
+): Promise<UserDailyAppsSeed> {
+  const appIds = await createSeedApps(db);
+  const ago = (ms: number) => new Date(now.getTime() - ms);
+  const hr1 = { appId: appIds.hr, sessionId: randomUUID(), user: USER_D };
+  const hr2 = { appId: appIds.hr, sessionId: randomUUID(), user: USER_D };
+  const sales = { appId: appIds.sales, sessionId: randomUUID(), user: USER_D };
+
+  const hrView = await insertWebEvent(db, {
+    ...hr1,
+    at: ago(120 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/leaves',
+  });
+  await insertWebEvent(db, {
+    ...hr1,
+    at: ago(119 * MINUTE),
+    seq: 1,
+    type: 'page_time',
+    path: '/leaves',
+    pageViewId: hrView,
+    visibleMs: 2000,
+  });
+  await insertWebEvent(db, {
+    ...hr2,
+    at: ago(110 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/leaves',
+  });
+  const salesView = await insertWebEvent(db, {
+    ...sales,
+    at: ago(60 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+  await insertWebEvent(db, {
+    ...sales,
+    at: ago(59 * MINUTE),
+    seq: 1,
+    type: 'page_time',
+    path: '/home',
+    pageViewId: salesView,
+    visibleMs: 4000,
+  });
+  await insertWebEvent(db, {
+    ...sales,
+    at: ago(58 * MINUTE),
+    seq: 2,
+    type: 'tool_use',
+    path: '/home',
+    tool: 'export-csv',
+  });
+  await new ApiRequestIngestRepository(db.appPool).insertBatch([
+    toInsert(
+      {
+        route: 'storeLookup',
+        at: ago(30 * MINUTE),
+        status: 500,
+        durationMs: 10,
+        user: USER_D,
+        sessionId: null,
+      },
+      appIds,
+    ),
+    toInsert(
+      { route: 'leaveList', at: ago(20 * HOUR), status: 200, durationMs: 5, user: USER_D },
+      appIds,
+    ),
+  ]);
+  return { now, appIds };
+}

@@ -847,6 +847,19 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
           visits: 1,
           apps: [SALES_SLUG],
           inProgress: true,
+          perApp: [
+            {
+              app: SALES_SLUG,
+              firstActivityAt: ago(60),
+              lastActivityAt: ago(54),
+              activeMs: 4000 + 3000 + 3000,
+              pageViews: 3,
+              requests: 1,
+              failedRequests: 0,
+              toolUses: 1,
+              visits: 1,
+            },
+          ],
         },
       ]);
       // 24h ending 12:00 IST is widened to whole IST days: yesterday 00:00 up to tomorrow 00:00.
