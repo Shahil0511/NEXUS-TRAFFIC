@@ -10,6 +10,8 @@
  */
 import type { UserDayActivityDto } from '@nexus/shared';
 
+import { EMPTY_VALUE, formatClockOffset, withUnit } from '@/lib/format';
+
 export const DAY_MS = 86_400_000;
 const PERCENT = 100;
 /** A one-event day still gets a visible mark on the strip (in % of the day). */
@@ -72,4 +74,17 @@ export function summarizeDays(days: readonly UserDayActivityDto[]): DailyTotals 
     ),
     totalActiveMs: days.reduce((total, day) => total + day.activeMs, 0),
   };
+}
+
+/** What "Average last activity" shows while the only active day is today (still running). */
+export const NOT_ENDED_YET = 'Not yet';
+
+/**
+ * The value of the "Average last activity" KPI: "16:00 IST"; NOT_ENDED_YET when every active day
+ * is still running (today only — its last activity is "so far", so it is left out of the average);
+ * "—" alone without any active day. Never "— IST". Pure.
+ */
+export function averageLastLabel(totals: DailyTotals): string {
+  if (totals.averageLastMs === null) return totals.daysActive > 0 ? NOT_ENDED_YET : EMPTY_VALUE;
+  return withUnit(formatClockOffset(totals.averageLastMs), 'IST');
 }

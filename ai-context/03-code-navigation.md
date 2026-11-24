@@ -385,9 +385,24 @@ only, `useCanOpenPersonPages`),
 `components/RelativeTime.tsx`, `lib/useDocumentTitle.ts` (masked emails only), `NavItem.filters` +
 `pageFiltersFor` in `lib/nav.ts` (which global filters a page shows, and its range cap).
 
-Page frame (Phase B, [ADR 0014](decisions/0014-object-first-navigation-and-person-page.md)): `NAV_SECTIONS` in
+Page frame (Phase B, [ADR 0014](decisions/0014-object-first-navigation-and-person-page.md); English-only copy, icons
+and art [ADR 0016](decisions/0016-english-only-ui-icons-and-illustrations.md)): `NAV_SECTIONS` in
 `apps/web/src/lib/nav.ts` groups the sidebar by object (top, People, Apps, Setup); each `NavItem` carries
-`question` + `questionHi`, printed by the hero `apps/web/src/components/PageHeader.tsx` on list pages.
+`question` (one English sentence), printed by the hero `apps/web/src/components/PageHeader.tsx` on list pages.
+The hero also shows the item's `icon` in a brand-gradient tile (`--brand-from` / `--brand-to` tokens) and, from md
+up, on list pages only, the section's motif from `apps/web/src/components/illustrations/index.ts`
+(`NAV_ILLUSTRATIONS`, a `Record<NavItemId, …>`, so a new nav id without art fails the typecheck; state scenes in
+`STATE_ILLUSTRATIONS`); detail pages keep the section's icon but no motif, and their long title wraps.
+Copy that names another page reads the sidebar label with `navLabel(id)` (`lib/nav.ts`); the requests metric is
+"API calls" everywhere (`METRIC_COPY.requests.label`); chart descriptions name the grain with `perGrain`
+(`lib/format.ts`); business empty states link the guide with `components/GuideLinkButton.tsx`. The top bar
+height is the `--spacing-topbar` token (`md:h-topbar`); the person identity card sticks at `top-below-topbar`.
+Decorative art: inline SVG drawn only with token utilities (`fill-primary/…`, `stroke-border`, `fill-chart-…`),
+always `aria-hidden` (`IllustrationFrame`). Empty, error, admins-only, no-access and not-found states open with
+`apps/web/src/components/StateArt.tsx` (a small scene plus a badge with the state's own icon). Major panels may
+pass `icon` to `Panel` (size-4, muted, aria-hidden). Favicon: `apps/web/src/app/icon.svg` (plum "L" mark).
+Operating systems print through `formatOsName` (`apps/web/src/lib/format.ts`): every macOS form reads "macOS"
+(display only; the stored `ua_os` is unchanged). Empty times print alone (`withUnit`: "—", never "— IST").
 `apps/web/src/components/AppShell.tsx` wraps every page in `PageEndProvider` (`apps/web/src/components/PageEndProvider.tsx`)
 and renders `apps/web/src/components/PageEnd.tsx` under it: "Still loading…" during a first load, "More rows
 above" while a `LoadMoreButton` list has more (`useOpenListMarker`), else "End of <page>". The `today` preset

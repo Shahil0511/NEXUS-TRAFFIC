@@ -132,20 +132,21 @@ function DetailContent({
           hint="verified"
         />
         <KpiCard
-          label="Sessions"
+          label="Visits"
           info={metricInfo('sessions')}
           icon={Waypoints}
           value={formatInteger(page.uniqueSessions)}
         />
         <KpiCard
-          label="Avg time visible"
+          label="Average visible"
           info={metricInfo('visibleTime')}
           icon={Hourglass}
           value={formatDuration(page.avgVisibleMs)}
           hint="tab in foreground"
         />
         <KpiCard
-          label="Median time visible"
+          label="Median visible"
+          info={metricInfo('visibleTime')}
           icon={Clock}
           value={formatDuration(page.p50VisibleMs)}
         />
@@ -177,7 +178,7 @@ function DetailContent({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Came from" description="The page just before, by sessions">
+        <Panel title="Came from" description="The page just before, by visits">
           <PageLinkList
             app={page.app}
             links={detail.cameFrom}
@@ -185,12 +186,12 @@ function DetailContent({
             empty="Entry page: nothing before it"
           />
         </Panel>
-        <Panel title="Went to" description="The page just after, by sessions">
+        <Panel title="Went to" description="The page just after, by visits">
           <PageLinkList
             app={page.app}
             links={detail.wentTo}
             linkQuery={linkQuery}
-            empty="Nothing after it in these sessions"
+            empty="Nothing after it in these visits"
           />
         </Panel>
       </div>

@@ -18,6 +18,106 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-24 — Docs in line with the English-only, icons and illustrations passes (ADR 0016)
+
+Docs-only step over the three uncommitted UI passes below (English-only copy; page icons and art; one name
+per thing). No code behaviour changed.
+
+**Done**
+- **New [ADR 0016](decisions/0016-english-only-ui-icons-and-illustrations.md):** screen copy is English only
+  (`NavItem.questionHi` removed); every hero shows its section's icon tile and list pages a small illustration
+  (`NAV_ILLUSTRATIONS`); empty, error, admins-only, no-access and not-found states open with `StateArt`; art is
+  inline SVG through `IllustrationFrame` (aria-hidden, token colours only, motion-safe) rather than raster images;
+  `formatOsName` prints every macOS form as "macOS" at display time (stored `ua_os` unchanged).
+- **[ADR 0014](decisions/0014-object-first-navigation-and-person-page.md)** (where `questionHi` was introduced,
+  decision 2) carries a "Superseded in part by ADR 0016" line.
+- **ai-context:** `02-architecture.md` lists ADR 0016; `03-code-navigation.md` page frame cites ADR 0016 and notes
+  `formatOsName` and `withUnit`; `04-how-to-recipes.md` "Add a dashboard metric or page" now asks for an English
+  `question`, an `icon`, a `NAV_ILLUSTRATIONS` entry and points at `apps/web/src/components/illustrations/`;
+  `GLOSSARY.md` has "page hero" and "illustration / state art".
+- **Comment fix:** `components/illustrations/index.ts` no longer says detail pages show their section's motif
+  (they keep the icon tile only, as `PageHeader` does).
+- **Gates:** `npm run typecheck` and `npm test` green (DB suites skipped without `RUN_DB_TESTS`); the ai-context
+  link test passes with the new paths.
+
+**Next / known issues**
+- The public guide (`docs/integration/01-getting-keys.md`, `11-troubleshooting.md`) still says "Apps page" and
+  "Integration page" for the screens now called App keys and Data health.
+- Still unchecked in the running app: both themes, a 360px phone and a 1280px laptop.
+- The three UI passes and this docs step are uncommitted.
+
+## 2026-11-24 — Phase B polish: one name per thing, layout and a11y fixes from the UI review
+
+Builds on the two uncommitted passes below (English-only copy; page icons and art).
+
+**Done**
+- **Page names:** copy that sends the reader to another page reads the sidebar label (`navLabel` in `lib/nav.ts`):
+  key, base path and origin fixes point at the "App keys page" (`integrationCopy.ts`, `AppHealthCard`,
+  `IntegrationView`); metric tips and buttons say People, Data health and Apps (`lib/metricCopy.ts`,
+  `WidenRangeButton`, the app page). "Geography" became "places".
+- **One name per thing:** routes are "request types" on screen (Request types list column, detail fallback title
+  and crumb, "Top failing request types", "Most used request types", command palette group); the list header
+  says each row is one API route. The visit page says "Visit", "visit id", "Visit metrics" and "Person page";
+  the Visits column is "Entry → exit". The requests metric is "API calls" everywhere
+  (`METRIC_COPY.requests.label`: KPIs, columns, Live, Places, Devices share-of switch). The command palette groups
+  are Go to, Apps, People, Request types.
+- **Neutral, accurate wording:** "Verified people, by API calls" (app page), "Who calls it" (request type page),
+  "People affected" (Problems); the Places switch is "Show countries by" / "Show by …".
+- **Plain words:** chart descriptions say "per minute / hour / day" (`perGrain` in `lib/format.ts`) instead of
+  "per bucket"; "Most failed requests" replaces "4xx + 5xx"; Live KPIs carry the p95 and "Active users now" tips;
+  empty states drop SDK event names and link the guide (`components/GuideLinkButton.tsx`). Pages columns are
+  "Average visible" / "Median visible" with the visible-time tip.
+- **Layout:** Privacy and Data health grids are `grid-cols-1` below xl (tables no longer push a phone sideways);
+  the Apps table shows p95, Visits, Tool uses and Linked from 2xl only (`SECONDARY_COLUMN`, DataTable skeletons
+  follow column classes) and the Application column keeps `min-w-48`; the identity card sticks below the top bar
+  (`--spacing-topbar` token); tab rows wrap below sm; the Apps used table has cell gaps and its own scroll.
+- **A11y:** the unavailable Devices panel has a dashed outline instead of `opacity-70` (AA contrast); the day strip
+  is aria-hidden (times are printed above it); "+N" app counts name the hidden apps for screen readers; the tab
+  list is "Person page sections"; detail-page titles wrap and get no hero motif.
+- **Person page:** a no-activity 404 no longer shows "Could not load these facts" in the identity card, and the
+  failure line no longer points at a Devices tab that is not on screen.
+- **Access log:** `person_profile` is labelled "Identity card and Summary" (it is sent on every open); ADR 0015 §4
+  says so.
+- **Tests:** `components/StateArt.test.tsx`, `components/AppChip.test.tsx`, `appTrafficColumns.test.ts`;
+  illustrations test checks class utilities against a token allowlist and iterates `STATE_ILLUSTRATIONS`;
+  `navLabel` and `perGrain` tests; updated view tests for the new names.
+
+**Next / known issues**
+- The public guide (`docs/integration/01-getting-keys.md`, `11-troubleshooting.md`) still says "Apps page" and
+  "Integration page" for the dashboard screens now called App keys and Data health.
+- Look at both themes, a 360px phone and a 1280px laptop in the running app.
+
+## 2026-11-24 — Phase B polish: page icons, illustrations, state art, panel icons, Libas favicon
+
+Builds on the uncommitted English-only copy pass of 2026-11-23 (NavItem.questionHi removed, OnlineBadge,
+withUnit / "Not yet", "macOS", identity card stacking, People / Visits column names).
+
+**Done**
+- **Page hero:** `components/PageHeader.tsx` shows the nav item's icon in a plum gradient tile left of the title
+  and, from md up, the section's illustration on the right. Both are aria-hidden and follow the active nav item,
+  so person, app, page and tool detail pages wear their section's art. The hero top line now uses the new
+  `--brand-from` / `--brand-to` tokens instead of hard-coded hex.
+- **Illustrations:** `components/illustrations/` holds one small inline-SVG motif per nav item (charts, pulse,
+  people, path, devices, apps, pages, request routes, problems, data health, keys, shield) plus state art (empty
+  box, warning cloud, lock, compass). `IllustrationFrame` makes every SVG aria-hidden and non-focusable; colours
+  come only from token utilities, so light and dark both work. The Live beacon pings only under `motion-safe`.
+  `NAV_ILLUSTRATIONS` is a `Record<NavItemId, …>`; `NavItemId` is a new union type in `lib/nav.ts`.
+- **States:** `components/StateArt.tsx` (scene + badge with the state's own icon) now opens `EmptyState`,
+  `ErrorState` (and its too-long-range state), `AdminOnly`, `NoAccess` and `app/not-found.tsx`. Visible text is
+  unchanged.
+- **Panel icons:** `Panel` takes an optional `icon` (size-4, muted, aria-hidden). Used on the major panels of
+  Overview, Live (incl. Who's online now), Devices & places (one icon per dimension in `DEVICES_DIMENSION_COPY`,
+  first-time vs returning, countries, cities), the person page tabs and Privacy & access.
+- **Favicon:** `app/icon.svg` is a plum gradient rounded square with a white "L" mark.
+- **Tests:** `components/illustrations/illustrations.test.tsx` (every nav id has art, all art is aria-hidden with
+  no text and no raw colours), `components/PageHeader.test.tsx` (icon tile, md+ art, detail pages, pages outside
+  the nav), a Panel icon test, and a brand-tile contrast check in `app/designTokens.test.ts`.
+
+**Next / known issues**
+- ADR 0014 still says the hero prints an English and a Hinglish sentence; the screens are now English only. An
+  ADR recording the English-only decision is still to be written (owner's call).
+- Look at both themes and a 360px phone in the running app once the local api is up.
+
 ## 2026-11-23 — Phase B polish: Libas logo, light by default, light sidebar, cursor spotlight, new names in trails
 
 **Done**

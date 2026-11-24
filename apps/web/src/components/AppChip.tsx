@@ -30,7 +30,10 @@ export function AppChip({ app, linkQuery = {}, className }: AppChipProps) {
   );
 }
 
-/** Up to `max` chips, then "+N" (the full list is on the user's page). */
+/**
+ * Up to `max` chips, then "+N" (the full list is on the user's page). The hidden names are also
+ * in visually hidden text: a `title` alone reaches neither keyboard, touch nor most screen readers.
+ */
 export function AppChipList({
   apps,
   linkQuery,
@@ -50,6 +53,7 @@ export function AppChipList({
       {hidden > 0 ? (
         <span className="text-2xs text-muted-foreground" title={apps.slice(max).join(', ')}>
           +{hidden}
+          <span className="sr-only"> more: {apps.slice(max).join(', ')}</span>
         </span>
       ) : null}
     </span>

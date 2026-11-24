@@ -1,7 +1,17 @@
 'use client';
 
 import type { UserProfileDto } from '@nexus/shared';
-import { Activity, Eye, TriangleAlert, Waypoints } from 'lucide-react';
+import {
+  Activity,
+  Boxes,
+  Eye,
+  FileText,
+  Globe2,
+  MousePointerClick,
+  Route,
+  TriangleAlert,
+  Waypoints,
+} from 'lucide-react';
 import Link from 'next/link';
 
 import { AppChip } from '@/components/AppChip';
@@ -13,7 +23,7 @@ import { RankedList } from '@/components/RankedList';
 import { RelativeTime } from '@/components/RelativeTime';
 import { Badge } from '@/components/ui/badge';
 import { formatCountry, formatInteger, formatPercent } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 const PERCENT = 100;
@@ -46,7 +56,7 @@ export function UserSummaryTab({
     <div className="space-y-6">
       <section aria-label="User metrics" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <KpiCard
-          label="API requests"
+          label={METRIC_COPY.requests.label}
           info={metricInfo('requests')}
           icon={Activity}
           value={formatInteger(summary.requests)}
@@ -76,13 +86,17 @@ export function UserSummaryTab({
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Apps used" description="This person's activity per application">
+        <Panel title="Apps used" icon={Boxes} description="This person's activity per application">
           <AppsUsedTable apps={profile.perApp} linkQuery={linkQuery} />
         </Panel>
-        <Panel title="Top API routes" description="The routes this person calls most">
+        <Panel
+          title="Top request types"
+          icon={Route}
+          description="The request types this person calls most"
+        >
           {profile.topEndpoints.length > 0 ? (
             <RankedList
-              ariaLabel="Top API routes"
+              ariaLabel="Top request types"
               items={profile.topEndpoints.map((route) => ({
                 key: route.endpointId,
                 label: (
@@ -112,7 +126,7 @@ export function UserSummaryTab({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <Panel title="Top pages" description="Most viewed page templates">
+        <Panel title="Top pages" icon={FileText} description="Most viewed page templates">
           {profile.topPages.length > 0 ? (
             <RankedList
               ariaLabel="Top pages"
@@ -134,7 +148,7 @@ export function UserSummaryTab({
             <EmptyState title="No page views" description="Only API calls were recorded." />
           )}
         </Panel>
-        <Panel title="Top tools" description="UI tools and features used">
+        <Panel title="Top tools" icon={MousePointerClick} description="UI tools and features used">
           {profile.topTools.length > 0 ? (
             <RankedList
               ariaLabel="Top tools"
@@ -156,7 +170,11 @@ export function UserSummaryTab({
             <EmptyState title="No tool uses" description="No tracked tool was used." />
           )}
         </Panel>
-        <Panel title="Countries" description="Where the activity came from (approximate)">
+        <Panel
+          title="Countries"
+          icon={Globe2}
+          description="Where the activity came from (approximate)"
+        >
           {profile.countries.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5" aria-label="Countries">
               {profile.countries.map((country) => (
@@ -178,6 +196,9 @@ export function UserSummaryTab({
 
 // ─── Apps used ───────────────────────────────────────────────────────────────
 
+/** A number column of the Apps used table: right-aligned, with a gap to the column before it. */
+const NUMBER_CELL = 'pl-3 text-right whitespace-nowrap';
+
 /** WHY: "which apps does this person use, and how much" — one row per app, each opening it. */
 function AppsUsedTable({
   apps,
@@ -187,43 +208,47 @@ function AppsUsedTable({
   linkQuery: Record<string, string | undefined>;
 }) {
   if (apps.length === 0) return <EmptyState title="No activity" />;
+  // WHY the wrapper and pl-3: the right-aligned number columns touched each other on a phone;
+  // like DataTable, the table scrolls inside its panel instead of widening the page.
   return (
-    <table className="w-full text-xs">
-      <caption className="sr-only">Apps used</caption>
-      <thead>
-        <tr className="text-2xs text-muted-foreground uppercase">
-          <th scope="col" className="pb-2 text-left font-medium">
-            App
-          </th>
-          <th scope="col" className="pb-2 text-right font-medium">
-            API calls
-          </th>
-          <th scope="col" className="pb-2 text-right font-medium">
-            Page views
-          </th>
-          <th scope="col" className="pb-2 text-right font-medium">
-            Tools
-          </th>
-          <th scope="col" className="pb-2 text-right font-medium">
-            Last seen
-          </th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-border">
-        {apps.map((app) => (
-          <tr key={app.app}>
-            <td className="py-2">
-              <AppChip app={app.app} linkQuery={linkQuery} />
-            </td>
-            <td className="py-2 text-right tabular">{formatInteger(app.requests)}</td>
-            <td className="py-2 text-right tabular">{formatInteger(app.pageViews)}</td>
-            <td className="py-2 text-right tabular">{formatInteger(app.toolUses)}</td>
-            <td className="py-2 text-right text-muted-foreground">
-              <RelativeTime iso={app.lastSeenAt} />
-            </td>
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <caption className="sr-only">Apps used</caption>
+        <thead>
+          <tr className="text-2xs text-muted-foreground uppercase">
+            <th scope="col" className="pb-2 text-left font-medium">
+              App
+            </th>
+            <th scope="col" className={`${NUMBER_CELL} pb-2 font-medium`}>
+              {METRIC_COPY.requests.label}
+            </th>
+            <th scope="col" className={`${NUMBER_CELL} pb-2 font-medium`}>
+              Page views
+            </th>
+            <th scope="col" className={`${NUMBER_CELL} pb-2 font-medium`}>
+              Tools
+            </th>
+            <th scope="col" className={`${NUMBER_CELL} pb-2 font-medium`}>
+              Last seen
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {apps.map((app) => (
+            <tr key={app.app}>
+              <td className="py-2">
+                <AppChip app={app.app} linkQuery={linkQuery} />
+              </td>
+              <td className={`${NUMBER_CELL} py-2 tabular`}>{formatInteger(app.requests)}</td>
+              <td className={`${NUMBER_CELL} py-2 tabular`}>{formatInteger(app.pageViews)}</td>
+              <td className={`${NUMBER_CELL} py-2 tabular`}>{formatInteger(app.toolUses)}</td>
+              <td className={`${NUMBER_CELL} py-2 text-muted-foreground`}>
+                <RelativeTime iso={app.lastSeenAt} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

@@ -24,6 +24,7 @@ import {
 
 import { EMPTY_VALUE } from '@/lib/format';
 import type { GuideChapter } from '@/lib/guide';
+import { navLabel } from '@/lib/nav';
 
 export type Tone = 'success' | 'warning' | 'destructive' | 'muted';
 
@@ -51,8 +52,7 @@ const percent = (ratio: number) => `${Math.round(ratio * 100)} %`;
 export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   exposed_key: {
     title: 'Secret key exposed',
-    description:
-      'A secret key was sent from a browser. Treat it as leaked: issue a new key on the Apps page, deploy it, then revoke the old one.',
+    description: `A secret key was sent from a browser. Treat it as leaked: issue a new key on the ${navLabel('apps')} page, deploy it, then revoke the old one.`,
     tone: 'destructive',
     chapter: 'keys',
   },
@@ -85,7 +85,7 @@ export const WARNING_COPY: Record<IntegrationWarning, WarningCopy> = {
   },
   private_ips: {
     title: 'Proxy IPs instead of users',
-    description: `More than ${percent(PRIVATE_IP_RATIO_THRESHOLD)} of server events carry a private IP (your proxy, not the user), so Geography and location stay empty for this app on the dashboard. Set trustProxyHops to the number of proxies in front of the app.`,
+    description: `More than ${percent(PRIVATE_IP_RATIO_THRESHOLD)} of server events carry a private IP (your proxy, not the user), so places (country and city) stay empty for this app on the dashboard. Set trustProxyHops to the number of proxies in front of the app.`,
     tone: 'warning',
     chapter: 'clientIp',
   },
@@ -178,12 +178,10 @@ export const REJECTION_CODE_COPY: Record<IngestRejectionCode, string> = {
   INVALID_EVENT: 'The event failed validation: see the field; fix the sender’s payload.',
   EVENT_TIME_OUT_OF_RANGE:
     'occurredAt was too far in the past or future: check the sender’s clock (NTP) and retry queue.',
-  PATH_OUTSIDE_APP:
-    'The page path is outside the app’s base path: check basePath on the Apps page.',
+  PATH_OUTSIDE_APP: `The page path is outside the app’s base path: check basePath on the ${navLabel('apps')} page.`,
   DB_CONSTRAINT: 'A value broke a database limit: the field names the constraint.',
   INVALID_ENVELOPE: 'The whole batch was malformed (server SDK): check the SDK version.',
-  ORIGIN_NOT_ALLOWED:
-    'A browser beacon came from an origin not in the app’s allowed origins (Apps page).',
+  ORIGIN_NOT_ALLOWED: `A browser beacon came from an origin not in the app’s allowed origins (${navLabel('apps')} page).`,
 };
 
 export const PII_KIND_LABELS: Record<PiiKind, string> = {

@@ -1,6 +1,7 @@
 'use client';
 
 import type { TimeWindowQuery } from '@nexus/shared';
+import { Activity } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { DataTable } from '@/components/DataTable';
@@ -33,6 +34,7 @@ export function UserActivityTab({
   return (
     <Panel
       title="Activity"
+      icon={Activity}
       description="API calls, page views and tool uses, newest first"
       contentClassName="px-0 pb-0"
     >

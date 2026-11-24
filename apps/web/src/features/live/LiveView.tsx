@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDateTime, formatDuration, formatInteger } from '@/lib/format';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { cn } from '@/lib/utils';
 
 import { latestTick, LIVE_FEED_BUFFER, ticksToPoints } from './liveBuffer';
@@ -54,7 +55,8 @@ export function LiveView() {
 
       <section aria-label="Live metrics" className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard
-          label="Requests / min"
+          label={`${METRIC_COPY.requests.label} / min`}
+          info={metricInfo('requests')}
           icon={Activity}
           loading={loading}
           value={formatInteger(current?.requests)}
@@ -73,13 +75,15 @@ export function LiveView() {
         />
         <KpiCard
           label="p95 latency"
+          info={metricInfo('p95')}
           icon={Gauge}
           loading={loading}
           value={formatDuration(current?.p95Ms)}
           hint="this minute"
         />
         <KpiCard
-          label="Active users"
+          label={METRIC_COPY.activeUsersNow.label}
+          info={metricInfo('activeUsersNow')}
           icon={Radio}
           loading={loading}
           value={formatInteger(current?.activeUsers)}
@@ -87,7 +91,11 @@ export function LiveView() {
         />
       </section>
 
-      <Panel title="Requests per minute" description={`Last ${LIVE_SNAPSHOT_MINUTES} minutes`}>
+      <Panel
+        title={`${METRIC_COPY.requests.label} per minute`}
+        icon={Activity}
+        description={`Last ${LIVE_SNAPSHOT_MINUTES} minutes`}
+      >
         <QueryState
           query={live.snapshot}
           skeleton={<ChartSkeleton />}
@@ -101,6 +109,7 @@ export function LiveView() {
 
       <Panel
         title="Activity stream"
+        icon={Radio}
         description={`API calls, page views and tool uses as they arrive · newest ${LIVE_FEED_BUFFER} kept`}
         contentClassName="px-0 pb-0"
         aside={
@@ -133,7 +142,7 @@ export function LiveView() {
             empty={
               <EmptyState
                 title="Waiting for traffic"
-                description="New API calls and page views appear here as soon as they are ingested."
+                description="New API calls and page views appear here as soon as they arrive."
               />
             }
           />

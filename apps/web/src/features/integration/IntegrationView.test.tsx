@@ -27,7 +27,9 @@ describe('IntegrationView', () => {
     expect(within(warnings).getByText('Secret key exposed')).toBeInTheDocument();
     expect(within(warnings).getByText('Proxy IPs instead of users')).toBeInTheDocument();
     // The proxy-IP warning says what it costs on the dashboard, not only how to fix it.
-    expect(within(warnings).getByText(/Geography and location stay empty/)).toBeInTheDocument();
+    expect(
+      within(warnings).getByText(/places \(country and city\) stay empty/),
+    ).toBeInTheDocument();
     expect(within(sales).getByRole('button', { name: 'Copy app slug' })).toBeInTheDocument();
     expect(within(warnings).getByText('Events rejected')).toBeInTheDocument();
     const fixes = within(warnings).getAllByRole('link', { name: /How to fix/ });
@@ -176,7 +178,7 @@ describe('IntegrationView', () => {
     serve({ ...INTEGRATION_HEALTH, apps: [] });
     renderWithProviders(<IntegrationView />);
     expect(await screen.findByText('No apps registered yet')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open Apps' })).toHaveAttribute('href', '/apps');
+    expect(screen.getByRole('link', { name: 'Open App keys' })).toHaveAttribute('href', '/apps');
   });
 
   it('shows the error state with the request id', async () => {

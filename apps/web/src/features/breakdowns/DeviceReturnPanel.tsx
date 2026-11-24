@@ -1,6 +1,7 @@
 'use client';
 
 import type { DeviceReturnDto, TimeWindowQuery } from '@nexus/shared';
+import { Repeat } from 'lucide-react';
 
 import { EmptyState } from '@/components/EmptyState';
 import { InfoTip } from '@/components/InfoTip';
@@ -73,6 +74,7 @@ export function DeviceReturnPanel({
   return (
     <Panel
       title={title}
+      icon={Repeat}
       description={`Returning = also seen in the ${RETURNING_LOOKBACK_DAYS} days before`}
       className={className}
     >

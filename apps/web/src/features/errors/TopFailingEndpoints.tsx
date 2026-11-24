@@ -32,14 +32,14 @@ export function TopFailingEndpoints({
   if (endpoints.length === 0) {
     return (
       <EmptyState
-        title="No failing routes"
-        description="Nothing returned 4xx or 5xx in this window."
+        title="No failing request types"
+        description="No request failed in this window."
       />
     );
   }
   const linkQuery = filterLinkQuery(filters);
   return (
-    <ol className="-mx-2 space-y-0.5" aria-label="Top failing routes">
+    <ol className="-mx-2 space-y-0.5" aria-label="Top failing request types">
       {endpoints.slice(0, limit).map((endpoint) => (
         <li key={endpoint.endpointId}>
           <Link
@@ -49,9 +49,7 @@ export function TopFailingEndpoints({
             <MethodBadge method={endpoint.method} />
             <span className="min-w-0 flex-1">
               <span className="block truncate font-mono text-xs">{endpoint.routeTemplate}</span>
-              <span className="block truncate text-2xs text-muted-foreground">
-                {endpoint.app}
-              </span>
+              <span className="block truncate text-2xs text-muted-foreground">{endpoint.app}</span>
             </span>
             <span className="text-right text-xs tabular">
               <span className="block font-semibold">

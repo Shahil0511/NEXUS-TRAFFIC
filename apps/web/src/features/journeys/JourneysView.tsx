@@ -42,7 +42,7 @@ export function JourneysView() {
         description={
           topPaths.data
             ? formatWindowCaption(topPaths.data.window)
-            : 'Browser sessions, their replays and the paths people take'
+            : 'Browser visits, their replays and the paths people take'
         }
       />
 
@@ -53,8 +53,8 @@ export function JourneysView() {
           isEmpty={topPaths.data?.items.length === 0}
           empty={
             <EmptyState
-              title="No multi-page sessions"
-              description="Paths appear once sessions visit at least three pages."
+              title="No multi-page visits"
+              description="Paths appear once a visit reaches at least three pages."
             />
           }
         >
@@ -77,11 +77,11 @@ function SessionsPanel() {
   const columns = useMemo(() => sessionColumns(filters), [filters]);
   // The chip names the user from the rows (verified email of their sessions), never from the URL.
   const userLabel =
-    (userKey && rows?.find((row) => row.userKey === userKey)?.userEmail) || 'One user only';
+    (userKey && rows?.find((row) => row.userKey === userKey)?.userEmail) || 'One person only';
 
   return (
     <Panel
-      title="Sessions"
+      title="All visits"
       description="Most recent first · open one to replay it"
       contentClassName="px-0 pb-0"
       aside={
@@ -91,7 +91,7 @@ function SessionsPanel() {
             size="sm"
             onClick={clearUser}
             className="max-w-72"
-            aria-label={`Remove user filter ${userLabel}`}
+            aria-label={`Remove person filter ${userLabel}`}
           >
             <span className="truncate">{userLabel}</span>
             <X aria-hidden="true" />
@@ -104,15 +104,15 @@ function SessionsPanel() {
       ) : (
         <>
           <DataTable
-            caption="Sessions"
+            caption="Visits"
             columns={columns}
             rows={rows}
             rowKey={(row) => `${row.app}|${row.sessionId}`}
             loading={sessions.isPending}
             empty={
               <EmptyState
-                title="No sessions in this window"
-                description="Sessions appear once an app sends browser events. Try a longer range."
+                title="No visits in this range"
+                description="Visits appear once an app sends browser events. Try a longer range."
                 action={<WidenRangeButton />}
               />
             }

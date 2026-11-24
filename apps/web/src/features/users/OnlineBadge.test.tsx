@@ -8,7 +8,7 @@ import { USER_KEY } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
-import { OnlineBadge } from './OnlineBadge';
+import { OnlineBadge, onlineSentence, otherAppsLabel } from './OnlineBadge';
 
 function onlineUser(overrides: Partial<OnlineUserDto> = {}): OnlineUserDto {
   return {
@@ -56,8 +56,10 @@ describe('OnlineBadge', () => {
     renderWithProviders(<OnlineBadge userKey={USER_KEY} />, {
       searchParams: '?app=other&range=7d',
     });
-    const badge = await screen.findByText(/Online now/);
-    expect(badge).toHaveTextContent('Online now · in ebo-sales · on /orders');
+    // One sentence for screen readers, every space and the app name in place.
+    expect(
+      await screen.findByText('Online now · in ebo-sales · on /orders', { selector: '.sr-only' }),
+    ).toBeInTheDocument();
     // Not app- or range-filtered: being online is a fact about the person.
     expect(seen[0]?.get('userKey')).toBe(USER_KEY);
     expect(seen[0]?.get('app')).toBeNull();
@@ -72,9 +74,28 @@ describe('OnlineBadge', () => {
       ]),
     );
     renderWithProviders(<OnlineBadge userKey={USER_KEY} />);
-    const badge = await screen.findByText(/Online now/);
-    expect(badge).toHaveTextContent('Online now · in hr-portal (+1 more app)');
-    expect(badge).not.toHaveTextContent('· on');
+    const sentence = await screen.findByText(/^Online now/, { selector: '.sr-only' });
+    expect(sentence).toHaveTextContent(/^Online now · in hr-portal \(\+1 more app\)$/);
+  });
+
+  it('draws the visual parts as separate, spaced pieces hidden from screen readers', async () => {
+    useOnline(online([onlineUser()]));
+    renderWithProviders(<OnlineBadge userKey={USER_KEY} />);
+    const app = await screen.findByText('ebo-sales');
+    const visual = app.parentElement!;
+    expect(visual).toHaveAttribute('aria-hidden', 'true');
+    expect(visual).toHaveClass('gap-x-1');
+    // "in" and the app name are separate items, so the gap always spaces them.
+    expect(app.previousElementSibling).toHaveTextContent(/^in$/);
+  });
+
+  it('builds the sentence with every space in place', () => {
+    expect(onlineSentence('nexus-portal', 0, null)).toBe('Online now · in nexus-portal');
+    expect(onlineSentence('ebo-sales', 2, '/orders')).toBe(
+      'Online now · in ebo-sales (+2 more apps) · on /orders',
+    );
+    expect(otherAppsLabel(0)).toBe('');
+    expect(otherAppsLabel(1)).toBe('(+1 more app)');
   });
 
   it('renders nothing when the person is not active', async () => {

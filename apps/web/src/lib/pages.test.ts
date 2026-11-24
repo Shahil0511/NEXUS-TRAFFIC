@@ -4,7 +4,7 @@ import path from 'node:path';
 import { MAX_COUNT_RANGE_MS, MAX_PERCENTILE_RANGE_MS } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { isNavItemActive, NAV_ITEMS, NAV_SECTIONS, pageFiltersFor } from './nav';
+import { isNavItemActive, NAV_ITEMS, NAV_SECTIONS, navLabel, pageFiltersFor } from './nav';
 import { PAGES, withQuery } from './pages';
 
 const PAGES_FILE = path.join(__dirname, 'pages.ts');
@@ -82,7 +82,6 @@ describe('the Privacy & access nav item', () => {
       label: 'Privacy & access',
       href: PAGES.privacy(),
       question: 'Who opened whose person page, and when.',
-      questionHi: 'Kisne kiska page kab khola.',
     });
     expect(isNavItemActive(privacy, '/privacy')).toBe(true);
     expect(isNavItemActive(privacy, '/privacyX')).toBe(false);
@@ -127,5 +126,14 @@ describe('pageFiltersFor', () => {
   it('does not confuse /applications with /apps', () => {
     const apps = NAV_ITEMS.find((item) => item.id === 'apps')!;
     expect(isNavItemActive(apps, '/applications')).toBe(false);
+  });
+});
+
+describe('navLabel', () => {
+  it('reads the sidebar label, so copy that names a page matches the sidebar', () => {
+    expect(navLabel('apps')).toBe('App keys');
+    expect(navLabel('applications')).toBe('Apps');
+    expect(navLabel('users')).toBe('People');
+    expect(navLabel('integration')).toBe('Data health');
   });
 });

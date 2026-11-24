@@ -65,6 +65,7 @@ export function OnlineNowPanel() {
   return (
     <Panel
       title="Who's online now"
+      icon={UsersRound}
       description={
         <>
           People active in the last {WINDOW_MINUTES} minutes · refreshed every {REFRESH_SECONDS} s

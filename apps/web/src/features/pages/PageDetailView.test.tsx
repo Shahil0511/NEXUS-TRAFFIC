@@ -89,7 +89,7 @@ describe('PageDetailView', () => {
     expect(screen.getByRole('link', { name: '/orders' }).getAttribute('href')).toBe(
       `/pages/ebo-sales/${OTHER_PAGE_ID}?app=ebo-sales&range=7d`,
     );
-    expect(screen.getByText('Nothing after it in these sessions')).toBeInTheDocument();
+    expect(screen.getByText('Nothing after it in these visits')).toBeInTheDocument();
 
     // Applications › ebo-sales › Pages › /orders/:id — hrefs from PAGES, carrying the filters.
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });

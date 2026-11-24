@@ -14,6 +14,8 @@ import {
   RETURNING_DEVICE_LOOKBACK_MS,
 } from '@nexus/shared';
 
+import { navLabel } from './nav';
+
 /** One metric's explanation: a name, a one-line gist and the detail a curious user wants. */
 export interface MetricCopy {
   /** The metric's name in words, e.g. "p95 latency". */
@@ -38,9 +40,9 @@ export const RETURNING_LOOKBACK_DAYS = Math.round(RETURNING_DEVICE_LOOKBACK_MS /
 export const METRIC_COPY = {
   // ─── API traffic ───────────────────────────────────────────────────────────
   requests: {
-    label: 'Requests (API calls)',
+    label: 'API calls',
     short: 'How many backend API calls the apps reported in this time range.',
-    long: 'One request = one call from a browser or service to an app’s server, counted once whatever its result.',
+    long: 'One API call = one call from a browser or service to an app’s server, counted once whatever its result.',
   },
   errorRate: {
     label: 'Error rate',
@@ -90,9 +92,10 @@ export const METRIC_COPY = {
     long: 'Reloading or coming back to a page counts again; one person can make many page views.',
   },
   sessions: {
-    label: 'Sessions',
-    short: 'Browser visits: one browser tab’s activity until it is closed or idle for 30 minutes.',
-    long: 'Two tabs open at once are two sessions. A session is not a login — one user can have many.',
+    label: 'Visits',
+    short:
+      'Browser visits (sessions): one browser tab’s activity until it is closed or idle for 30 minutes.',
+    long: 'Two tabs open at once are two visits. A visit is not a login — one person can have many.',
   },
   visibleTime: {
     label: 'Visible time',
@@ -101,7 +104,7 @@ export const METRIC_COPY = {
   },
   exitRate: {
     label: 'Exit rate',
-    short: 'The share of sessions on this page whose last page view was this page.',
+    short: 'The share of visits to this page whose last page view was this page.',
     long: 'High on a “done” page is normal; high on a step in the middle of a flow can mean people give up there.',
   },
   toolUses: {
@@ -113,7 +116,7 @@ export const METRIC_COPY = {
   identifiedUsers: {
     label: 'Identified users',
     short: 'Distinct people we could name with a verified identity (SSO cookie or app-attested).',
-    long: 'Anonymous visitors and identities claimed only by the browser are not counted. Same definition as the Users page.',
+    long: `Anonymous visitors and identities claimed only by the browser are not counted. Same definition as the ${navLabel('users')} page.`,
   },
   uniqueUsers: {
     label: 'Users',
@@ -167,6 +170,12 @@ export const METRIC_COPY = {
     short: 'The latest recorded API call or browser event of the day, India time.',
     long: 'It is the last thing the apps recorded, not a sign-out time.',
   },
+  daySpan: {
+    label: 'First – last activity',
+    short:
+      'The earliest and latest API call or browser event of the day, India time, marked on a 00:00 to 24:00 bar.',
+    long: 'They are not sign-in or sign-out times. Today is not over yet, so its last activity is “so far”.',
+  },
   daysActive: {
     label: 'Days active',
     short:
@@ -199,12 +208,12 @@ export const METRIC_COPY = {
     label: 'Identified %',
     short:
       'The share of events (API calls and browser events combined) that carry a verified user.',
-    long: `Low means people are missing from the Users pages. The Integration page shows it per source. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
+    long: `Low means people are missing from the ${navLabel('users')} pages. The ${navLabel('integration')} page shows it per source. Below ${COVERAGE_WARN_PCT} % is highlighted.`,
   },
   identityCoverage: {
     label: 'Identified (per source)',
     short: 'The share of this source’s events that carry a verified user.',
-    long: `Per source here; the Applications page combines both sources. Below ${COVERAGE_WARN_PCT} % is highlighted; under ${COVERAGE_MIN_EVENTS} events there is no verdict.`,
+    long: `Per source here; the ${navLabel('applications')} page combines both sources. Below ${COVERAGE_WARN_PCT} % is highlighted; under ${COVERAGE_MIN_EVENTS} events there is no verdict.`,
   },
   linkingCoverage: {
     label: 'Linked API calls',
@@ -226,7 +235,7 @@ export const METRIC_COPY = {
   sendingData: {
     label: 'Apps sending data',
     short: 'Registered apps that sent at least one API call or browser event in this time range.',
-    long: 'A registered app that stays silent usually has a broken or undeployed integration — see Integration health.',
+    long: `A registered app that stays silent usually has a broken or undeployed integration. See ${navLabel('integration')}.`,
   },
   linkedPct: {
     label: 'Linked %',

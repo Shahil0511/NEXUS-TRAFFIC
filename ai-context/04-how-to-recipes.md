@@ -31,7 +31,11 @@ reading order.
 5. **Web**: `api.<group>.<leaf>` in `apps/web/src/lib/api.ts`, a key in `apps/web/src/lib/query/keys.ts`, a hook
    `apps/web/src/features/<group>/use<Thing>.ts` (one query), the view `<X>View.tsx`. A new page also needs
    `apps/web/src/app/(dashboard)/<page>/page.tsx`, a builder in `apps/web/src/lib/pages.ts` and a nav entry in
-   `apps/web/src/lib/nav.ts` with `question` + `questionHi` (the purpose sentence the page hero prints, ADR 0014). A
+   `apps/web/src/lib/nav.ts` with `question` (one English sentence the page hero prints, ADR 0014 / 0016) and an
+   `icon`, plus its hero art in `NAV_ILLUSTRATIONS` (`apps/web/src/components/illustrations/index.ts`; the
+   typecheck fails without it). New art is an inline-SVG component in that folder, wrapped in `IllustrationFrame`
+   and drawn with token utilities only (ADR 0016). An empty or error state uses `EmptyState` / `ErrorState`,
+   which already open with `components/StateArt.tsx`. A
    paged list uses `components/LoadMoreButton.tsx` so the page end does not claim the page is over. Keep
    on-screen labels descriptive; no per-person scores, ranks or comparisons between people.
 6. **Tests**: service unit test with fakes (`apps/api/test/fixtures/fake-query-repositories.ts`), a DB block in

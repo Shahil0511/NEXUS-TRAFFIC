@@ -8,7 +8,9 @@ import { cn } from '@/lib/utils';
 /**
  * WHY: in-page tabs (Devices & places) on Radix Tabs — roving focus, arrow keys, tab / tabpanel
  * roles — styled like the SegmentedControl, so a tab row and a switch look like one family.
- * Inactive panels unmount, so a hidden tab sends no queries.
+ * Inactive panels unmount, so a hidden tab sends no queries. Below sm the row WRAPS instead of
+ * scrolling: four person tabs need about 380px, and a clipped last tab gave touch users no cue
+ * that more tabs existed.
  */
 export const Tabs = TabsPrimitive.Root;
 
@@ -17,7 +19,7 @@ export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrim
     <TabsPrimitive.List
       data-slot="tabs-list"
       className={cn(
-        'inline-flex h-9 max-w-full items-center gap-0.5 overflow-x-auto rounded-lg bg-muted p-0.5 ring-1 ring-border ring-inset',
+        'inline-flex min-h-9 max-w-full flex-wrap items-center gap-0.5 overflow-x-auto rounded-lg sm:h-9 sm:flex-nowrap bg-muted p-0.5 ring-1 ring-border ring-inset',
         className,
       )}
       {...props}

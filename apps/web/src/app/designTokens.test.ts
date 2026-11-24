@@ -87,6 +87,12 @@ describe.each([':root', '.dark'])('colour tokens of %s', (selector) => {
     }
   });
 
+  it('--brand-foreground (the hero tile icon) reaches 3:1 on both ends of the brand gradient', () => {
+    for (const end of [tokens['brand-from']!, tokens['brand-to']!]) {
+      expect(contrastOf(rgbOf(tokens['brand-foreground']!), rgbOf(end))).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('keeps the stacked 4xx/5xx chart marks apart in lightness (not hue alone)', () => {
     const step = contrastOf(rgbOf(tokens['chart-4xx']!), rgbOf(tokens['chart-5xx']!));
     expect(step).toBeGreaterThanOrEqual(1.2);

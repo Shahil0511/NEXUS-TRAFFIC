@@ -1,7 +1,7 @@
 'use client';
 
 import type { GeoCityDto, GeoCountryDto, TimeWindowQuery } from '@nexus/shared';
-import { BookOpen, MapPin, Network, PlugZap } from 'lucide-react';
+import { BookOpen, ChartColumn, Flag, MapPin, Network, PlugZap } from 'lucide-react';
 import Link from 'next/link';
 import { parseAsStringLiteral, useQueryStates } from 'nuqs';
 import { useCallback, useMemo, type ReactNode } from 'react';
@@ -18,6 +18,7 @@ import { SegmentedControl, type SegmentedOption } from '@/components/ui/segmente
 import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { EMPTY_VALUE, formatCountry, formatInteger } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
+import { METRIC_COPY } from '@/lib/metricCopy';
 import { PAGES } from '@/lib/pages';
 
 import { useGeoCities } from './useGeoCities';
@@ -47,15 +48,22 @@ function useGeoMetric(): [GeoMetric, (metric: GeoMetric) => void] {
 }
 
 const METRIC_OPTIONS: readonly SegmentedOption<GeoMetric>[] = [
-  { value: 'requests', label: 'Requests', ariaLabel: 'Rank by API requests' },
-  { value: 'pageViews', label: 'Page views', ariaLabel: 'Rank by page views' },
-  { value: 'users', label: 'Users', ariaLabel: 'Rank by verified users' },
+  { value: 'requests', label: 'API calls', ariaLabel: 'Show by API calls' },
+  { value: 'pageViews', label: 'Page views', ariaLabel: 'Show by page views' },
+  { value: 'users', label: 'Users', ariaLabel: 'Show by verified people' },
 ];
 
 const METRIC_LABELS: Record<GeoMetric, string> = {
-  requests: 'Requests',
+  requests: METRIC_COPY.requests.label,
   pageViews: 'Page views',
   users: 'Users',
+};
+
+/** The same metric inside a sentence ("Show API calls"): lower case except the acronym. */
+const METRIC_NOUNS: Record<GeoMetric, string> = {
+  requests: METRIC_COPY.requests.label,
+  pageViews: 'page views',
+  users: 'users',
 };
 
 /** Top countries by the chosen metric; zero rows are dropped (they would be empty bars). */
@@ -95,8 +103,8 @@ export function metricWithData(
 /** Empty-chart copy per metric: the traffic exists, this metric is 0 everywhere. */
 const NO_METRIC_COPY: Record<GeoMetric, { title: string; description: string }> = {
   requests: {
-    title: 'No API requests in this window',
-    description: 'API requests are sent by the server SDK; this traffic has none.',
+    title: 'No API calls in this window',
+    description: 'API calls are sent by the server SDK; this traffic has none.',
   },
   pageViews: {
     title: 'No page views in this window',
@@ -144,7 +152,7 @@ const COUNTRY_COLUMNS: DataTableColumn<GeoCountryDto>[] = [
   },
   {
     id: 'requests',
-    header: 'Requests',
+    header: METRIC_COPY.requests.label,
     align: 'right',
     cell: (row) => formatInteger(row.requests),
   },
@@ -178,7 +186,7 @@ const CITY_COLUMNS: DataTableColumn<GeoCityDto>[] = [
   },
   {
     id: 'requests',
-    header: 'Requests',
+    header: METRIC_COPY.requests.label,
     align: 'right',
     cell: (row) => formatInteger(row.requests),
   },
@@ -196,7 +204,7 @@ export interface GeoPlacesSectionProps {
   filters: TimeWindowQuery;
   /**
    * Controlled chart metric (the Devices & places "Show share of" switch). Absent: the section
-   * keeps its own `?metric=` and shows its own "Rank countries by" control.
+   * keeps its own `?metric=` and shows its own "Show countries by" control.
    */
   metric?: GeoMetric;
   onMetricChange?: (metric: GeoMetric) => void;
@@ -207,7 +215,7 @@ export interface GeoPlacesSectionProps {
 }
 
 /**
- * WHY: where traffic comes from — a ranked country chart (requests, page views or verified
+ * WHY: where traffic comes from — a country bar chart (requests, page views or verified
  * users), the country table and an APPROXIMATE city table, with the GeoLite2 attribution. Used by
  * the Geography page and the Places tab of Devices & places. No map in v1: a ranked bar reads
  * more precisely than shaded areas.
@@ -240,12 +248,13 @@ export function GeoPlacesSection({
           <div className="grid gap-4 lg:grid-cols-5 lg:items-start">
             <Panel
               title="Top countries"
+              icon={ChartColumn}
               description={`${METRIC_LABELS[metric]} · top ${CHART_BARS}`}
               className="lg:col-span-3"
               aside={
                 controlled ? null : (
                   <SegmentedControl
-                    ariaLabel="Rank countries by"
+                    ariaLabel="Show countries by"
                     value={metric}
                     options={METRIC_OPTIONS}
                     onValueChange={setMetric}
@@ -284,7 +293,12 @@ export function GeoPlacesSection({
               </QueryState>
             </Panel>
 
-            <Panel title="Countries" className="lg:col-span-2" contentClassName="px-0 pb-0">
+            <Panel
+              title="Countries"
+              icon={Flag}
+              className="lg:col-span-2"
+              contentClassName="px-0 pb-0"
+            >
               {countries.isError ? (
                 <ErrorState error={countries.error} onRetry={() => void countries.refetch()} />
               ) : (
@@ -308,7 +322,8 @@ export function GeoPlacesSection({
 
           <Panel
             title="Cities"
-            description="City-level location is an estimate from the IP address (GeoLite2 city centroids)"
+            icon={MapPin}
+            description="City is estimated from the IP address"
             contentClassName="px-0 pb-0"
             aside={
               <Badge variant="warning" title="Cities are estimated from IP addresses">
@@ -377,7 +392,7 @@ function NoMetricState({
       action={
         switchTo ? (
           <Button variant="outline" size="sm" onClick={() => onSwitch(switchTo)}>
-            Show {METRIC_LABELS[switchTo].toLowerCase()}
+            Show {METRIC_NOUNS[switchTo]}
           </Button>
         ) : null
       }

@@ -18,7 +18,14 @@ import { TopUsersList } from '@/components/TopUsersList';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { formatAgo, formatDateTime, formatInteger, formatWindowCaption } from '@/lib/format';
+import {
+  EMPTY_VALUE,
+  formatAgo,
+  formatDateTime,
+  formatInteger,
+  formatWindowCaption,
+  withUnit,
+} from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
@@ -124,7 +131,7 @@ function DetailContent({
           hint="verified"
         />
         <KpiCard
-          label="Sessions"
+          label="Visits"
           info={metricInfo('sessions')}
           icon={Waypoints}
           value={formatInteger(tool.distinctSessions)}
@@ -132,8 +139,8 @@ function DetailContent({
         <KpiCard
           label="Last used"
           icon={Clock}
-          value={formatAgo(tool.lastUsedAt, Date.now()) ?? '—'}
-          hint={`${formatDateTime(tool.lastUsedAt)} IST`}
+          value={formatAgo(tool.lastUsedAt, Date.now()) ?? EMPTY_VALUE}
+          hint={withUnit(formatDateTime(tool.lastUsedAt), 'IST')}
         />
       </section>
 

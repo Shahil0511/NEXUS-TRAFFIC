@@ -81,7 +81,13 @@ describe('METRIC_COPY', () => {
     expect(METRIC_COPY.linkedPct.short).toMatch(/desktop, mobile and tablet/);
     expect(METRIC_COPY.linkedPct.long).toMatch(/server-to-server/);
     expect(METRIC_COPY.identifiedPct.short).toMatch(/combined/);
-    expect(METRIC_COPY.identityCoverage.long).toMatch(/Applications page combines both sources/);
+    expect(METRIC_COPY.identityCoverage.long).toMatch(/Apps page combines both sources/);
+  });
+
+  it('names other pages by their sidebar labels, never by old page names', () => {
+    const copy = JSON.stringify(METRIC_COPY);
+    expect(copy).not.toMatch(/Users page|Integration page|Integration health|Applications page/);
+    expect(METRIC_COPY.identifiedPct.long).toMatch(/People pages\. The Data health page/);
   });
 });
 

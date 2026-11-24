@@ -1,5 +1,5 @@
 import { ROUTES } from '@nexus/shared';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -42,6 +42,18 @@ describe('UsersView', () => {
     expect(screen.getByText(/Verified identities only/)).toBeInTheDocument();
   });
 
+  it('names its columns like the nav: Person and Visits', async () => {
+    useUserHandlers();
+    renderWithProviders(<UsersView />);
+    const table = await screen.findByRole('table', { name: 'People' });
+    const headers = within(table)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent ?? '');
+    expect(headers[0]).toBe('Person');
+    expect(headers.some((text) => text.startsWith('Visits'))).toBe(true);
+    expect(headers.some((text) => /user|session/i.test(text))).toBe(false);
+  });
+
   it('"Load more" fetches the next page with the cursor and appends it', async () => {
     const calls = useUserHandlers();
     const user = userEvent.setup();
@@ -68,9 +80,9 @@ describe('UsersView', () => {
     renderWithProviders(<UsersView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
     await screen.findByText('buyer@libas.in');
 
-    await user.type(screen.getByRole('searchbox', { name: 'Search users' }), 'nobody');
+    await user.type(screen.getByRole('searchbox', { name: 'Search people' }), 'nobody');
     await waitFor(() => expect(bodies.at(-1)).toMatchObject({ search: 'nobody' }));
-    expect(await screen.findByText('No user matches your search')).toBeInTheDocument();
+    expect(await screen.findByText('No person matches your search')).toBeInTheDocument();
     expect(calls.every((params) => !params.has('search'))).toBe(true);
     expect(urls.every((query) => !query.includes('nobody'))).toBe(true);
   });

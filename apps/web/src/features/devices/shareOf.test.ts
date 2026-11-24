@@ -37,7 +37,7 @@ describe('share-of copy', () => {
     expect(SHARE_OF_COPY.pageViews.source).toBe('browser');
     expect(SHARE_OF_COPY.requests.source).toBe('server');
     expect(UNIT_OF_SOURCE.browser).toBe('page views');
-    expect(UNIT_OF_SOURCE.server).toBe('requests');
+    expect(UNIT_OF_SOURCE.server).toBe('API calls');
     for (const share of SHARE_OF_VALUES) {
       expect(shareOfGeoMetric(SHARE_OF_COPY[share].geoMetric)).toBe(share);
     }

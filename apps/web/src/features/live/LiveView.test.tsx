@@ -158,10 +158,10 @@ describe('LiveView', () => {
     renderWithProviders(<LiveView />);
 
     await screen.findByText('/api/orders/42');
-    expect(within(card('Requests / min')).getByText('42')).toBeInTheDocument();
+    expect(within(card('API calls / min')).getByText('42')).toBeInTheDocument();
     expect(within(card('Errors / min')).getByText('4')).toBeInTheDocument();
     expect(within(card('p95 latency')).getByText('840 ms')).toBeInTheDocument();
-    expect(within(card('Active users')).getByText('7')).toBeInTheDocument();
+    expect(within(card('Active users now')).getByText('7')).toBeInTheDocument();
     expect(latestSocket().subscriptions).toEqual([{}]);
     await vi.waitFor(() =>
       expect(screen.getAllByRole('status').map((el) => el.textContent)).toContain('Live'),
@@ -192,7 +192,7 @@ describe('LiveView', () => {
       ]);
     });
 
-    expect(within(card('Requests / min')).getByText('50')).toBeInTheDocument();
+    expect(within(card('API calls / min')).getByText('50')).toBeInTheDocument();
     const rows = within(table()).getAllByRole('row');
     // header + 2 events, newest first
     expect(rows).toHaveLength(3);

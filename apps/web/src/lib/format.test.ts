@@ -14,11 +14,14 @@ import {
   formatElapsed,
   formatHoursMinutes,
   formatInteger,
+  formatOsName,
   formatPercent,
   formatWindowCaption,
   fromIstInputValue,
+  perGrain,
   toIstInputValue,
   UNKNOWN_COUNTRY,
+  withUnit,
 } from './format';
 
 describe('format helpers', () => {
@@ -112,5 +115,38 @@ describe('person-page time formats', () => {
     expect(formatClockOffset(undefined)).toBe(EMPTY_VALUE);
     // IST midnight of 1 Oct is 30 Sep 18:30 UTC.
     expect(formatDay('2026-09-30T18:30:00.000Z')).toMatch(/Thu.*1 Oct.*2026/);
+  });
+});
+
+describe('withUnit', () => {
+  it('adds the unit to a value and never to an empty one', () => {
+    expect(withUnit('09:10', 'IST')).toBe('09:10 IST');
+    expect(withUnit(formatClockOffset(null), 'IST')).toBe(EMPTY_VALUE);
+    expect(withUnit(formatDateTime(undefined), 'IST')).toBe(EMPTY_VALUE);
+  });
+});
+
+describe('formatOsName', () => {
+  it('drops the frozen macOS version the User-Agent carries', () => {
+    expect(formatOsName('Mac OS 10')).toBe('macOS');
+    expect(formatOsName('Mac OS')).toBe('macOS');
+    expect(formatOsName('Mac OS X 10')).toBe('macOS');
+    expect(formatOsName('macOS 14')).toBe('macOS');
+  });
+
+  it('keeps every other system as stored', () => {
+    expect(formatOsName('Windows 10')).toBe('Windows 10');
+    expect(formatOsName('iOS 17')).toBe('iOS 17');
+    expect(formatOsName('Android 14')).toBe('Android 14');
+    expect(formatOsName('Chrome OS 120')).toBe('Chrome OS 120');
+  });
+});
+
+describe('perGrain', () => {
+  it('names the chart grain in words, and says "over time" before it is known', () => {
+    expect(perGrain('minute')).toBe('per minute');
+    expect(perGrain('hour')).toBe('per hour');
+    expect(perGrain('day')).toBe('per day');
+    expect(perGrain(undefined)).toBe('over time');
   });
 });

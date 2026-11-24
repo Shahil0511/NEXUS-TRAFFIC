@@ -29,6 +29,7 @@ import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDateTime, formatInteger } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
 import { metricInfo } from '@/lib/metricCopy';
+import { navLabel } from '@/lib/nav';
 import { PAGES } from '@/lib/pages';
 
 import { AppHealthCard } from './AppHealthCard';
@@ -188,10 +189,10 @@ export function IntegrationView() {
           <Card>
             <EmptyState
               title={filters.app ? 'This app is not registered' : 'No apps registered yet'}
-              description="An admin registers an app and issues its keys on the Apps page; its team then follows the integration guide."
+              description={`An admin registers an app and issues its keys on the ${navLabel('apps')} page. Its team then follows the integration guide.`}
               action={
                 <Button asChild variant="outline" size="sm">
-                  <Link href={PAGES.apps()}>Open Apps</Link>
+                  <Link href={PAGES.apps()}>Open {navLabel('apps')}</Link>
                 </Button>
               }
             />
@@ -199,7 +200,7 @@ export function IntegrationView() {
         }
       >
         {() => (
-          <div className="grid gap-4 xl:grid-cols-2 xl:items-start">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start">
             {apps.map((app) => (
               <AppHealthCard key={app.app} health={app} nowMs={nowMs} />
             ))}

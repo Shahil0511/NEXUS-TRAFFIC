@@ -23,6 +23,12 @@ describe('breakdownValueLabel', () => {
     expect(breakdownValueLabel('release', null)).toBe(NOT_SENT_LABEL);
   });
 
+  it('shows macOS without the frozen User-Agent version; other systems as stored', () => {
+    expect(breakdownValueLabel('os', 'Mac OS 10')).toBe('macOS');
+    expect(breakdownValueLabel('os', 'Windows 10')).toBe('Windows 10');
+    expect(breakdownValueLabel('os', null)).toBe(NOT_SENT_LABEL);
+  });
+
   it('never resolves a value to an Object.prototype member', () => {
     expect(breakdownValueLabel('environment', 'constructor')).toBe('constructor');
     expect(breakdownValueLabel('device', '__proto__')).toBe('__proto__');

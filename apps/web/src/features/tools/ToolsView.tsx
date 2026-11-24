@@ -9,6 +9,7 @@ import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarCha
 import { Sparkline } from '@/components/charts/Sparkline';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
+import { GuideLinkButton } from '@/components/GuideLinkButton';
 import { ErrorState } from '@/components/ErrorState';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
@@ -91,7 +92,7 @@ export function toolColumns(
     },
     {
       id: 'sessions',
-      header: 'Sessions',
+      header: 'Visits',
       align: 'right',
       cell: (row) => formatInteger(row.distinctSessions),
     },
@@ -168,7 +169,8 @@ export function ToolsView() {
             empty={
               <EmptyState
                 title="No tool usage"
-                description="Tools appear from data-nexus-tool clicks and trackTool() calls."
+                description="Tools appear once the app's team tags its buttons. See the integration guide."
+                action={<GuideLinkButton chapter="browserContract" />}
               />
             }
           >

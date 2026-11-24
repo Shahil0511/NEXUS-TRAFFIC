@@ -77,7 +77,7 @@ describe('ErrorsView', () => {
     renderWithProviders(<ErrorsView />);
     const totals = await screen.findByRole('region', { name: 'Failure totals' });
     expect(await within(totals).findByText('4')).toBeInTheDocument();
-    const affected = await screen.findByRole('list', { name: 'Most affected users' });
+    const affected = await screen.findByRole('list', { name: 'People affected' });
     expect(within(affected).getByRole('link', { name: 'buyer@libas.in' })).toBeInTheDocument();
   });
 

@@ -26,7 +26,7 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
     },
     {
       id: 'journey',
-      header: 'Journey',
+      header: 'Entry → exit',
       className: 'w-full max-w-0',
       cell: (row) => (
         <Link
@@ -49,7 +49,7 @@ export function sessionColumns(filters: TimeWindowQuery): DataTableColumn<Sessio
     },
     {
       id: 'user',
-      header: 'User',
+      header: 'Person',
       className: 'max-w-56',
       cell: (row) => <ActorCell actor={sessionActor(row)} linkQuery={linkQuery} />,
     },

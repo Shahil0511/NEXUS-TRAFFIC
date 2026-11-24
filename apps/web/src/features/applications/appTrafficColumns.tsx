@@ -59,6 +59,9 @@ export function isSilent(row: AppTrafficDto): boolean {
   return row.lastEventAt === null;
 }
 
+/** A column the table shows from 2xl only (DataTable puts it on the th, every td and skeleton). */
+export const SECONDARY_COLUMN = 'hidden 2xl:table-cell';
+
 /**
  * WHY: the Applications table — every app on one line with the numbers a lead compares (people,
  * traffic, failures, speed, adoption). Each app opens its own page (PAGES.applicationDetail; the
@@ -67,6 +70,10 @@ export function isSilent(row: AppTrafficDto): boolean {
  * where "Identified" / "Linked" and their COVERAGE_WARN_PCT threshold are explained (CoverageValue).
  * "Online now" ignores the range: `onlineOf(app)` comes from useOnlineNow (features/live), merged
  * by app slug in the view.
+ *
+ * Width: twelve columns did not fit the content area below about 1500px, so the secondary ones
+ * (p95, Visits, Tool uses, Linked) show from 2xl only (SECONDARY_COLUMN; the app page and Data
+ * health show them) and the Application column keeps a floor so names stay readable.
  */
 export function appTrafficColumns(
   linkQuery: LinkQuery,
@@ -77,7 +84,7 @@ export function appTrafficColumns(
     {
       id: 'app',
       header: 'Application',
-      className: 'w-full max-w-0',
+      className: 'w-full min-w-48 max-w-0',
       cell: (row) => (
         <Link
           href={withQuery(PAGES.applicationDetail(row.app), { ...linkQuery, app: undefined })}
@@ -137,6 +144,7 @@ export function appTrafficColumns(
       header: 'p95',
       hint: metricInfo('p95'),
       align: 'right',
+      className: SECONDARY_COLUMN,
       cell: (row) => <span className="tabular">{formatDuration(row.p95Ms)}</span>,
     },
     {
@@ -148,9 +156,10 @@ export function appTrafficColumns(
     },
     {
       id: 'sessions',
-      header: 'Sessions',
+      header: 'Visits',
       hint: metricInfo('sessions'),
       align: 'right',
+      className: SECONDARY_COLUMN,
       cell: (row) => <span className="tabular">{formatInteger(row.sessions)}</span>,
     },
     {
@@ -158,6 +167,7 @@ export function appTrafficColumns(
       header: 'Tool uses',
       hint: metricInfo('toolUses'),
       align: 'right',
+      className: SECONDARY_COLUMN,
       cell: (row) => <span className="tabular">{formatInteger(row.toolUses)}</span>,
     },
     {
@@ -177,6 +187,7 @@ export function appTrafficColumns(
       header: 'Linked',
       hint: metricInfo('linkedPct'),
       align: 'right',
+      className: SECONDARY_COLUMN,
       cell: (row) => (
         <CoverageValue
           pct={row.linkedPct}

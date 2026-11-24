@@ -16,10 +16,11 @@ import {
   formatDay,
   formatHoursMinutes,
   formatInteger,
+  withUnit,
 } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 
-import { dayStripSpan, summarizeDays } from './dailyActivity';
+import { averageLastLabel, dayStripSpan, summarizeDays } from './dailyActivity';
 import { useUserDaily } from './useUserDaily';
 
 /** Hour marks drawn on the strip (06:00, 12:00, 18:00), in % of the day. */
@@ -60,7 +61,7 @@ export function UserDailyActivityTab({
           label="Average first activity"
           info={metricInfo('firstActivity')}
           icon={Sunrise}
-          value={`${formatClockOffset(totals.averageFirstMs)} IST`}
+          value={withUnit(formatClockOffset(totals.averageFirstMs), 'IST')}
           hint="over the active days"
           loading={loading}
         />
@@ -68,7 +69,7 @@ export function UserDailyActivityTab({
           label="Average last activity"
           info={metricInfo('lastActivity')}
           icon={Sunset}
-          value={`${formatClockOffset(totals.averageLastMs)} IST`}
+          value={averageLastLabel(totals)}
           hint="over the active days that have ended"
           loading={loading}
         />
@@ -84,7 +85,8 @@ export function UserDailyActivityTab({
 
       <Panel
         title="Daily activity"
-        description="One row per whole day (India time) with any activity, newest first. The bar is the whole day, 00:00 to 24:00; the marked part runs from the first to the last activity. Today is not over yet, so its last activity is so far."
+        icon={CalendarDays}
+        description="One row per day (India time) with any activity, newest first. The bar is the whole day, 00:00 to 24:00; the marked part runs from the first to the last activity. Today is not over yet, so its last activity is so far."
         contentClassName="px-0 pb-0"
       >
         <DataTable
@@ -100,6 +102,11 @@ export function UserDailyActivityTab({
   );
 }
 
+/**
+ * WHY so few columns: the tab shares the page with the identity card, so the table must fit
+ * without sideways scrolling from 1280 px. First and last activity sit above their own day bar
+ * (one column instead of three), and failed requests sit under the request count.
+ */
 const DAILY_COLUMNS: readonly DataTableColumn<UserDayActivityDto>[] = [
   {
     id: 'day',
@@ -107,33 +114,23 @@ const DAILY_COLUMNS: readonly DataTableColumn<UserDayActivityDto>[] = [
     cell: (row) => <span className="whitespace-nowrap">{formatDay(row.day)}</span>,
   },
   {
-    id: 'first',
-    header: 'First activity',
-    hint: metricInfo('firstActivity'),
-    cell: (row) => <span className="tabular">{formatClockTime(row.firstActivityAt)}</span>,
-  },
-  {
-    id: 'last',
-    header: 'Last activity',
-    hint: metricInfo('lastActivity'),
-    cell: (row) => (
-      <span className="tabular whitespace-nowrap">
-        {formatClockTime(row.lastActivityAt)}
-        {row.inProgress ? <span className="text-muted-foreground"> so far</span> : null}
-      </span>
-    ),
-  },
-  {
-    id: 'strip',
-    header: '00:00 – 24:00 IST',
+    id: 'span',
+    header: 'First – last activity (IST)',
+    hint: metricInfo('daySpan'),
     className: 'w-full min-w-40',
     cell: (row) => (
-      <DayStrip day={row.day} firstAt={row.firstActivityAt} lastAt={row.lastActivityAt} />
+      <div className="space-y-1.5">
+        <span className="block tabular whitespace-nowrap">
+          {formatClockTime(row.firstActivityAt)} – {formatClockTime(row.lastActivityAt)}
+          {row.inProgress ? <span className="text-muted-foreground"> so far</span> : null}
+        </span>
+        <DayStrip day={row.day} firstAt={row.firstActivityAt} lastAt={row.lastActivityAt} />
+      </div>
     ),
   },
   {
     id: 'active',
-    header: 'Active time (tab visible)',
+    header: 'Active time',
     hint: metricInfo('activeTime'),
     align: 'right',
     cell: (row) => <span className="whitespace-nowrap">{formatHoursMinutes(row.activeMs)}</span>,
@@ -146,18 +143,17 @@ const DAILY_COLUMNS: readonly DataTableColumn<UserDayActivityDto>[] = [
   },
   {
     id: 'requests',
-    header: 'Requests',
-    align: 'right',
-    cell: (row) => <span className="tabular">{formatInteger(row.requests)}</span>,
-  },
-  {
-    id: 'failed',
-    header: 'Failed',
-    hint: metricInfo('failedRequests'),
+    header: METRIC_COPY.requests.label,
+    hint: `${metricInfo('requests')} The line under the count says how many failed (HTTP status 400 or higher).`,
     align: 'right',
     cell: (row) => (
-      <span className={row.failedRequests > 0 ? 'text-destructive tabular' : 'tabular'}>
-        {formatInteger(row.failedRequests)}
+      <span className="flex flex-col items-end gap-0.5">
+        <span className="tabular">{formatInteger(row.requests)}</span>
+        {row.failedRequests > 0 ? (
+          <span className="text-2xs text-destructive tabular">
+            {formatInteger(row.failedRequests)} failed
+          </span>
+        ) : null}
       </span>
     ),
   },
@@ -173,6 +169,8 @@ const DAILY_COLUMNS: readonly DataTableColumn<UserDayActivityDto>[] = [
 /**
  * WHY: a whole IST day as one bar, so the reader sees at a glance WHEN in the day the activity
  * happened. Only the span first → last activity is marked (not what happened in between).
+ * Decorative (aria-hidden): the times are printed as text right above it, so a label here only
+ * read them twice (and lost the "so far" of today's row).
  */
 export function DayStrip({
   day,
@@ -186,8 +184,8 @@ export function DayStrip({
   const span = dayStripSpan(day, firstAt, lastAt);
   return (
     <div
-      role="img"
-      aria-label={`Active from ${formatClockTime(firstAt)} to ${formatClockTime(lastAt)} IST`}
+      aria-hidden="true"
+      data-slot="day-strip"
       className="relative h-3 w-full rounded-full bg-muted ring-1 ring-border ring-inset"
     >
       {STRIP_TICKS_PCT.map((tick) => (

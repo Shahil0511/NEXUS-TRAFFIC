@@ -9,7 +9,7 @@ import { useGeoCountries } from './useGeoCountries';
 
 /**
  * The Geography page (PAGES.geography, kept so old links work; the sidebar's "Devices & places"
- * item covers it): the places content on its own, with its own "Rank countries by" control. The
+ * item covers it): the places content on its own, with its own "Show countries by" control. The
  * same content is the Places tab of PAGES.devices (features/devices/DevicesView.tsx).
  */
 export function GeographyView() {

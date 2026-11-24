@@ -3,12 +3,16 @@ import { describe, expect, it } from 'vitest';
 
 import { USER_DAILY } from '@/test/fixtures';
 
+import { EMPTY_VALUE } from '@/lib/format';
+
 import {
+  averageLastLabel,
   averageTimeIntoDay,
   DAY_MS,
   dayStripSpan,
   MIN_STRIP_WIDTH_PCT,
   msIntoDay,
+  NOT_ENDED_YET,
   summarizeDays,
 } from './dailyActivity';
 
@@ -73,5 +77,16 @@ describe('daily averages and totals', () => {
       totalActiveMs: 0,
     });
     expect(averageTimeIntoDay([], (day: UserDayActivityDto) => day.firstActivityAt)).toBeNull();
+  });
+});
+
+describe('averageLastLabel', () => {
+  it('prints the average with its unit, and never a unit after an empty value', () => {
+    const [today, yesterday] = USER_DAILY.items;
+    if (!today || !yesterday) throw new Error('fixture');
+    expect(averageLastLabel(summarizeDays(USER_DAILY.items))).toBe('16:00 IST');
+    // Only today, still running: nothing has ended yet.
+    expect(averageLastLabel(summarizeDays([{ ...today, inProgress: true }]))).toBe(NOT_ENDED_YET);
+    expect(averageLastLabel(summarizeDays([]))).toBe(EMPTY_VALUE);
   });
 });

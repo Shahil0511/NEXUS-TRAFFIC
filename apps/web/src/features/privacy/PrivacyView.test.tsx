@@ -76,7 +76,7 @@ describe('PrivacyView', () => {
       within(rows[0] as HTMLElement).getByRole('link', { name: /^Daily activity/ }),
     ).toHaveAttribute('href', `/users/${USER_KEY}?tab=daily`);
     expect(rows[1]).toHaveTextContent('c***@libas.in');
-    expect(rows[1]).toHaveTextContent('Summary');
+    expect(rows[1]).toHaveTextContent('Identity card and Summary');
 
     await userEvent.setup().click(screen.getByRole('button', { name: /Load more/ }));
     expect(await within(table).findByText('Devices')).toBeInTheDocument();

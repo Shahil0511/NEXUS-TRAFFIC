@@ -1,7 +1,17 @@
 'use client';
 
 import type { OverviewSummaryDto, TimeseriesPointDto } from '@nexus/shared';
-import { Activity, ArrowRight, Eye, Gauge, Radio, TriangleAlert, UserCheck } from 'lucide-react';
+import {
+  Activity,
+  ArrowRight,
+  Boxes,
+  Eye,
+  Gauge,
+  Radio,
+  Route,
+  TriangleAlert,
+  UserCheck,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 
@@ -30,8 +40,9 @@ import {
   formatInteger,
   formatPercent,
   formatWindowCaption,
+  perGrain,
 } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 
 import { useOverviewSummary } from './useOverviewSummary';
@@ -88,7 +99,12 @@ export function OverviewView() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Requests" description="API calls per bucket" className="lg:col-span-2">
+        <Panel
+          title={METRIC_COPY.requests.label}
+          icon={Activity}
+          description={`${METRIC_COPY.requests.label} ${perGrain(timeseries.data?.window.grain)}`}
+          className="lg:col-span-2"
+        >
           <QueryState
             query={timeseries}
             skeleton={<ChartSkeleton />}
@@ -110,6 +126,7 @@ export function OverviewView() {
         </Panel>
         <Panel
           title="Errors"
+          icon={TriangleAlert}
           description="Failed requests by class"
           aside={<ChartLegend series={ERROR_SERIES} />}
         >
@@ -131,7 +148,8 @@ export function OverviewView() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel
           title="Latency"
-          description="p95 per bucket (streams excluded)"
+          icon={Gauge}
+          description={`${METRIC_COPY.p95.label} ${perGrain(timeseries.data?.window.grain)}, streams excluded`}
           className="lg:col-span-2"
         >
           <QueryState
@@ -150,8 +168,9 @@ export function OverviewView() {
           </QueryState>
         </Panel>
         <Panel
-          title="Top failing routes"
-          description="Most 4xx + 5xx responses"
+          title="Top failing request types"
+          icon={Route}
+          description="Most failed requests"
           aside={
             <Button asChild variant="ghost" size="sm">
               <Link href={withQuery(PAGES.errors(), linkQuery)}>All errors</Link>
@@ -189,6 +208,7 @@ function ActiveUsersPanel({
   return (
     <Panel
       title="Active users"
+      icon={UserCheck}
       description="Distinct verified users per day (IST)"
       aside={
         activity.data ? (
@@ -257,6 +277,7 @@ function AppsPanel({
   return (
     <Panel
       title="Applications"
+      icon={Boxes}
       description="Busiest first: users, API calls and error rate per app"
       aside={
         <Button asChild variant="ghost" size="sm">
@@ -329,7 +350,7 @@ function KpiGrid({
       className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6"
     >
       <KpiCard
-        label="Requests"
+        label={METRIC_COPY.requests.label}
         info={metricInfo('requests')}
         icon={Activity}
         loading={loading}

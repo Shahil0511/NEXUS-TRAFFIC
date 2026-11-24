@@ -148,4 +148,5 @@ kill switch + CORS layering [0009](decisions/0009-sdk-remote-config-and-kill-swi
 Phase B (dashboard redesign): object-first navigation, page hero + page end, the Today preset,
 Devices & places and the person page [0014](decisions/0014-object-first-navigation-and-person-page.md);
 admin-only person pages and the person access log
-[0015](decisions/0015-admin-only-person-pages-and-access-log.md).
+[0015](decisions/0015-admin-only-person-pages-and-access-log.md); English-only screen copy, page icons and
+illustrations [0016](decisions/0016-english-only-ui-icons-and-illustrations.md).

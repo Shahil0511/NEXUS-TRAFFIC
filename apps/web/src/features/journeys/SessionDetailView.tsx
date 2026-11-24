@@ -42,7 +42,7 @@ export function SessionDetailView({ app, sessionId }: { app: string; sessionId: 
   const filters = useMemo(() => ({ ...globalFilters, app }), [globalFilters, app]);
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const detail = useSessionDetail(app, sessionId, filters);
-  const title = `Session ${sessionId.slice(0, SESSION_ID_PREVIEW)}`;
+  const title = `Visit ${sessionId.slice(0, SESSION_ID_PREVIEW)}`;
   const backLink = (
     <Breadcrumbs
       items={[
@@ -138,11 +138,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <AppChip app={summary.app} linkQuery={linkQuery} />
-            <CopyableText
-              value={summary.sessionId}
-              label="session id"
-              className="max-w-72 text-xs"
-            />
+            <CopyableText value={summary.sessionId} label="visit id" className="max-w-72 text-xs" />
             <span>Started {formatDateTime(summary.startedAt)} IST</span>
             <SessionIdentity session={summary} />
           </span>
@@ -151,7 +147,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
           summary.userKey && canOpenPerson ? (
             <Button asChild variant="outline">
               <Link href={withQuery(PAGES.userDetail(summary.userKey), linkQuery)}>
-                <UserRound aria-hidden="true" /> User profile
+                <UserRound aria-hidden="true" /> Person page
               </Link>
             </Button>
           ) : null
@@ -159,7 +155,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
       />
 
       <section
-        aria-label="Session metrics"
+        aria-label="Visit metrics"
         className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5"
       >
         <KpiCard label="Duration" icon={Clock} value={formatDuration(summary.durationMs)} />

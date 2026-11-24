@@ -36,7 +36,7 @@ describe('OverviewView', () => {
     renderWithProviders(<OverviewView />);
 
     const metrics = await screen.findByRole('region', { name: 'Key metrics' });
-    const requests = await within(metrics).findByRole('heading', { name: 'Requests' });
+    const requests = await within(metrics).findByRole('heading', { name: 'API calls' });
     const requestsCard = requests.closest('section')!;
     expect(within(requestsCard).getByText('12.3K')).toBeInTheDocument();
     expect(within(requestsCard).getByText('+23.4%')).toBeInTheDocument();
@@ -49,7 +49,7 @@ describe('OverviewView', () => {
     expect(within(metrics).getByText('840 ms')).toBeInTheDocument();
     expect(within(metrics).getByText('7')).toBeInTheDocument();
     expect(within(metrics).getByText('no previous data')).toBeInTheDocument();
-    // Top failing routes come from errors.summary and link by opaque id only.
+    // Top failing request types come from errors.summary and link by opaque id only.
     const link = await screen.findByRole('link', { name: /\/api\/orders\/:id/ });
     expect(link.getAttribute('href')).toBe('/endpoints/6f1c3f7e-2a59-5a7e-9a51-0d6d3f3c1a11');
   });

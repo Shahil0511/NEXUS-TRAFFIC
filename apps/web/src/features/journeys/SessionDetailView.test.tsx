@@ -50,13 +50,13 @@ describe('SessionDetailView', () => {
     // The full session id is one click away (the title shows only a prefix).
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    fireEvent.click(screen.getByRole('button', { name: 'Copy session id' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy visit id' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SESSION_ID));
 
-    const metrics = screen.getByRole('region', { name: 'Session metrics' });
+    const metrics = screen.getByRole('region', { name: 'Visit metrics' });
     expect(within(metrics).getByText('12m 0s')).toBeInTheDocument();
     expect(within(metrics).getByText('1 failed')).toBeInTheDocument();
-    expect((await screen.findByRole('link', { name: /user profile/i })).getAttribute('href')).toBe(
+    expect((await screen.findByRole('link', { name: /person page/i })).getAttribute('href')).toBe(
       `/users/${USER_KEY}?app=ebo-sales`,
     );
   });
@@ -70,7 +70,7 @@ describe('SessionDetailView', () => {
     });
 
     const replay = await screen.findByRole('list', { name: 'Session replay' });
-    // Applications › ebo-sales › Journeys › Session xxxxxxxx
+    // Apps › ebo-sales › Visits › Visit xxxxxxxx
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     const links = within(trail).getAllByRole('link');
     expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
@@ -78,7 +78,7 @@ describe('SessionDetailView', () => {
       ['ebo-sales', '/applications/ebo-sales?range=7d'],
       ['Visits', '/journeys?app=ebo-sales&range=7d'],
     ]);
-    expect(await screen.findByRole('link', { name: /user profile/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /person page/i })).toHaveAttribute(
       'href',
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
     );
@@ -102,6 +102,6 @@ describe('SessionDetailView', () => {
     expect(await screen.findByText('someone@libas.in')).toBeInTheDocument();
     expect(screen.getByLabelText('claimed identity, not verified')).toBeInTheDocument();
     expect(screen.getByText(/203\.0\.113\.9/)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /user profile/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /person page/i })).not.toBeInTheDocument();
   });
 });

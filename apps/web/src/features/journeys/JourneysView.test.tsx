@@ -36,7 +36,7 @@ describe('JourneysView', () => {
   it('lists sessions linked to their replay; a claimed identity is flagged, IP only when sent', async () => {
     useJourneyHandlers();
     renderWithProviders(<JourneysView />, { searchParams: '?app=ebo-sales' });
-    const table = await screen.findByRole('table', { name: 'Sessions' });
+    const table = await screen.findByRole('table', { name: 'Visits' });
     const replay = (await within(table).findAllByRole('link'))[0]!;
     expect(replay.getAttribute('href')).toBe(`/journeys/ebo-sales/${SESSION_ID}?app=ebo-sales`);
     expect(within(table).getAllByText('buyer@libas.in').length).toBeGreaterThan(0);
@@ -44,18 +44,19 @@ describe('JourneysView', () => {
     expect(within(table).getAllByLabelText('claimed identity, not verified')).toHaveLength(1);
     expect(within(table).getByText(/203\.0\.113\.9/)).toBeInTheDocument();
     expect(within(table).getAllByText('12m 0s')).toHaveLength(2);
+    expect(within(table).getByRole('columnheader', { name: 'Person' })).toBeInTheDocument();
   });
 
   it('narrows to one user from ?userKey= and can clear it', async () => {
     const calls = useJourneyHandlers();
     const user = userEvent.setup();
     renderWithProviders(<JourneysView />, { searchParams: `?userKey=${USER_KEY}` });
-    await screen.findByRole('table', { name: 'Sessions' });
+    await screen.findByRole('table', { name: 'Visits' });
     expect(calls[0]?.get('userKey')).toBe(USER_KEY);
 
     // The chip names the user (from the rows, not the URL) and removes the filter.
     await user.click(
-      await screen.findByRole('button', { name: 'Remove user filter buyer@libas.in' }),
+      await screen.findByRole('button', { name: 'Remove person filter buyer@libas.in' }),
     );
     await waitFor(() => expect(calls.at(-1)?.get('userKey')).toBeNull());
   });
@@ -63,7 +64,7 @@ describe('JourneysView', () => {
   it('ignores a malformed ?userKey= instead of sending it', async () => {
     const calls = useJourneyHandlers();
     renderWithProviders(<JourneysView />, { searchParams: '?userKey=not-a-key' });
-    await screen.findByRole('table', { name: 'Sessions' });
+    await screen.findByRole('table', { name: 'Visits' });
     expect(calls[0]?.get('userKey')).toBeNull();
   });
 });

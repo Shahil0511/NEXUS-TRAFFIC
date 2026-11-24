@@ -3,6 +3,7 @@
 - **Status:** accepted (2026-11-23); implemented in Phase B steps 1–5 (see [PROGRESS.md](../PROGRESS.md)).
   Extends [ADR 0006](0006-navigation-search-and-applications.md) (linked navigation); the access rules
   for the person page are [ADR 0015](0015-admin-only-person-pages-and-access-log.md).
+- **Superseded in part by [ADR 0016](0016-english-only-ui-icons-and-illustrations.md):** the `questionHi` (Hinglish) sentence of decision 2 is gone; screens are English only.
 - **Context:** the sidebar listed pages by data source (API Routes, Journeys, Geography…), so a reader
   had to know how the data is collected to find an answer. Pages had no stated purpose and no visible
   end (it was unclear whether more was still loading). The shortest range preset that matched a

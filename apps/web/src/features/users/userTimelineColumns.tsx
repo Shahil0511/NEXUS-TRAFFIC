@@ -48,7 +48,7 @@ export function userTimelineColumns(filters: TimeWindowQuery): DataTableColumn<T
     },
     {
       id: 'session',
-      header: 'Session',
+      header: 'Visit',
       cell: (row) =>
         row.sessionId ? (
           <Link

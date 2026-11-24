@@ -166,7 +166,8 @@ export function DataTable<T, S extends string = never>({
           ? Array.from({ length: skeletonRows }, (_, index) => (
               <TableRow key={`skeleton-${index}`} className="hover:bg-transparent">
                 {columns.map((column) => (
-                  <TableCell key={column.id}>
+                  // column.className too: a column hidden below a breakpoint hides its skeleton.
+                  <TableCell key={column.id} className={column.className}>
                     <Skeleton
                       className={cn('h-4', column.align === 'right' ? 'ml-auto w-12' : 'w-28')}
                     />

@@ -3,6 +3,8 @@
 import { ERROR_CODES } from '@nexus/shared';
 import { AlertTriangle, CalendarRange, RotateCw } from 'lucide-react';
 
+import { EmptyBoxIllustration, WarningCloudIllustration } from '@/components/illustrations';
+import { StateArt } from '@/components/StateArt';
 import { Button } from '@/components/ui/button';
 import { useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { ApiError } from '@/lib/apiError';
@@ -44,9 +46,7 @@ function RangeTooLargeState({ className }: { className?: string }) {
         className,
       )}
     >
-      <span className="flex size-10 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-        <CalendarRange className="size-5" aria-hidden="true" />
-      </span>
+      <StateArt art={EmptyBoxIllustration} icon={CalendarRange} />
       <p className="text-sm font-semibold">This range is too long for this view</p>
       <p className="max-w-md text-xs leading-relaxed text-muted-foreground">
         Latency and time-on-page views cover at most 31 days. Pick a shorter range to see the data.
@@ -79,9 +79,7 @@ export function ErrorState({
         className,
       )}
     >
-      <span className="flex size-10 items-center justify-center rounded-xl bg-destructive/10 text-destructive">
-        <AlertTriangle className="size-5" aria-hidden="true" />
-      </span>
+      <StateArt art={WarningCloudIllustration} icon={AlertTriangle} tone="alert" />
       <p className="text-sm font-semibold">{title}</p>
       <p className="max-w-md text-xs leading-relaxed text-muted-foreground">{message}</p>
       {code || requestId ? (

@@ -15,7 +15,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDateTime, formatDuration, formatInteger, formatPercent } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
@@ -48,7 +48,7 @@ export function endpointColumns(
   return [
     {
       id: 'route',
-      header: 'Route',
+      header: 'Request type',
       className: 'w-full max-w-0',
       cell: (row) => (
         <Link
@@ -65,7 +65,7 @@ export function endpointColumns(
     },
     {
       id: 'calls',
-      header: 'Calls',
+      header: METRIC_COPY.requests.label,
       hint: metricInfo('requests'),
       sortKey: 'calls',
       align: 'right',
@@ -163,10 +163,10 @@ export function EndpointsView() {
     <div className="space-y-6">
       <PageHeader
         title="Request types"
-        description="Calls, errors and latency per route template (streams excluded from percentiles)"
+        description="Each row is one API route: its API calls, errors and latency (streams excluded from percentiles)."
         actions={
           <label className="relative block w-72">
-            <span className="sr-only">Search routes</span>
+            <span className="sr-only">Search request types</span>
             <Search
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -187,7 +187,7 @@ export function EndpointsView() {
         ) : (
           <>
             <DataTable
-              caption="API routes"
+              caption="Request types"
               columns={columns}
               rows={rows}
               rowKey={(row) => row.endpointId}
@@ -196,11 +196,13 @@ export function EndpointsView() {
               loading={query.isPending}
               empty={
                 <EmptyState
-                  title={search ? 'No route matches your search' : 'No API traffic in this window'}
+                  title={
+                    search ? 'No request type matches your search' : 'No API traffic in this window'
+                  }
                   description={
                     search
                       ? 'Search matches the route template, e.g. /api/orders.'
-                      : 'Routes appear once an app sends server events. Try a longer range.'
+                      : 'Request types appear once an app sends server events. Try a longer range.'
                   }
                 />
               }

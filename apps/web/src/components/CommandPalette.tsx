@@ -41,13 +41,18 @@ const RANGE_ACTIONS: readonly Exclude<RangePreset, 'custom'>[] = [
   '30d',
 ];
 /** Name of the search button; below sm it is the ONLY name (the visible text is hidden). */
-const SEARCH_BUTTON_LABEL = 'Search pages, apps, users, routes…';
+const SEARCH_BUTTON_LABEL = 'Search apps, people, request types…';
 /** aria-keyshortcuts of the search button: Ctrl+K, ⌘K and "/" all open the palette. */
 const PALETTE_SHORTCUTS = 'Control+K Meta+K /';
 
 export interface PaletteItem {
   id: string;
-  group: 'Pages' | 'Applications' | 'Users' | 'API routes' | 'Time range';
+  /**
+   * Result group heading. The entity groups use the sidebar labels of the pages they open (Apps,
+   * People, Request types); dashboard screens are "Go to", not "Pages" (that is the page
+   * templates tab).
+   */
+  group: 'Go to' | 'Apps' | 'People' | 'Request types' | 'Time range';
   label: ReactNode;
   /** Plain text matched against the query and read by screen readers. */
   text: string;
@@ -66,7 +71,7 @@ const EMPTY_MESSAGES: Record<SearchStatus, string> = {
   idle: 'Type to search.',
   searching: 'Searching…',
   failed: 'Search failed. Try again in a moment.',
-  done: 'Nothing matches. Try part of an email or a route path.',
+  done: 'Nothing matches. Try part of an email or a request path.',
 };
 
 /** Case-insensitive "every word of the query appears in the text" (pure; tested). */
@@ -185,7 +190,7 @@ function PaletteDialog({ onClose }: { onClose: () => void }) {
             setActive(0);
           }}
           onKeyDown={onKeyDown}
-          placeholder="Search pages, apps, users by email, API routes…"
+          placeholder="Search apps, people by email, request types…"
           className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           role="combobox"
           aria-expanded="true"
@@ -318,7 +323,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
       const Icon = item.icon;
       return {
         id: `page:${item.id}`,
-        group: 'Pages',
+        group: 'Go to',
         label: item.label,
         text: item.label,
         sublabel: item.description,
@@ -331,7 +336,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
       .filter((app) => matchesQuery(`${app.displayName} ${app.slug}`, query))
       .map((app) => ({
         id: `app:${app.slug}`,
-        group: 'Applications',
+        group: 'Apps',
         label: app.displayName,
         text: app.displayName,
         sublabel: app.slug,
@@ -342,7 +347,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
     const userItems: PaletteItem[] = searchUsers
       ? (users.data?.pages[0]?.items ?? []).map((user) => ({
           id: `user:${user.userKey}`,
-          group: 'Users',
+          group: 'People',
           label: user.email,
           text: user.email,
           sublabel: user.apps.join(' · '),
@@ -354,7 +359,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
     const routeItems: PaletteItem[] = serverSearch
       ? (routes.data?.pages[0]?.items ?? []).map((route) => ({
           id: `route:${route.endpointId}`,
-          group: 'API routes',
+          group: 'Request types',
           label: (
             <span className="flex min-w-0 items-center gap-2">
               <MethodBadge method={route.method} />

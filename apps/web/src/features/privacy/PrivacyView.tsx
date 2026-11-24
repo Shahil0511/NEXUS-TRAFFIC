@@ -1,7 +1,7 @@
 'use client';
 
 import { PERSON_ACCESS_COALESCE_MS } from '@nexus/shared';
-import { Eye, X } from 'lucide-react';
+import { ClipboardList, Eye, X } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { AdminOnly } from '@/components/AdminOnly';
@@ -107,14 +107,22 @@ function PrivacyAdmin() {
     <div className="space-y-6">
       <PageHeader title={TITLE} />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] xl:items-start">
+      {/* grid-cols-1 below xl: an implicit `auto` column grew to the access-log table's width and
+          pushed the page sideways on a phone; minmax(0,1fr) lets the table scroll inside. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] xl:items-start">
         <Panel
           title="Who opened a person's page"
+          icon={Eye}
           description={`Newest first. A part is a tab of the person page, or the Visits or Failed requests list narrowed to that person. The same admin, person and part is recorded at most once every ${COALESCE_MINUTES} minutes; pages left open do not add entries on their own.`}
           contentClassName="px-0 pb-0"
           aside={
             userKey ? (
-              <Button variant="outline" size="sm" onClick={showEveryone}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={showEveryone}
+                className="h-auto min-h-8 max-w-full py-1 text-left whitespace-normal [overflow-wrap:anywhere]"
+              >
                 <X aria-hidden="true" /> Only {personLabel ?? 'one person'} · show everyone
               </Button>
             ) : undefined
@@ -156,6 +164,7 @@ function PrivacyAdmin() {
 
         <Panel
           title="What this dashboard records"
+          icon={ClipboardList}
           description="From the apps that send data to it."
         >
           <ul aria-label="What this dashboard records" className="space-y-3">

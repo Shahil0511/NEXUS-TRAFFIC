@@ -146,18 +146,18 @@ export function ErrorsView() {
             )}
           </QueryState>
         </Panel>
-        <Panel title="Top failing routes" description="Most 4xx + 5xx responses">
+        <Panel title="Top failing request types" description="Most failed requests">
           <QueryState query={summary} skeleton={<ListSkeleton />}>
             {() => <TopFailingEndpoints endpoints={summary.data!.topEndpoints} filters={filters} />}
           </QueryState>
         </Panel>
-        <Panel title="Most affected users" description="Verified users by failed requests">
+        <Panel title="People affected" description="Verified people, by failed requests">
           <QueryState query={summary} skeleton={<ListSkeleton />}>
             {() => (
               <TopUsersList
                 users={summary.data!.topAffectedUsers}
                 unit="failed"
-                ariaLabel="Most affected users"
+                ariaLabel="People affected"
                 linkQuery={linkQuery}
                 emptyTitle="No verified user was affected"
               />

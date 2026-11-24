@@ -93,10 +93,12 @@ export function PersonAdminOnly() {
 }
 
 /**
- * One verified person over the GLOBAL range: an identity card on the left that never disappears
- * (email, online now, apps, first / last seen, latest known device facts) and tabs on the right,
- * kept in the URL (`?tab=`): Summary, Daily activity, Devices, Activity. Each tab sends its own
- * read only while it is open (the card's facts come with the profile), so the access log records
+ * One verified person over the GLOBAL range: an identity card that never disappears (email,
+ * online now, apps, first / last seen, latest known device facts; a left column on 2xl screens, a
+ * band above the tabs below that, so the tab tables get the full width) and the tabs,
+ * kept in the URL (`?tab=`): Summary, Daily activity, Devices, Activity. The profile read (header,
+ * identity card and Summary) is sent on every open, so the access log names that row "Identity
+ * card and Summary"; every other tab sends its own read only while it is open, so the log records
  * the parts that were actually shown. Reached ONLY through
  * PAGES.userDetail(userKey) — the opaque HMAC, never the email.
  */
@@ -119,6 +121,9 @@ function PersonDetail({ userKey }: { userKey: string }) {
   );
 
   if (profile.isError && isForbidden(profile.error)) return <PersonAdminOnly />;
+  // A 404 for a registered app is "nothing in this range", not a failure: the card then says
+  // there is no browser activity (latest null) instead of "could not load".
+  const noActivity = profile.isError && isNoActivity(profile.error, filters.app, apps.data);
 
   return (
     <div className="space-y-6">
@@ -130,7 +135,7 @@ function PersonDetail({ userKey }: { userKey: string }) {
       ) : (
         <PageHeader
           eyebrow={breadcrumbs}
-          title={email ?? 'User'}
+          title={email ?? 'Person'}
           description="How this person uses the apps in the selected range."
           actions={
             profile.data ? (
@@ -153,24 +158,24 @@ function PersonDetail({ userKey }: { userKey: string }) {
         />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:items-start">
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:items-start">
         <PersonIdentityCard
           userKey={userKey}
           profile={profile.data}
           loading={profile.isPending}
-          latest={profile.data?.latest}
-          latestFailed={profile.isError}
+          latest={noActivity ? null : profile.data?.latest}
+          latestFailed={profile.isError && !noActivity}
           linkQuery={linkQuery}
         />
 
         <div className="min-w-0">
           {profile.isError ? (
             <Card>
-              {isNoActivity(profile.error, filters.app, apps.data) ? (
+              {noActivity ? (
                 <EmptyState
                   icon={UserX}
-                  title="No activity for this user in this range"
-                  description="This user has no recorded activity in the selected window."
+                  title="No activity for this person in this range"
+                  description="This person has no recorded activity in the selected range."
                   action={<WidenRangeButton />}
                 />
               ) : (
@@ -179,7 +184,7 @@ function PersonDetail({ userKey }: { userKey: string }) {
             </Card>
           ) : (
             <Tabs value={tab} onValueChange={(value) => isUserDetailTab(value) && setTab(value)}>
-              <TabsList aria-label="About this person">
+              <TabsList aria-label="Person page sections">
                 {(Object.keys(TAB_LABELS) as UserDetailTab[]).map((value) => {
                   const Icon = TAB_ICONS[value];
                   return (
@@ -256,8 +261,8 @@ function PersonPageSkeleton() {
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-7 w-72" />
       </div>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:items-start">
-        <Skeleton className="h-80 w-full rounded-2xl" />
+      <div className="grid gap-6 2xl:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] 2xl:items-start">
+        <Skeleton className="h-40 w-full rounded-2xl 2xl:h-80" />
         <SummarySkeleton />
       </div>
     </div>

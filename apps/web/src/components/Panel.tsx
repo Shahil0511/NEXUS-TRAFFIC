@@ -1,3 +1,4 @@
+import type { LucideIcon } from 'lucide-react';
 import { useId, type ReactNode, type Ref } from 'react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +9,11 @@ import { CHART_HEIGHT } from './charts/chartTheme';
 
 export interface PanelProps {
   title: string;
+  /**
+   * A small muted icon before the title, on the major panels of a page (helps scanning).
+   * Decorative: the title names the region.
+   */
+  icon?: LucideIcon;
   description?: ReactNode;
   /** Right side of the header: legend, link, filter. */
   aside?: ReactNode;
@@ -35,6 +41,7 @@ export interface PanelProps {
  */
 export function Panel({
   title,
+  icon: Icon,
   description,
   aside,
   className,
@@ -51,12 +58,19 @@ export function Panel({
             id={headingId}
             ref={headingRef}
             tabIndex={headingRef ? -1 : undefined}
-            className={
-              headingRef
-                ? 'rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60'
-                : undefined
-            }
+            className={cn(
+              Icon && 'flex items-center gap-2',
+              headingRef &&
+                'rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+            )}
           >
+            {Icon ? (
+              <Icon
+                aria-hidden="true"
+                data-slot="panel-icon"
+                className="size-4 shrink-0 text-muted-foreground"
+              />
+            ) : null}
             {title}
           </CardTitle>
           {description ? <CardDescription>{description}</CardDescription> : null}

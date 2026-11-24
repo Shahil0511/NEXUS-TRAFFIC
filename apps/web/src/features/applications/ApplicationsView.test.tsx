@@ -170,8 +170,8 @@ describe('ApplicationDetailView', () => {
     // "N online now" next to the header actions opens the Live page filtered to the app.
     const onlineLink = await screen.findByRole('link', { name: '6 online now' });
     expect(onlineLink.getAttribute('href')).toBe('/live?app=ebo-sales');
-    // Integration health opens narrowed to this app.
-    expect(screen.getByRole('link', { name: /Integration health/ }).getAttribute('href')).toBe(
+    // Data health opens narrowed to this app.
+    expect(screen.getByRole('link', { name: /Data health/ }).getAttribute('href')).toBe(
       '/integration?app=ebo-sales',
     );
   });

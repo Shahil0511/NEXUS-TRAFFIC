@@ -98,15 +98,15 @@ describe('DevicesView', () => {
     renderWithProviders(<DevicesView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
     await screen.findByRole('table', { name: 'Browser: share of page views' });
 
-    await userEvent.setup().click(screen.getByRole('radio', { name: 'Requests (server events)' }));
+    await userEvent.setup().click(screen.getByRole('radio', { name: 'API calls (server events)' }));
     expect(urls.at(-1)).toContain('share=requests');
-    const table = await screen.findByRole('table', { name: 'Browser: share of requests' });
-    expect(within(table).getByRole('cell', { name: '64% of requests' })).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: 'Browser: share of API calls' });
+    expect(within(table).getByRole('cell', { name: '64% of API calls' })).toBeInTheDocument();
     expect(seen.breakdowns.some((q) => q.source === 'server' && q.dimension === 'browser')).toBe(
       true,
     );
     expect(
-      screen.getByText('Every bar is a share of requests in the selected range.'),
+      screen.getByText('Every bar is a share of API calls in the selected range.'),
     ).toBeInTheDocument();
   });
 
@@ -120,12 +120,14 @@ describe('DevicesView', () => {
 
     expect(screen.getByRole('tab', { name: /Places/ })).toHaveAttribute('aria-selected', 'true');
     const timeZone = screen.getByRole('region', { name: 'Time zone' });
-    expect(within(timeZone).getByText('Not available for requests')).toBeInTheDocument();
+    expect(within(timeZone).getByText('Not available for API calls')).toBeInTheDocument();
+    // No opacity fade on the unavailable panel: it would push the text below AA contrast.
+    expect(timeZone.className).not.toMatch(/opacity-/);
     const language = screen.getByRole('region', { name: 'Language' });
-    expect(within(language).getByText('Not available for requests')).toBeInTheDocument();
-    // Countries follow the share-of switch: no own "Rank countries by" control here.
-    expect(await screen.findByText('Requests · top 10')).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Rank countries by' })).toBeNull();
+    expect(within(language).getByText('Not available for API calls')).toBeInTheDocument();
+    // Countries follow the share-of switch: no own "Show countries by" control here.
+    expect(await screen.findByText('API calls · top 10')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Show countries by' })).toBeNull();
     expect(await screen.findByRole('table', { name: 'Countries' })).toBeInTheDocument();
     expect(seen.breakdowns).toHaveLength(0);
 

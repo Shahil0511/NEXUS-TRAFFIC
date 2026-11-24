@@ -71,10 +71,11 @@ describe('MobileNav', () => {
     }
   });
 
-  it('gives every item a purpose sentence in English and Hinglish', () => {
+  it('gives every item a purpose sentence in plain English (no second language)', () => {
     for (const item of NAV_SECTIONS.flatMap((section) => section.items)) {
       expect(item.question.length).toBeGreaterThan(10);
-      expect(item.questionHi.length).toBeGreaterThan(10);
+      expect(item.question).toMatch(/^[\x20-\x7E]+$/);
+      expect(item).not.toHaveProperty('questionHi');
     }
   });
 });

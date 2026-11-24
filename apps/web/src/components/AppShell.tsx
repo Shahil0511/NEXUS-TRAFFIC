@@ -120,7 +120,7 @@ function TopBar() {
   const pageFilters = pageFiltersFor(pathname);
   const hasFilters = pageFilters.app || pageFilters.range || pageFilters.environment;
   return (
-    <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-6 md:h-14 md:flex-nowrap md:gap-3 md:py-0">
+    <header className="sticky top-0 z-30 flex min-h-14 flex-wrap items-center gap-2 border-b border-border bg-background/80 px-3 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-6 md:h-topbar md:flex-nowrap md:gap-3 md:py-0">
       <MobileNav />
       <CommandPalette />
       {hasFilters ? (

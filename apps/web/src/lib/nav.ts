@@ -58,8 +58,27 @@ const PERCENTILE_PAGE: PageFilters = {
   maxRangeMs: MAX_PERCENTILE_RANGE_MS,
 };
 
+/**
+ * Every nav item id. WHY a union: maps keyed by page (the hero illustrations in
+ * components/illustrations) are Record<NavItemId, …>, so a new page without its entry fails the
+ * typecheck instead of rendering a blank hero.
+ */
+export type NavItemId =
+  | 'overview'
+  | 'live'
+  | 'users'
+  | 'journeys'
+  | 'devices'
+  | 'applications'
+  | 'pages'
+  | 'endpoints'
+  | 'errors'
+  | 'integration'
+  | 'apps'
+  | 'privacy';
+
 export interface NavItem {
-  id: string;
+  id: NavItemId;
   label: string;
   href: string;
   icon: LucideIcon;
@@ -67,8 +86,6 @@ export interface NavItem {
   description: string;
   /** The page's purpose in one sentence, printed under its title (English). */
   question: string;
-  /** The same sentence in simple Hinglish, printed under the English one. */
-  questionHi: string;
   filters: PageFilters;
   /** Set while the page is still a placeholder. */
   comingIn?: DeliveryStep;
@@ -95,7 +112,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: LayoutDashboard,
         description: 'Headline numbers, traffic, errors and latency',
         question: 'What needs my attention?',
-        questionHi: 'Kya dekhna zaroori hai?',
         filters: PERCENTILE_PAGE,
       },
       {
@@ -105,7 +121,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Activity,
         description: 'Events as they happen',
         question: 'What is happening in the apps right now?',
-        questionHi: 'Abhi apps mein kya chal raha hai?',
         // Live is production-only by design (ADR 0008): no environment filter.
         filters: { ...COUNT_PAGE, range: false, environment: false },
       },
@@ -122,7 +137,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Users,
         description: 'Who uses which app, and how much',
         question: 'Everyone who uses our apps, and how much.',
-        questionHi: 'Kaun-kaun use karta hai, aur kitna.',
         filters: COUNT_PAGE,
       },
       {
@@ -132,7 +146,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Waypoints,
         description: 'Browser visits (sessions) and common paths',
         question: 'Every visit to the apps, newest first, and the paths people take.',
-        questionHi: 'Saari visits, nayi pehle, aur log kis raaste chalte hain.',
         filters: PERCENTILE_PAGE,
       },
       {
@@ -142,7 +155,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Globe2,
         description: 'Devices, browsers, systems and locations',
         question: 'What do people connect with, and from where?',
-        questionHi: 'Kis device aur browser se, kahan se?',
         filters: COUNT_PAGE,
         alsoActiveOn: [PAGES.geography()],
       },
@@ -159,7 +171,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Boxes,
         description: 'Every app side by side: traffic, errors, users',
         question: 'How much is each app used, and is it healthy?',
-        questionHi: 'Kaun sa app kitna use hota hai, aur theek chal raha hai?',
         filters: { ...PERCENTILE_PAGE, app: false },
       },
       {
@@ -169,7 +180,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: MousePointerClick,
         description: 'Most viewed pages, time on page, feature (tool) usage',
         question: 'Which pages and buttons are used, and for how long?',
-        questionHi: 'App ke andar kaun se page aur button use hote hain?',
         filters: PERCENTILE_PAGE,
         alsoActiveOn: [PAGES.tools()],
       },
@@ -180,7 +190,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: Route,
         description: 'API routes: calls, error rate and latency per route',
         question: 'Which server requests (API routes) are called, and how fast are they?',
-        questionHi: 'Kaun si request kitni baar chali, aur kitni tez?',
         filters: PERCENTILE_PAGE,
       },
       {
@@ -190,7 +199,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: TriangleAlert,
         description: 'Failed requests, status codes, failing routes',
         question: 'What failed, where, and for whom?',
-        questionHi: 'Kya toot raha hai, kahan, aur kiske liye?',
         filters: PERCENTILE_PAGE,
       },
     ],
@@ -206,7 +214,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: PlugZap,
         description: 'Integration: is every app sending data?',
         question: 'Is every app sending complete data?',
-        questionHi: 'Har app theek se juda hai aur poora data bhej raha hai?',
         filters: { ...COUNT_PAGE, app: false, range: false, environment: false },
       },
       {
@@ -216,7 +223,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: AppWindow,
         description: 'Register apps and manage keys',
         question: 'Register apps and manage their keys.',
-        questionHi: 'Apps register karna aur unki keys (sirf admin).',
         filters: { ...COUNT_PAGE, app: false, range: false, environment: false },
       },
       {
@@ -226,7 +232,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         icon: ShieldCheck,
         description: 'Access log of person pages (admins only) and what the dashboard records',
         question: 'Who opened whose person page, and when.',
-        questionHi: 'Kisne kiska page kab khola.',
         // The log is not windowed: no app, range or environment filter.
         filters: { ...COUNT_PAGE, app: false, range: false, environment: false },
       },
@@ -236,6 +241,16 @@ export const NAV_SECTIONS: readonly NavSection[] = [
 
 /** Flat list (tests, command palette). */
 export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap((section) => section.items);
+
+/**
+ * The sidebar label of a page. WHY: on-screen copy that sends the reader to another page ("issue a
+ * new key on the App keys page") reads the name here, so it cannot drift from the sidebar again.
+ */
+export function navLabel(id: NavItemId): string {
+  const item = NAV_ITEMS.find((candidate) => candidate.id === id);
+  if (!item) throw new Error(`No nav item ${id}`);
+  return item.label;
+}
 
 /** Whether `pathname` (without basePath) belongs to a nav item; the overview matches exactly. */
 export function isNavItemActive(item: NavItem, pathname: string): boolean {

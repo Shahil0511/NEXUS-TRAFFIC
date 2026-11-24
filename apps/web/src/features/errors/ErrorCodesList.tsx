@@ -54,7 +54,7 @@ export function ErrorCodesList({ items, selected, onSelect }: ErrorCodesListProp
               className="block h-full rounded-full"
               style={{
                 width: `${(item.count / max) * PERCENT}%`,
-                // Neutral like "Most affected users": a code can be 4xx OR 5xx, and the page's
+                // Neutral like "People affected": a code can be 4xx OR 5xx, and the page's
                 // chart legend reserves the 4xx / 5xx colours for the status class.
                 backgroundColor: CHART_COLORS.requests,
               }}
@@ -64,9 +64,7 @@ export function ErrorCodesList({ items, selected, onSelect }: ErrorCodesListProp
         const numbers = (
           <span className="shrink-0 text-right text-xs tabular">
             <span className="block font-semibold">{formatInteger(item.count)}</span>
-            <span className="block text-2xs text-muted-foreground">
-              {routesLabel(item.routes)}
-            </span>
+            <span className="block text-2xs text-muted-foreground">{routesLabel(item.routes)}</span>
           </span>
         );
 

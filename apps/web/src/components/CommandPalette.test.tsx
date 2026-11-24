@@ -62,7 +62,7 @@ describe('CommandPalette', () => {
 
     // Below sm the button shows only an icon, so its name must not depend on the visible text.
     expect(
-      screen.getByRole('button', { name: 'Search pages, apps, users, routes…' }),
+      screen.getByRole('button', { name: 'Search apps, people, request types…' }),
     ).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K /');
     await user.keyboard('{Meta>}k{/Meta}');
     expect(await screen.findByRole('combobox', { name: 'Search' })).toHaveFocus();
@@ -73,11 +73,14 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderWithProviders(<CommandPalette />);
 
-    await user.click(screen.getByRole('button', { name: /Search pages, apps, users, routes/ }));
+    await user.click(screen.getByRole('button', { name: /Search apps, people, request types/ }));
     await user.type(await screen.findByRole('combobox', { name: 'Search' }), 'buyer');
     const listbox = await screen.findByRole('listbox', { name: 'Results' });
     const option = await within(listbox).findByRole('option', { name: /buyer@libas\.in/ });
     expect(bodies.at(-1)).toMatchObject({ search: 'buyer', limit: 5 });
+    // Groups carry the sidebar names of the pages they open.
+    expect(within(listbox).getByText('People')).toBeInTheDocument();
+    expect(within(listbox).queryByText('Users')).toBeNull();
 
     await user.click(option);
     await waitFor(() => expect(push).toHaveBeenCalledWith(`/users/${USER_KEY}`));
@@ -93,7 +96,7 @@ describe('CommandPalette', () => {
     const user = userEvent.setup();
     renderWithProviders(<CommandPalette />);
 
-    await user.click(screen.getByRole('button', { name: /Search pages, apps, users, routes/ }));
+    await user.click(screen.getByRole('button', { name: /Search apps, people, request types/ }));
     await user.type(await screen.findByRole('combobox', { name: 'Search' }), 'buyer');
     const listbox = await screen.findByRole('listbox', { name: 'Results' });
     await waitFor(() => expect(within(listbox).queryByText(/Searching/i)).not.toBeInTheDocument());

@@ -16,6 +16,7 @@ import {
 } from '@nexus/shared';
 
 import { ENVIRONMENT_LABELS } from '@/features/filters/environmentLabels';
+import { formatOsName } from '@/lib/format';
 
 export interface DimensionCopy {
   /** Name in the dimension picker and the list's accessible name. */
@@ -68,12 +69,20 @@ const VALUE_LABELS: Partial<Record<BreakdownDimension, Readonly<Record<string, s
   environment: ENVIRONMENT_LABELS,
 };
 
+/** Free-text dimensions whose values are tidied for display (the stored value is unchanged). */
+const VALUE_FORMATTERS: Partial<Record<BreakdownDimension, (value: string) => string>> = {
+  os: formatOsName,
+};
+
 /**
  * The text to show for one breakdown value: a known enum value's name, NOT_SENT_LABEL for null,
- * otherwise the value itself (ingested text — the caller renders it as text only).
+ * a tidied name for a formatted dimension (macOS without its frozen version), otherwise the value
+ * itself (ingested text — the caller renders it as text only).
  */
 export function breakdownValueLabel(dimension: BreakdownDimension, value: string | null): string {
   if (value === null) return NOT_SENT_LABEL;
+  const formatter = VALUE_FORMATTERS[dimension];
+  if (formatter) return formatter(value);
   const labels = VALUE_LABELS[dimension];
   // Own keys ONLY: an ingested value like `constructor` or `__proto__` must stay plain text, not
   // resolve to an Object.prototype member (a non-string React child crashes the panel).

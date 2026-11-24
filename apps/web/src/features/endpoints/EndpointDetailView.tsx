@@ -25,8 +25,14 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import {
+  formatDuration,
+  formatInteger,
+  formatPercent,
+  formatWindowCaption,
+  perGrain,
+} from '@/lib/format';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
@@ -57,7 +63,7 @@ export function EndpointDetailView({ endpointId }: { endpointId: string }) {
       items={[
         ...(endpoint ? applicationCrumbs(endpoint.app, linkQuery) : []),
         { label: 'Request types', href: withQuery(PAGES.endpoints(), linkQuery) },
-        { label: endpoint ? `${endpoint.method} ${endpoint.routeTemplate}` : 'Route' },
+        { label: endpoint ? `${endpoint.method} ${endpoint.routeTemplate}` : 'Request type' },
       ]}
     />
   );
@@ -65,7 +71,7 @@ export function EndpointDetailView({ endpointId }: { endpointId: string }) {
   if (detail.isError) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Route" eyebrow={backLink} />
+        <PageHeader title="Request type" eyebrow={backLink} />
         <Card>
           <ErrorState error={detail.error} onRetry={() => void detail.refetch()} />
         </Card>
@@ -92,7 +98,7 @@ function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Requests" className="lg:col-span-2">
+        <Panel title={METRIC_COPY.requests.label} className="lg:col-span-2">
           <ChartSkeleton />
         </Panel>
         <Panel title="Status codes">
@@ -144,11 +150,11 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
       />
 
       <section
-        aria-label="Route metrics"
+        aria-label="Request type metrics"
         className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6"
       >
         <KpiCard
-          label="Calls"
+          label={METRIC_COPY.requests.label}
           icon={Activity}
           value={formatInteger(endpoint.calls)}
           info={metricInfo('requests')}
@@ -189,14 +195,18 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Requests" description="Calls per bucket" className="lg:col-span-2">
+        <Panel
+          title={METRIC_COPY.requests.label}
+          description={`${METRIC_COPY.requests.label} ${perGrain(window.grain)}`}
+          className="lg:col-span-2"
+        >
           <TrafficChart points={detail.timeseries} grain={window.grain} />
         </Panel>
-        <Panel title="Top callers" description="Verified users by calls to this route">
+        <Panel title="Who calls it" description="Verified people, by calls to this request type">
           <TopUsersList
             users={detail.topUsers}
             unit="calls"
-            ariaLabel="Top callers"
+            ariaLabel="Who calls it"
             linkQuery={linkQuery}
             emptyTitle="No verified caller"
           />
@@ -204,7 +214,7 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Latency" description="p95 per bucket">
+        <Panel title="Latency" description={`${METRIC_COPY.p95.label} ${perGrain(window.grain)}`}>
           <LatencyChart points={detail.timeseries} grain={window.grain} />
         </Panel>
         <Panel

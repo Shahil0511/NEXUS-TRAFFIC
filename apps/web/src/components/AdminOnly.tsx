@@ -1,7 +1,9 @@
 import { ShieldX } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { LockIllustration } from '@/components/illustrations';
 import { PageHeader } from '@/components/PageHeader';
+import { StateArt } from '@/components/StateArt';
 import { Card } from '@/components/ui/card';
 
 /** The closing sentence of the Apps page's state (the original use of this component). */
@@ -39,9 +41,7 @@ export function AdminOnly({
       <PageHeader title={title} eyebrow={eyebrow} />
       <Card>
         <div role="status" className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-          <span className="flex size-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
-            <ShieldX className="size-6" aria-hidden="true" />
-          </span>
+          <StateArt art={LockIllustration} icon={ShieldX} tone="alert" size="md" />
           <h2 className="text-base font-semibold tracking-tight">{heading}</h2>
           <p className="max-w-md text-sm leading-relaxed text-muted-foreground">
             {description}

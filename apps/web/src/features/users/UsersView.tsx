@@ -45,7 +45,7 @@ export function userColumns(
   return [
     {
       id: 'user',
-      header: 'User',
+      header: 'Person',
       className: 'w-full max-w-0',
       cell: (row) => (
         <span className="flex min-w-0 items-center gap-2.5">
@@ -110,7 +110,7 @@ export function userColumns(
     },
     {
       id: 'sessions',
-      header: 'Sessions',
+      header: 'Visits',
       hint: metricInfo('sessions'),
       sortKey: 'sessions',
       align: 'right',
@@ -136,7 +136,7 @@ export function userColumns(
 }
 
 /**
- * The Users page: every VERIFIED identity (SSO cookie or app-attested) active in the window, sorted
+ * The People page: every VERIFIED identity (SSO cookie or app-attested) active in the window, sorted
  * server-side by any column (`?sort=&dir=`, default most recently seen), with the apps each uses. Browser-claimed emails are never users — they
  * appear, flagged, on sessions. The email search is sent in a POST body and kept in React state
  * only: an email never lands in the URL, the browser history or an access log (ADR 0006).
@@ -171,7 +171,7 @@ export function UsersView() {
         }
         actions={
           <label className="relative block w-full sm:w-72">
-            <span className="sr-only">Search users</span>
+            <span className="sr-only">Search people</span>
             <Search
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -193,7 +193,7 @@ export function UsersView() {
         ) : (
           <>
             <DataTable
-              caption="Users"
+              caption="People"
               columns={columns}
               rows={rows}
               rowKey={(row) => row.userKey}
@@ -203,12 +203,12 @@ export function UsersView() {
               empty={
                 <EmptyState
                   title={
-                    searching ? 'No user matches your search' : 'No identified users in this window'
+                    searching ? 'No person matches your search' : 'No verified people in this range'
                   }
                   description={
                     searching
                       ? 'Search matches part of the email address, e.g. buyer@libas.in.'
-                      : 'Users appear once an app sends verified identities (SSO cookie or app-attested). Try a longer range.'
+                      : 'People appear once an app sends verified identities (SSO cookie or app-attested). Try a longer range.'
                   }
                   action={<WidenRangeButton />}
                 />

@@ -105,9 +105,11 @@ describe('UserDetailView', () => {
     });
     renderWithProviders(<UserDetailView userKey={USER_KEY} />);
     await screen.findByRole('heading', { name: 'buyer@libas.in' });
-    expect(await screen.findByText(/Online now/)).toHaveTextContent(
-      'Online now · in ebo-sales · on /orders/:id',
-    );
+    expect(
+      await screen.findByText('Online now · in ebo-sales · on /orders/:id', {
+        selector: '.sr-only',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('shows no badge when the user is not online', async () => {
@@ -139,7 +141,9 @@ describe('UserDetailView', () => {
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, {
       onUrlUpdate: (event) => urls.push(event.queryString),
     });
-    expect(await screen.findByText('No activity for this user in this range')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No activity for this person in this range'),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('alert')).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Show the last 7 days' }));
     expect(urls.at(-1)).toContain('range=7d');
@@ -150,7 +154,9 @@ describe('UserDetailView', () => {
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, {
       searchParams: '?app=ebo-sales&range=1h',
     });
-    expect(await screen.findByText('No activity for this user in this range')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No activity for this person in this range'),
+    ).toBeInTheDocument();
   });
 
   it('shows the API message (not "no activity") when ?app= names an unknown app', async () => {
@@ -160,7 +166,7 @@ describe('UserDetailView', () => {
     });
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('no activity for this user')).toBeInTheDocument();
-    expect(screen.queryByText('No activity for this user in this range')).toBeNull();
+    expect(screen.queryByText('No activity for this person in this range')).toBeNull();
     expect(screen.queryByRole('button', { name: /Show the last/ })).toBeNull();
   });
 
@@ -179,6 +185,10 @@ describe('UserDetailView', () => {
     renderWithProviders(<UserDetailView userKey={USER_KEY} />);
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText(/Request ID req-7/)).toBeInTheDocument();
+    // The card says the facts failed, without pointing at a tab that is not on screen.
+    const card = screen.getByRole('complementary', { name: 'About this person' });
+    expect(within(card).getByText('Could not load these facts.')).toBeInTheDocument();
+    expect(within(card).queryByText(/Devices tab/)).toBeNull();
   });
 
   it('shows a breadcrumb trail back to Users that names the user by MASKED email only', async () => {
@@ -197,7 +207,7 @@ describe('UserDetailView', () => {
   it("shows the apps used and the top API routes, and links to the user's failures", async () => {
     useProfileHandlers();
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?range=7d' });
-    const routes = await screen.findByRole('list', { name: 'Top API routes' });
+    const routes = await screen.findByRole('list', { name: 'Top request types' });
     expect(
       within(routes)
         .getByRole('link', { name: /\/api\/orders\/:id/ })
@@ -242,6 +252,8 @@ describe('UserDetailView', () => {
       onUrlUpdate: (event) => urls.push(event.queryString),
     });
     await screen.findByRole('region', { name: 'User metrics' });
+    // Its own name (the identity card is "About this person"); wraps on a phone, never clips.
+    expect(screen.getByRole('tablist', { name: 'Person page sections' })).toHaveClass('flex-wrap');
     expect(screen.getByRole('tab', { name: /Summary/ })).toHaveAttribute('aria-selected', 'true');
     await userEvent.setup().click(screen.getByRole('tab', { name: /Daily activity/ }));
     expect(urls.at(-1)).toContain('tab=daily');
@@ -260,19 +272,16 @@ describe('UserDetailView', () => {
     expect(rows[1]).toHaveTextContent('09:10');
     expect(rows[1]).toHaveTextContent('18:40');
     expect(rows[1]).toHaveTextContent('3 h 12 min');
+    expect(rows[1]).toHaveTextContent('3 failed');
     expect(rows[2]).toHaveTextContent('48 min');
-    expect(
-      within(table).getByRole('img', { name: 'Active from 09:10 to 18:40 IST' }),
-    ).toBeInTheDocument();
+    expect(rows[2]).not.toHaveTextContent('failed');
+    // The day strip is decorative: the times are already printed as text above it.
+    expect(within(table).queryByRole('img')).toBeNull();
+    expect(table.querySelector('[data-slot="day-strip"]')).toHaveAttribute('aria-hidden', 'true');
     const headers = within(table)
       .getAllByRole('columnheader')
       .map((cell) => cell.textContent ?? '');
-    for (const header of [
-      'First activity',
-      'Last activity',
-      'Active time (tab visible)',
-      'Visits',
-    ]) {
+    for (const header of ['First – last activity (IST)', 'Active time', 'API calls', 'Visits']) {
       expect(
         headers.some((text) => text.includes(header)),
         header,
@@ -300,6 +309,34 @@ describe('UserDetailView', () => {
     expect(within(rows[2] as HTMLElement).getAllByText('Unknown')).toHaveLength(3);
   });
 
+  it('shows macOS without the version browsers freeze in the User-Agent', async () => {
+    useProfileHandlers();
+    server.use(
+      http.get(routeUrl(ROUTES.users.profile), () =>
+        HttpResponse.json({
+          ...USER_PROFILE,
+          latest: { ...USER_PROFILE.latest!, os: 'Mac OS 10' },
+        }),
+      ),
+      http.get(routeUrl(ROUTES.users.devices), () =>
+        HttpResponse.json({
+          ...USER_DEVICES,
+          items: [{ ...USER_DEVICES.items[0]!, os: 'Mac OS 10' }],
+        }),
+      ),
+    );
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=devices' });
+    const table = await screen.findByRole('table', { name: 'Devices' });
+    expect(await within(table).findByText('macOS')).toBeInTheDocument();
+    const latest = screen.getByRole('region', { name: 'Latest known' });
+    expect(within(latest).getByText('macOS')).toBeInTheDocument();
+    expect(screen.queryByText(/Mac OS 10/)).toBeNull();
+    // The source line names the app in one plain sentence.
+    expect(
+      within(latest).getByText(/^From the latest browser activity, .+ IST in ebo-sales\.$/),
+    ).toBeInTheDocument();
+  });
+
   it('keeps the identity card on screen when the range holds no activity', async () => {
     useProfileHandlers(404);
     server.use(
@@ -308,9 +345,14 @@ describe('UserDetailView', () => {
       ),
     );
     renderWithProviders(<UserDetailView userKey={USER_KEY} />);
-    expect(await screen.findByText('No activity for this user in this range')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No activity for this person in this range'),
+    ).toBeInTheDocument();
     const card = screen.getByRole('complementary', { name: 'About this person' });
     expect(within(card).getByText('No activity in this range')).toBeInTheDocument();
+    // "Nothing in this range" is not a failure: no "could not load", no hidden Devices tab.
+    expect(within(card).getByText(/No browser activity in this range/)).toBeInTheDocument();
+    expect(within(card).queryByText(/Could not load/)).toBeNull();
     expect(screen.queryByRole('tablist')).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import { PageLink } from '@/components/EntityLinks';
 import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
+import { GuideLinkButton } from '@/components/GuideLinkButton';
 import { ErrorState } from '@/components/ErrorState';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
@@ -23,6 +24,7 @@ import {
 } from '@/components/LoadedRowsFilter';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
+import { metricInfo } from '@/lib/metricCopy';
 
 import { PagesToolsTabs } from './PagesToolsTabs';
 import { usePageStats } from './usePageStats';
@@ -83,19 +85,21 @@ function pageColumns(
     { id: 'views', header: 'Views', align: 'right', cell: (row) => formatInteger(row.views) },
     {
       id: 'sessions',
-      header: 'Sessions',
+      header: 'Visits',
       align: 'right',
       cell: (row) => formatInteger(row.uniqueSessions),
     },
     {
       id: 'avg',
-      header: 'Avg visible',
+      header: 'Average visible',
+      hint: metricInfo('visibleTime'),
       align: 'right',
       cell: (row) => formatDuration(row.avgVisibleMs),
     },
     {
       id: 'p50',
-      header: 'p50 visible',
+      header: 'Median visible',
+      hint: metricInfo('visibleTime'),
       align: 'right',
       cell: (row) => formatDuration(row.p50VisibleMs),
     },
@@ -110,7 +114,7 @@ function pageColumns(
             {formatPercent(
               row.uniqueSessions > 0 ? (row.exits / row.uniqueSessions) * PERCENT : null,
             )}
-            <span className="sr-only"> of sessions</span>
+            <span className="sr-only"> of visits</span>
           </span>
         </span>
       ),
@@ -169,7 +173,8 @@ export function PagesView() {
             empty={
               <EmptyState
                 title="No time measured"
-                description="Visible time arrives with page_time events from the browser SDK."
+                description="Visible time appears once the app's browser tracker is installed."
+                action={<GuideLinkButton chapter="browserContract" />}
               />
             }
           >
@@ -185,7 +190,7 @@ export function PagesView() {
             )}
           </QueryState>
         </Panel>
-        <Panel title="Exit pages" description="Where sessions end">
+        <Panel title="Exit pages" description="Where visits end">
           <QueryState
             query={pages}
             skeleton={<ListSkeleton rows={EXIT_ROWS} />}

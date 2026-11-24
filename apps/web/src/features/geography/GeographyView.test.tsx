@@ -76,7 +76,7 @@ describe('GeographyView', () => {
       PAGES.integration(),
     );
     expect(screen.queryByRole('table', { name: 'Countries' })).toBeNull();
-    expect(screen.queryByRole('group', { name: 'Rank countries by' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Show countries by' })).toBeNull();
   });
 
   it('offers a wider range (not "no located traffic") when the window has no traffic at all', async () => {
@@ -111,10 +111,10 @@ describe('GeographyView', () => {
     expect(await screen.findByText('No page views in this window')).toBeInTheDocument();
     expect(screen.queryByText(/public IP/)).toBeNull();
     expect(screen.queryByText('We cannot tell where people are yet')).toBeNull();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Show requests' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show API calls' }));
     // Requests is the default, so the param is cleared from the URL.
     expect(urls.at(-1)).not.toContain('metric=');
-    expect(await screen.findByText('Requests · top 10')).toBeInTheDocument();
+    expect(await screen.findByText('API calls · top 10')).toBeInTheDocument();
   });
 
   it('picks the first other metric with data to switch to', () => {
@@ -144,7 +144,7 @@ describe('GeographyView', () => {
       onUrlUpdate: (event) => urls.push(event.queryString),
     });
     expect(await screen.findByText('Users · top 10')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('radio', { name: 'Rank by page views' }));
+    await userEvent.setup().click(screen.getByRole('radio', { name: 'Show by page views' }));
     expect(urls.at(-1)).toContain('metric=pageViews');
     expect(await screen.findByText('Page views · top 10')).toBeInTheDocument();
   });

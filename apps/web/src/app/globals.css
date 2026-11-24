@@ -24,6 +24,12 @@
 @theme {
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
+  /*
+   * Height of the sticky top bar from md (`md:h-topbar`). WHY a token: anything else that sticks
+   * below it (the person page's identity card, `top-below-topbar`) reads the same number.
+   */
+  --spacing-topbar: 3.5rem;
+  --spacing-below-topbar: calc(var(--spacing-topbar) + 1rem);
 }
 
 @theme inline {
@@ -71,6 +77,9 @@
   --color-chart-requests: var(--chart-requests);
   --color-chart-4xx: var(--chart-4xx);
   --color-chart-5xx: var(--chart-5xx);
+  --color-brand-from: var(--brand-from);
+  --color-brand-to: var(--brand-to);
+  --color-brand-foreground: var(--brand-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -140,7 +149,15 @@
   --spot-outer: rgba(113, 0, 106, 0.04);
   --hero-from: rgba(113, 0, 106, 0.1);
   --hero-to: rgba(192, 38, 181, 0.04);
-  --elevation-raised: 0 10px 30px -12px rgba(113, 0, 106, 0.18), 0 2px 6px -2px rgba(30, 20, 32, 0.06);
+  --elevation-raised:
+    0 10px 30px -12px rgba(113, 0, 106, 0.18), 0 2px 6px -2px rgba(30, 20, 32, 0.06);
+  /*
+   * Brand gradient (page hero icon tile, hero top line, favicon): Libas plum to orchid. The tile's
+   * white icon keeps >= 3:1 on both ends (a graphical mark; designTokens.test.ts checks it).
+   */
+  --brand-from: #71006a;
+  --brand-to: #a3159a;
+  --brand-foreground: #ffffff;
 }
 
 .dark {
@@ -195,6 +212,10 @@
   --hero-from: rgba(229, 138, 217, 0.12);
   --hero-to: rgba(192, 38, 181, 0.03);
   --elevation-raised: 0 10px 30px -12px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  /* The same plum tile on the dark page: it reads as the brand mark, not as a light chip. */
+  --brand-from: #8a1180;
+  --brand-to: #b3289f;
+  --brand-foreground: #ffffff;
 }
 
 @layer base {

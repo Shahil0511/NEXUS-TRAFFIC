@@ -14,7 +14,7 @@ import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { RANGE_LABELS } from '@/features/filters/rangeLabels';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { pageFiltersFor } from '@/lib/nav';
+import { navLabel, pageFiltersFor } from '@/lib/nav';
 import { PAGES, withQuery } from '@/lib/pages';
 
 /** A preset an empty page can widen to (any fixed preset; never `custom`). */
@@ -62,7 +62,7 @@ export function widerRange(
  * empty state offers the one-click fix ("Show the last 30 days") instead of sending the user to the
  * range picker. The step is capped by the CURRENT page (pageFiltersFor), so a count page still
  * offers 90 days. Once no wider preset fits, the honest next step is "is the app sending data at
- * all?", so it links to Integration health instead. Renders nothing on pages without a range.
+ * all?", so it links to Data health instead. Renders nothing on pages without a range.
  */
 export function WidenRangeButton({ className }: { className?: string }) {
   const { filters, setRange } = useGlobalFilters();
@@ -78,7 +78,7 @@ export function WidenRangeButton({ className }: { className?: string }) {
         <Link href={withQuery(PAGES.integration(), filterLinkQuery(filters))}>
           Is this app sending data?
           <ArrowRight aria-hidden="true" />
-          Integration health
+          {navLabel('integration')}
         </Link>
       </Button>
     );

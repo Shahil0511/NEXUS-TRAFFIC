@@ -58,7 +58,7 @@ export function TopPathsList({ paths }: { paths: readonly TopPathDto[] }) {
           <span className="text-right text-xs tabular">
             <span className="block font-semibold">{formatInteger(path.sessions)}</span>
             <span className="block text-2xs text-muted-foreground">
-              {path.sessions === 1 ? 'session' : 'sessions'}
+              {path.sessions === 1 ? 'visit' : 'visits'}
             </span>
           </span>
         </li>

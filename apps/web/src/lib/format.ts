@@ -62,6 +62,14 @@ const compactFormat = new Intl.NumberFormat(LOCALE, {
 });
 const integerFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
 
+/**
+ * "14:05" + "IST" → "14:05 IST". An empty value stays alone ("—", never "— IST"): a unit after
+ * nothing reads like a broken number.
+ */
+export function withUnit(value: string, unit: string): string {
+  return value === EMPTY_VALUE ? EMPTY_VALUE : `${value} ${unit}`;
+}
+
 /** "1 Oct, 14:05:09" in IST. */
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return EMPTY_VALUE;
@@ -137,6 +145,16 @@ export const GRAIN_LABELS: Record<Grain, string> = {
   day: 'daily',
 };
 
+const GRAIN_UNITS: Record<Grain, string> = { minute: 'minute', hour: 'hour', day: 'day' };
+
+/**
+ * A chart's grain in words for a panel description: 'hour' → "per hour". WHY: "per bucket" is
+ * jargon; before the response arrives (no grain yet) the panel says "over time".
+ */
+export function perGrain(grain: Grain | undefined): string {
+  return grain ? `per ${GRAIN_UNITS[grain]}` : 'over time';
+}
+
 /** "30 Sept, 13:30 – 1 Oct, 13:30 IST · hourly buckets" — the window a response covers. */
 export function formatWindowCaption(window: { from: string; to: string; grain: Grain }): string {
   const from = windowBoundFormat.format(new Date(window.from));
@@ -175,6 +193,20 @@ export function formatCountry(code: string | null | undefined): string {
   } catch {
     return upper;
   }
+}
+
+/** "Mac OS 10", "Mac OS X", "macOS 14" — every way the User-Agent parser names macOS. */
+const MAC_OS_NAME = /^mac\s?os(\s?x)?(\s+[\d.]+)?$/i;
+export const MAC_OS_LABEL = 'macOS';
+
+/**
+ * An operating-system facet as stored (`ua_os`, "Name major") → what the dashboard prints.
+ * Browsers freeze the macOS version in the User-Agent at 10.15.7, so "Mac OS 10" says nothing
+ * about the real version: every macOS value reads "macOS". Display-time only — the stored value
+ * (and any filter built from it) is unchanged; other systems are shown as stored.
+ */
+export function formatOsName(os: string): string {
+  return MAC_OS_NAME.test(os.trim()) ? MAC_OS_LABEL : os;
 }
 
 /** 42_000 → "42 s ago", 5_400_000 → "1 h ago", 3 days → "3 d ago"; future/now → "just now". */

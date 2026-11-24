@@ -1,6 +1,7 @@
 'use client';
 
 import { type TimeWindowQuery, USER_DEVICES_LIMIT, type UserDeviceDto } from '@nexus/shared';
+import { MonitorSmartphone } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { AppChipList } from '@/components/AppChip';
@@ -10,8 +11,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { Panel } from '@/components/Panel';
 import { RelativeTime } from '@/components/RelativeTime';
 import { WidenRangeButton } from '@/components/WidenRangeButton';
-import { formatDateTime, formatInteger } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { formatDateTime, formatInteger, formatOsName } from '@/lib/format';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 
 import { DeviceValue } from './PersonIdentityCard';
 import { UNKNOWN_FACT } from './personFacts';
@@ -40,6 +41,7 @@ export function UserDevicesTab({
   return (
     <Panel
       title="Devices"
+      icon={MonitorSmartphone}
       description="Each row is one device type, browser and operating system seen in this range, most recently used first."
       contentClassName="px-0 pb-0"
     >
@@ -62,6 +64,11 @@ export function UserDevicesTab({
   );
 }
 
+/**
+ * WHY so few columns: the tab shares the page with the identity card, so the table must fit
+ * without sideways scrolling from 1280 px. Browser and operating system share a cell (two lines),
+ * and the first sighting sits under the last one.
+ */
 function deviceColumns(
   linkQuery: Record<string, string | undefined>,
 ): DataTableColumn<UserDeviceDto>[] {
@@ -71,17 +78,29 @@ function deviceColumns(
       header: 'Device',
       cell: (row) => <DeviceValue device={row.device} />,
     },
-    { id: 'browser', header: 'Browser', cell: (row) => row.browser ?? UNKNOWN_FACT },
-    { id: 'os', header: 'Operating system', cell: (row) => row.os ?? UNKNOWN_FACT },
     {
-      id: 'firstSeen',
-      header: 'First seen',
-      cell: (row) => <span className="whitespace-nowrap">{formatDateTime(row.firstSeenAt)}</span>,
+      id: 'system',
+      header: 'Browser and system',
+      cell: (row) => (
+        <span className="flex flex-col gap-0.5">
+          <span>{row.browser ?? UNKNOWN_FACT}</span>
+          <span className="text-xs text-muted-foreground">
+            {row.os ? formatOsName(row.os) : UNKNOWN_FACT}
+          </span>
+        </span>
+      ),
     },
     {
-      id: 'lastSeen',
+      id: 'seen',
       header: 'Last seen',
-      cell: (row) => <RelativeTime iso={row.lastSeenAt} />,
+      cell: (row) => (
+        <span className="flex flex-col gap-0.5">
+          <RelativeTime iso={row.lastSeenAt} />
+          <span className="text-xs whitespace-nowrap text-muted-foreground">
+            First {formatDateTime(row.firstSeenAt)}
+          </span>
+        </span>
+      ),
     },
     {
       id: 'pageViews',
@@ -91,7 +110,7 @@ function deviceColumns(
     },
     {
       id: 'requests',
-      header: 'Requests',
+      header: METRIC_COPY.requests.label,
       align: 'right',
       cell: (row) => <span className="tabular">{formatInteger(row.requests)}</span>,
     },
@@ -105,6 +124,7 @@ function deviceColumns(
     {
       id: 'apps',
       header: 'Apps',
+      className: 'w-full min-w-32 whitespace-normal',
       cell: (row) => <AppChipList apps={row.apps} linkQuery={linkQuery} max={3} />,
     },
   ];

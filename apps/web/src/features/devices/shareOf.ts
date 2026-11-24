@@ -7,10 +7,20 @@
  * greyed out instead of being asked for (the API would refuse it).
  */
 import type { BreakdownDimension, BreakdownDto, IngestSource } from '@nexus/shared';
+import {
+  AppWindow,
+  Clock,
+  Cpu,
+  Languages,
+  type LucideIcon,
+  MonitorSmartphone,
+  Tag,
+} from 'lucide-react';
 
 import type { ProportionRow } from '@/components/proportionShares';
 import { breakdownValueLabel, dimensionsFor } from '@/features/breakdowns/breakdownCopy';
 import type { GeoMetric } from '@/features/geography/GeoPlacesSection';
+import { METRIC_COPY } from '@/lib/metricCopy';
 
 export const SHARE_OF_VALUES = ['pageViews', 'requests'] as const;
 export type ShareOf = (typeof SHARE_OF_VALUES)[number];
@@ -34,8 +44,8 @@ export const SHARE_OF_COPY: Record<ShareOf, ShareOfCopy> = {
     geoMetric: 'pageViews',
   },
   requests: {
-    label: 'Requests',
-    ariaLabel: 'Requests (server events)',
+    label: METRIC_COPY.requests.label,
+    ariaLabel: `${METRIC_COPY.requests.label} (server events)`,
     source: 'server',
     geoMetric: 'requests',
   },
@@ -44,7 +54,7 @@ export const SHARE_OF_COPY: Record<ShareOf, ShareOfCopy> = {
 /** The plural noun printed inside every bar label, per source ("30% of page views"). */
 export const UNIT_OF_SOURCE: Record<IngestSource, string> = {
   browser: 'page views',
-  server: 'requests',
+  server: METRIC_COPY.requests.label,
 };
 
 /** The share-of choice that counts the same thing as a country chart metric (null: none). */
@@ -83,17 +93,31 @@ export type DevicesPageDimension =
 export interface DevicesDimensionCopy {
   /** Panel title and the value column header. */
   title: string;
+  /** The small muted icon before the panel title. */
+  icon: LucideIcon;
   /** One line under the title. */
   description: string;
 }
 
 export const DEVICES_DIMENSION_COPY: Record<DevicesPageDimension, DevicesDimensionCopy> = {
-  device: { title: 'Device type', description: 'Desktop, mobile or tablet' },
-  browser: { title: 'Browser', description: 'The browser that sent it' },
-  os: { title: 'Operating system', description: 'The system the browser runs on' },
-  release: { title: 'App version', description: 'The release tag the app sends' },
-  client_tz: { title: 'Time zone', description: 'The time zone the browser is set to' },
-  client_lang: { title: 'Language', description: 'The language the browser is set to' },
+  device: {
+    title: 'Device type',
+    icon: MonitorSmartphone,
+    description: 'Desktop, mobile or tablet',
+  },
+  browser: { title: 'Browser', icon: AppWindow, description: 'The browser that sent it' },
+  os: { title: 'Operating system', icon: Cpu, description: 'The system the browser runs on' },
+  release: { title: 'App version', icon: Tag, description: 'The release tag the app sends' },
+  client_tz: {
+    title: 'Time zone',
+    icon: Clock,
+    description: 'The time zone the browser is set to',
+  },
+  client_lang: {
+    title: 'Language',
+    icon: Languages,
+    description: 'The language the browser is set to',
+  },
 };
 
 /**

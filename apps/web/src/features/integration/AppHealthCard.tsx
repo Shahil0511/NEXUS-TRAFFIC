@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EMPTY_VALUE, formatDateTime, formatInteger, formatPercent } from '@/lib/format';
 import { guideHref } from '@/lib/guide';
 import { metricInfo } from '@/lib/metricCopy';
+import { navLabel } from '@/lib/nav';
 import { PAGES } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
@@ -339,7 +340,7 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
                 : `${formatPercent(health.privateIpRatio * 100, 0)} of server events`}
             </span>
             {health.warnings.includes('private_ips') ? (
-              <span className="text-foreground"> · Geography and location stay empty</span>
+              <span className="text-foreground"> · Places stay empty</span>
             ) : null}
           </span>
           {health.exposedKeys.length > 0 ? (
@@ -348,7 +349,8 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
               className="inline-flex items-center gap-1 rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
             >
               <KeyRound className="size-3.5" aria-hidden="true" />
-              Rotate {health.exposedKeys.map((key) => key.keyPrefix).join(', ')} on the Apps page
+              Rotate {health.exposedKeys.map((key) => key.keyPrefix).join(', ')} on the{' '}
+              {navLabel('apps')} page
             </Link>
           ) : null}
         </div>

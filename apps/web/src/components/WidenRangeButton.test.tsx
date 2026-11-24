@@ -72,20 +72,20 @@ describe('WidenRangeButton', () => {
     expect(screen.getByRole('button', { name: 'Show the last 90 days' })).toBeInTheDocument();
   });
 
-  it('links to Integration health once no wider preset fits the page (30 days on Overview)', () => {
+  it('links to Data health once no wider preset fits the page (30 days on Overview)', () => {
     navigation.pathname = PAGES.overview();
     renderWithProviders(<WidenRangeButton />, { searchParams: '?range=30d&app=ebo-sales' });
     expect(screen.queryByRole('button')).toBeNull();
     const link = screen.getByRole('link', {
-      name: /Is this app sending data\?.*Integration health/,
+      name: /Is this app sending data\?.*Data health/,
     });
     expect(link).toHaveAttribute('href', `${PAGES.integration()}?app=ebo-sales&range=30d`);
   });
 
-  it('links to Integration health at 90 days on a count page', () => {
+  it('links to Data health at 90 days on a count page', () => {
     navigation.pathname = PAGES.geography();
     renderWithProviders(<WidenRangeButton />, { searchParams: '?range=90d' });
-    expect(screen.getByRole('link', { name: /Integration health/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Data health/ })).toBeInTheDocument();
   });
 
   it('renders nothing on a page without a time range', () => {

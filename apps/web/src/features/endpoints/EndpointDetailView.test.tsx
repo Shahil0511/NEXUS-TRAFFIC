@@ -52,7 +52,7 @@ describe('EndpointDetailView', () => {
       'href',
       `${PAGES.errors()}?app=ebo-sales&range=7d&endpointId=${ENDPOINT_ID}`,
     );
-    const callers = screen.getByRole('list', { name: 'Top callers' });
+    const callers = screen.getByRole('list', { name: 'Who calls it' });
     expect(await within(callers).findByRole('link', { name: 'buyer@libas.in' })).toHaveAttribute(
       'href',
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
@@ -69,7 +69,9 @@ describe('EndpointDetailView', () => {
       searchParams: '?app=other',
     });
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Route' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Request type' }),
+    ).toBeInTheDocument();
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(trail).getAllByRole('link')).toHaveLength(1);
     expect(within(trail).getByRole('link', { name: 'Request types' })).toHaveAttribute(

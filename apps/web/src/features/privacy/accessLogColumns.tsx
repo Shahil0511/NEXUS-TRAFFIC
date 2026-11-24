@@ -11,10 +11,12 @@ import { PAGES, withQuery } from '@/lib/pages';
 
 /**
  * Which part was opened, in the words of the page that shows it: a person-page tab, or a list
- * narrowed to the person (Visits, Failed requests).
+ * narrowed to the person (Visits, Failed requests). `person_profile` is the profile read, which
+ * the page ALWAYS sends (the header and identity card need it, whatever tab is open), so it is
+ * named for everything that read shows, not only the Summary tab (ADR 0015 §4).
  */
 export const SURFACE_LABELS: Record<PersonAccessSurface, string> = {
-  person_profile: 'Summary',
+  person_profile: 'Identity card and Summary',
   person_timeline: 'Activity',
   person_devices: 'Devices',
   person_daily: 'Daily activity',

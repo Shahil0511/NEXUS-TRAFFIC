@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { Activity } from 'lucide-react';
 import { createRef } from 'react';
 import { describe, expect, it } from 'vitest';
 
@@ -35,6 +36,19 @@ describe('Panel', () => {
     // Title first, aside after it: on a shared line the aside stays on the right.
     expect(header.firstElementChild).toHaveAttribute('data-slot', 'panel-title');
     expect(header.lastElementChild).toBe(aside);
+  });
+
+  it('draws an optional muted icon before the title without changing its name', () => {
+    const { container } = render(
+      <Panel title="Requests" icon={Activity}>
+        body
+      </Panel>,
+    );
+    const heading = screen.getByRole('heading', { name: 'Requests' });
+    const icon = container.querySelector('[data-slot="panel-icon"]')!;
+    expect(heading).toContainElement(icon as HTMLElement);
+    expect(icon).toHaveAttribute('aria-hidden', 'true');
+    expect(icon).toHaveClass('size-4', 'text-muted-foreground');
   });
 
   it('makes the heading a programmatic focus target only when asked to', () => {

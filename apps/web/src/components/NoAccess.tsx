@@ -1,5 +1,7 @@
 import { ShieldX } from 'lucide-react';
 
+import { LockIllustration } from '@/components/illustrations';
+import { StateArt } from '@/components/StateArt';
 import { Button } from '@/components/ui/button';
 import { loadWebEnv } from '@/env.schema';
 
@@ -22,9 +24,7 @@ export function NoAccess() {
   return (
     <main className="flex min-h-screen items-center justify-center px-6">
       <div className="max-w-md space-y-4 text-center">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
-          <ShieldX className="size-6" aria-hidden="true" />
-        </span>
+        <StateArt art={LockIllustration} icon={ShieldX} tone="alert" size="md" />
         <h1 className="text-xl font-semibold tracking-tight">You do not have access to Traffic</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
           You are signed in to the Data Nexus portal, but your account is not on the access list of

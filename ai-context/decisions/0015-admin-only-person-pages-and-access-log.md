@@ -46,6 +46,10 @@
      nothing. The dashboard never refetches person-level queries because of live traffic
      (`isTrafficDrivenKey`, `apps/web/src/features/live/autoRefreshPolicy.ts`), and each person-page tab
      sends its read only while it is open, so a row is written only for a part that was actually shown.
+     One exception, by design: the profile read (`person_profile`) feeds the page header and the
+     identity card as well as the Summary tab, so it is sent on every open of the person page, on
+     any tab. The log therefore labels that surface "Identity card and Summary"
+     (`SURFACE_LABELS`, `apps/web/src/features/privacy/accessLogColumns.tsx`), not "Summary".
   5. **Masking.** The person is named by `user_key` plus a MASKED email (`maskEmail`: first character,
      `***`, then `@domain`), taken from their newest event in the read's window
      (`WebEventQueryRepository.findUserEmail`, window- and environment-bound). A CHECK refuses any other
@@ -53,7 +57,7 @@
      the person was shown, so no row is written. The admin is stored by their sign-in email, which is
      only shown to admins.
   6. **The UI only offers what the viewer may open.** Links and buttons to a person page (People list,
-     command palette user results, session replay "User profile", `UserLink`) are shown to admins only
+     command palette people results, the visit page's "Person page" button, `UserLink`) are shown to admins only
      (`apps/web/src/features/me/useCanOpenPersonPages.ts`); a viewer who still opens one sees the
      "Only admins" state (`components/AdminOnly.tsx`) and no person read is sent.
 - **Consequences:**

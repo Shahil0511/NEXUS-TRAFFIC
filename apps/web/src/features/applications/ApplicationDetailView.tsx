@@ -21,6 +21,7 @@ import { TrafficChart } from '@/components/charts/TrafficChart';
 import { EmptyState } from '@/components/EmptyState';
 import { PageLink, ToolLink } from '@/components/EntityLinks';
 import { ErrorState } from '@/components/ErrorState';
+import { GuideLinkButton } from '@/components/GuideLinkButton';
 import { KpiCard } from '@/components/KpiCard';
 import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
@@ -47,8 +48,10 @@ import {
   formatInteger,
   formatPercent,
   formatWindowCaption,
+  perGrain,
 } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
+import { navLabel } from '@/lib/nav';
 import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
@@ -167,7 +170,7 @@ function AppHeader({
           </Button>
           <Button asChild variant="outline">
             <Link href={withQuery(PAGES.integration(), { app: row.app })}>
-              <PlugZap aria-hidden="true" /> Integration health
+              <PlugZap aria-hidden="true" /> {navLabel('integration')}
             </Link>
           </Button>
         </>
@@ -216,7 +219,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
         href={withQuery(PAGES.users(), linkQuery)}
       />
       <KpiCard
-        label="API calls"
+        label={METRIC_COPY.requests.label}
         info={metricInfo('requests')}
         icon={Activity}
         loading={loading}
@@ -252,7 +255,7 @@ function AppKpis({ row, linkQuery }: { row: AppTrafficDto | undefined; linkQuery
         href={withQuery(PAGES.pages(), linkQuery)}
       />
       <KpiCard
-        label="Sessions"
+        label="Visits"
         info={metricInfo('sessions')}
         icon={Waypoints}
         loading={loading}
@@ -279,7 +282,11 @@ function ViewAll({ href, label }: { href: string; label: string }) {
 function ActivityPanel({ filters }: { filters: TimeWindowQuery }) {
   const timeseries = useOverviewTimeseries(filters);
   return (
-    <Panel title="API calls over time" description="Requests per bucket" className="lg:col-span-2">
+    <Panel
+      title="API calls over time"
+      description={`${METRIC_COPY.requests.label} ${perGrain(timeseries.data?.window.grain)}`}
+      className="lg:col-span-2"
+    >
       <QueryState
         query={timeseries}
         skeleton={<ChartSkeleton />}
@@ -287,7 +294,7 @@ function ActivityPanel({ filters }: { filters: TimeWindowQuery }) {
         empty={
           <EmptyState
             title="No traffic in this window"
-            description="Try a longer range, or check Integration health."
+            description={`Try a longer range, or check ${navLabel('integration')}.`}
           />
         }
       >
@@ -309,8 +316,8 @@ function FailingRoutesPanel({
   const errors = useErrorSummary(filters);
   return (
     <Panel
-      title="Top failing routes"
-      description="Most 4xx + 5xx responses"
+      title="Top failing request types"
+      description="Most failed requests"
       aside={<ViewAll href={withQuery(PAGES.errors(), linkQuery)} label="All errors of this app" />}
     >
       <QueryState query={errors} skeleton={<ListSkeleton />}>
@@ -321,13 +328,13 @@ function FailingRoutesPanel({
 }
 
 function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuery: LinkQuery }) {
-  // Most active first: the people who use this app the most.
+  // Sorted by API calls only (the description says so; it is not a measure of activity).
   const users = useUserList({ ...filters, sort: 'requests', dir: 'desc', limit: TOP_N });
   const rows = users.data?.pages[0]?.items;
   return (
     <Panel
       title="Who uses it"
-      description="Verified users, most active first"
+      description="Verified people, by API calls"
       aside={<ViewAll href={withQuery(PAGES.users(), linkQuery)} label="All users of this app" />}
     >
       <QueryState
@@ -349,7 +356,7 @@ function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
                   <UserLink userKey={user.userKey} email={user.email} linkQuery={linkQuery} />
                   <span className="text-2xs text-muted-foreground">
                     {formatInteger(user.requests)} API calls · {formatInteger(user.pageViews)} page
-                    views · {formatInteger(user.sessions)} sessions
+                    views · {formatInteger(user.sessions)} visits
                   </span>
                 </span>
                 <RelativeTime
@@ -370,10 +377,13 @@ function RoutesPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQue
   const rows = routes.data?.pages[0]?.items;
   return (
     <Panel
-      title="Most used API routes"
-      description="By calls"
+      title="Most used request types"
+      description="By API calls"
       aside={
-        <ViewAll href={withQuery(PAGES.endpoints(), linkQuery)} label="All routes of this app" />
+        <ViewAll
+          href={withQuery(PAGES.endpoints(), linkQuery)}
+          label="All request types of this app"
+        />
       }
     >
       <QueryState
@@ -384,7 +394,7 @@ function RoutesPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQue
       >
         {() => (
           <RankedList
-            ariaLabel="Most used API routes"
+            ariaLabel="Most used request types"
             items={rows!.map((route) => ({
               key: route.endpointId,
               label: (
@@ -439,7 +449,10 @@ function PagesPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
                   linkQuery={linkQuery}
                 />
               ),
-              sublabel: `${formatInteger(page.uniqueSessions)} sessions · avg ${formatDuration(page.avgVisibleMs)} visible`,
+              sublabel:
+                page.avgVisibleMs === null
+                  ? `${formatInteger(page.uniqueSessions)} visits`
+                  : `${formatInteger(page.uniqueSessions)} visits · avg ${formatDuration(page.avgVisibleMs)} visible`,
               value: page.views,
             }))}
           />
@@ -465,7 +478,8 @@ function ToolsPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
         empty={
           <EmptyState
             title="No tool uses"
-            description="Tools appear once the app tracks feature clicks (tool_use events)."
+            description="Tools appear once the app's team tags its buttons. See the integration guide."
+            action={<GuideLinkButton chapter="browserContract" />}
           />
         }
       >
@@ -482,7 +496,7 @@ function ToolsPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuer
                   linkQuery={linkQuery}
                 />
               ),
-              sublabel: `${formatInteger(tool.distinctUsers)} users · ${formatInteger(tool.distinctSessions)} sessions`,
+              sublabel: `${formatInteger(tool.distinctUsers)} users · ${formatInteger(tool.distinctSessions)} visits`,
               value: tool.uses,
             }))}
           />

@@ -61,7 +61,14 @@ function UnavailableDimensionPanel({ dimension, share, onUsePageViews }: Dimensi
   const copy = DEVICES_DIMENSION_COPY[dimension];
   const unit = UNIT_OF_SOURCE[SHARE_OF_COPY[share].source];
   return (
-    <Panel title={copy.title} description={copy.description} className="opacity-70">
+    <Panel
+      title={copy.title}
+      icon={copy.icon}
+      description={copy.description}
+      // WHY no opacity fade: it pushed the muted text and the working button below AA contrast.
+      // A dashed outline marks "not available" while the text keeps its full token colour.
+      className="border border-dashed border-foreground/20 shadow-none ring-0 hover:shadow-none"
+    >
       <EmptyState
         icon={Ban}
         title={`Not available for ${unit}`}
@@ -85,6 +92,7 @@ function AvailableDimensionPanel({ dimension, filters, share }: DimensionSharePa
   return (
     <Panel
       title={copy.title}
+      icon={copy.icon}
       description={copy.description}
       aside={<InfoTip label="Share" text={metricInfo('breakdownShare')} />}
     >
