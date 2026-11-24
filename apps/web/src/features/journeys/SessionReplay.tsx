@@ -45,7 +45,7 @@ export function SessionReplay({ events, startedAt, linkQuery }: SessionReplayPro
   // A lead-in step (events before the first page view) has no number, so pages count from 1.
   const leadIn = steps[0]?.page === null ? 1 : 0;
   return (
-    <ol aria-label="Session replay">
+    <ol aria-label="Visit steps">
       {steps.map((step, index) => (
         <ReplayStep
           key={step.page?.eventId ?? 'lead-in'}

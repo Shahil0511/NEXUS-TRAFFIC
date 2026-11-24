@@ -42,7 +42,7 @@ export function JourneysView() {
         description={
           topPaths.data
             ? formatWindowCaption(topPaths.data.window)
-            : 'Browser visits, their replays and the paths people take'
+            : 'Browser visits, their visit steps and the paths people take'
         }
       />
 
@@ -82,7 +82,7 @@ function SessionsPanel() {
   return (
     <Panel
       title="All visits"
-      description="Most recent first · open one to replay it"
+      description="Most recent first · open one to see its visit steps"
       contentClassName="px-0 pb-0"
       aside={
         userKey ? (

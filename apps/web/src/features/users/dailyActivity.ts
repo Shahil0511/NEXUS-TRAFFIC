@@ -1,7 +1,7 @@
 /**
  * Pure helpers of the person page's "Daily activity" tab: where a day's activity sits on the
- * 00:00-24:00 IST strip, and the window totals (days active, average first / last activity, total
- * active time).
+ * 00:00-24:00 IST strip, the window totals (active days, average first / last activity, tab
+ * visible time) and the one-day link query of a row's Visits count.
  *
  * WHY HERE: the arithmetic is the part that can be wrong silently (a strip drawn an hour off, an
  * average that mixes days), so it lives outside the components and is unit-tested.
@@ -10,7 +10,7 @@
  */
 import type { UserDayActivityDto } from '@nexus/shared';
 
-import { EMPTY_VALUE, formatClockOffset, withUnit } from '@/lib/format';
+import { EMPTY_VALUE, formatClockOffset, formatInteger, withUnit } from '@/lib/format';
 
 export const DAY_MS = 86_400_000;
 const PERCENT = 100;
@@ -52,7 +52,7 @@ export function averageTimeIntoDay(
 
 /** The totals row of the tab, over the active days of the window. */
 export interface DailyTotals {
-  daysActive: number;
+  activeDays: number;
   /** Mean first activity, ms after IST midnight (null without days). */
   averageFirstMs: number | null;
   /**
@@ -60,19 +60,19 @@ export interface DailyTotals {
    * the day still running (`inProgress`) only has a last activity "so far".
    */
   averageLastMs: number | null;
-  /** Σ tab-visible time of every day. */
-  totalActiveMs: number;
+  /** Σ tab visible time of every day (UserDayActivityDto.activeMs). */
+  totalTabVisibleMs: number;
 }
 
 export function summarizeDays(days: readonly UserDayActivityDto[]): DailyTotals {
   return {
-    daysActive: days.length,
+    activeDays: days.length,
     averageFirstMs: averageTimeIntoDay(days, (day) => day.firstActivityAt),
     averageLastMs: averageTimeIntoDay(
       days.filter((day) => !day.inProgress),
       (day) => day.lastActivityAt,
     ),
-    totalActiveMs: days.reduce((total, day) => total + day.activeMs, 0),
+    totalTabVisibleMs: days.reduce((total, day) => total + day.activeMs, 0),
   };
 }
 
@@ -85,6 +85,45 @@ export const NOT_ENDED_YET = 'Not yet';
  * "—" alone without any active day. Never "— IST". Pure.
  */
 export function averageLastLabel(totals: DailyTotals): string {
-  if (totals.averageLastMs === null) return totals.daysActive > 0 ? NOT_ENDED_YET : EMPTY_VALUE;
+  if (totals.averageLastMs === null) return totals.activeDays > 0 ? NOT_ENDED_YET : EMPTY_VALUE;
   return withUnit(formatClockOffset(totals.averageLastMs), 'IST');
+}
+
+/** A custom range of exactly one IST day: `from` = its midnight, `to` = 24 h later. */
+export interface DayWindowQuery {
+  range: 'custom';
+  from: string;
+  to: string;
+}
+
+/**
+ * The global-filter range of ONE IST day, from the day's midnight instant (UserDayActivityDto.day)
+ * to the next midnight (24 h later: India keeps no daylight saving). Pure.
+ */
+export function dayWindowQuery(day: string): DayWindowQuery {
+  const fromMs = Date.parse(day);
+  return {
+    range: 'custom',
+    from: new Date(fromMs).toISOString(),
+    to: new Date(fromMs + DAY_MS).toISOString(),
+  };
+}
+
+/**
+ * The query of the Visits page narrowed to this person and this ONE day, keeping the current app
+ * and environment of `base` (filterLinkQuery). WHY a custom range: with the global range, a row of
+ * an older day would open the Visits of the whole range, not of that day. The person narrowing
+ * (`?userKey=`) is admin-only on the API and recorded in the access log (`person_visits`). Pure.
+ */
+export function dayVisitsQuery(
+  day: string,
+  base: Readonly<Record<string, string | undefined>>,
+  userKey: string,
+): Record<string, string | undefined> {
+  return { app: base.app, env: base.env, userKey, ...dayWindowQuery(day) };
+}
+
+/** "1 page view", "38 page views", "1,234 API calls": a count with its noun. Pure. */
+export function countLabel(count: number, one: string, many: string): string {
+  return `${formatInteger(count)} ${count === 1 ? one : many}`;
 }

@@ -130,7 +130,7 @@ describe('UserDetailView', () => {
     expect(within(table).getByText('1m 5s visible')).toBeInTheDocument();
     expect(within(table).getByText('export-csv')).toBeInTheDocument();
     expect(within(table).getAllByText('203.0.113.7')).toHaveLength(1);
-    const replays = within(table).getAllByRole('link', { name: /replay/i });
+    const replays = within(table).getAllByRole('link', { name: /visit steps/i });
     expect(replays).toHaveLength(2);
     expect(replays[0]?.getAttribute('href')).toBe(`/journeys/ebo-sales/${SESSION_ID}`);
   });
@@ -281,7 +281,14 @@ describe('UserDetailView', () => {
     const headers = within(table)
       .getAllByRole('columnheader')
       .map((cell) => cell.textContent ?? '');
-    for (const header of ['First – last activity (IST)', 'Active time', 'API calls', 'Visits']) {
+    for (const header of [
+      'Date',
+      'First – last activity (IST)',
+      'Tab visible time',
+      'Apps',
+      'Pages and calls',
+      'Visits',
+    ]) {
       expect(
         headers.some((text) => text.includes(header)),
         header,

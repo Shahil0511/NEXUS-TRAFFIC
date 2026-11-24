@@ -82,7 +82,7 @@ function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
           <KpiCard key={index} label="" value="" loading />
         ))}
       </div>
-      <Panel title="Replay">
+      <Panel title="Visit steps">
         <ListSkeleton rows={6} />
       </Panel>
     </div>
@@ -180,7 +180,7 @@ function DetailContent({ title, detail, linkQuery, eyebrow }: DetailContentProps
       </section>
 
       <Panel
-        title="Replay"
+        title="Visit steps"
         description="Each page with its visible time, then the tools used and API calls made on it"
       >
         {events.length > 0 ? (

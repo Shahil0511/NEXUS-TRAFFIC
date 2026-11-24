@@ -8,8 +8,11 @@ import { EMPTY_VALUE } from '@/lib/format';
 import {
   averageLastLabel,
   averageTimeIntoDay,
+  countLabel,
   DAY_MS,
   dayStripSpan,
+  dayVisitsQuery,
+  dayWindowQuery,
   MIN_STRIP_WIDTH_PCT,
   msIntoDay,
   NOT_ENDED_YET,
@@ -51,18 +54,18 @@ describe('day strip position', () => {
 describe('daily averages and totals', () => {
   it('averages the time of day of first and last activity over the active days', () => {
     const totals = summarizeDays(USER_DAILY.items);
-    expect(totals.daysActive).toBe(2);
+    expect(totals.activeDays).toBe(2);
     // 09:10 and 10:00 → 09:35; 18:40 and 13:20 → 16:00.
     expect(totals.averageFirstMs).toBe((9 * 60 + 35) * 60_000);
     expect(totals.averageLastMs).toBe(16 * HOUR);
-    expect(totals.totalActiveMs).toBe(4 * HOUR);
+    expect(totals.totalTabVisibleMs).toBe(4 * HOUR);
   });
 
   it('leaves the day still running out of the average last activity only', () => {
     const [today, yesterday] = USER_DAILY.items;
     if (!today || !yesterday) throw new Error('fixture');
     const totals = summarizeDays([{ ...today, inProgress: true }, yesterday]);
-    expect(totals.daysActive).toBe(2);
+    expect(totals.activeDays).toBe(2);
     expect(totals.averageFirstMs).toBe((9 * 60 + 35) * 60_000);
     // Only 30 Sep (ended): 13:20 IST.
     expect(totals.averageLastMs).toBe((13 * 60 + 20) * 60_000);
@@ -71,10 +74,10 @@ describe('daily averages and totals', () => {
 
   it('has no averages without days', () => {
     expect(summarizeDays([])).toEqual({
-      daysActive: 0,
+      activeDays: 0,
       averageFirstMs: null,
       averageLastMs: null,
-      totalActiveMs: 0,
+      totalTabVisibleMs: 0,
     });
     expect(averageTimeIntoDay([], (day: UserDayActivityDto) => day.firstActivityAt)).toBeNull();
   });
@@ -88,5 +91,52 @@ describe('averageLastLabel', () => {
     // Only today, still running: nothing has ended yet.
     expect(averageLastLabel(summarizeDays([{ ...today, inProgress: true }]))).toBe(NOT_ENDED_YET);
     expect(averageLastLabel(summarizeDays([]))).toBe(EMPTY_VALUE);
+  });
+});
+
+describe('one-day links', () => {
+  it('turns an IST midnight into a custom range of exactly 24 hours', () => {
+    expect(dayWindowQuery(DAY)).toEqual({
+      range: 'custom',
+      from: '2026-09-30T18:30:00.000Z',
+      to: '2026-10-01T18:30:00.000Z',
+    });
+  });
+
+  it('narrows the Visits query to the person and the day, keeping app and environment only', () => {
+    const query = dayVisitsQuery(
+      DAY,
+      { app: 'ebo-sales', env: 'staging', range: '7d', from: undefined, to: undefined },
+      'a'.repeat(64),
+    );
+    expect(query).toEqual({
+      app: 'ebo-sales',
+      env: 'staging',
+      userKey: 'a'.repeat(64),
+      range: 'custom',
+      from: '2026-09-30T18:30:00.000Z',
+      to: '2026-10-01T18:30:00.000Z',
+    });
+    // The bounds are one whole day, start inclusive, next midnight as the end.
+    expect(Date.parse(query.to!) - Date.parse(query.from!)).toBe(DAY_MS);
+  });
+
+  it('drops a global custom range in favour of the day', () => {
+    const query = dayVisitsQuery(
+      DAY,
+      { range: 'custom', from: '2026-01-01T00:00:00.000Z', to: '2026-02-01T00:00:00.000Z' },
+      'a'.repeat(64),
+    );
+    expect(query.from).toBe('2026-09-30T18:30:00.000Z');
+    expect(query.app).toBeUndefined();
+    expect(query.env).toBeUndefined();
+  });
+});
+
+describe('countLabel', () => {
+  it('prints the count with the singular or plural noun', () => {
+    expect(countLabel(1, 'page view', 'page views')).toBe('1 page view');
+    expect(countLabel(0, 'page view', 'page views')).toBe('0 page views');
+    expect(countLabel(1234, 'API call', 'API calls')).toBe('1,234 API calls');
   });
 });

@@ -1,5 +1,5 @@
 import type { TimelineItemDto, TimeWindowQuery } from '@nexus/shared';
-import { PlayCircle } from 'lucide-react';
+import { ListOrdered } from 'lucide-react';
 import Link from 'next/link';
 
 import { ActivityEventSummary, ActivityKindBadge } from '@/components/ActivityEvent';
@@ -14,7 +14,7 @@ const SESSION_ID_PREVIEW = 8;
 
 /**
  * WHY: a user's combined timeline reads as one table — when, what kind, what exactly, where.
- * The replay link is built ONLY from the app slug + session uuid (PAGES); paths are text.
+ * The visit-steps link is built ONLY from the app slug + session uuid (PAGES); paths are text.
  * The IP shows only when the API sent one (admins).
  */
 export function userTimelineColumns(filters: TimeWindowQuery): DataTableColumn<TimelineItemDto>[] {
@@ -55,9 +55,9 @@ export function userTimelineColumns(filters: TimeWindowQuery): DataTableColumn<T
             href={withQuery(PAGES.sessionDetail(row.app, row.sessionId), linkQuery)}
             className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            <PlayCircle className="size-3.5" aria-hidden="true" />
-            Replay
-            <span className="sr-only"> session {row.sessionId.slice(0, SESSION_ID_PREVIEW)}</span>
+            <ListOrdered className="size-3.5" aria-hidden="true" />
+            Visit steps
+            <span className="sr-only"> of visit {row.sessionId.slice(0, SESSION_ID_PREVIEW)}</span>
           </Link>
         ) : (
           <span className="text-muted-foreground">{EMPTY_VALUE}</span>

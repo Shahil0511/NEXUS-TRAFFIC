@@ -24,8 +24,11 @@ describe('SessionDetailView', () => {
     );
     renderWithProviders(<SessionDetailView app="ebo-sales" sessionId={SESSION_ID} />);
 
-    const replay = await screen.findByRole('list', { name: 'Session replay' });
+    const replay = await screen.findByRole('list', { name: 'Visit steps' });
     expect(seen).toEqual([`ebo-sales/${SESSION_ID}`]);
+    // The steps are headed "Visit steps" (never "Replay": nothing on screen was recorded as video).
+    expect(screen.getByRole('heading', { name: 'Visit steps' })).toBeInTheDocument();
+    expect(screen.queryByText('Replay')).toBeNull();
     const steps = within(replay).getAllByText(/^Page \d$/);
     expect(steps.map((step) => step.textContent)).toEqual(['Page 1', 'Page 2']);
     expect(within(replay).getByText('42.00 s visible')).toBeInTheDocument();
@@ -69,7 +72,7 @@ describe('SessionDetailView', () => {
       searchParams: '?app=other&range=7d',
     });
 
-    const replay = await screen.findByRole('list', { name: 'Session replay' });
+    const replay = await screen.findByRole('list', { name: 'Visit steps' });
     // Apps › ebo-sales › Visits › Visit xxxxxxxx
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     const links = within(trail).getAllByRole('link');

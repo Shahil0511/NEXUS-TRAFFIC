@@ -18,6 +18,45 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-24 — Person 360 daily depth, step 1: neutral labels, one-day Visits link, stated limits (ADR 0017)
+
+Web and shared tests only; no API, contract or database change.
+
+**Done**
+- **New [ADR 0017](decisions/0017-person-daily-depth.md)** (first version): the owner's call to go deeper into
+  per-person, per-day facts under the ADR 0015 safeguards; the neutral label list and where the banned words live;
+  the definitions of tab visible time, time in app and activity blocks; what later steps add. ADR 0014 / 0015,
+  `02-architecture.md`, `03-code-navigation.md`, `04-how-to-recipes.md`, `07-data-model.md` and `GLOSSARY.md`
+  point at it.
+- **Daily activity tab** (`features/users/`): `UserDailyActivityTab.tsx` is now a thin entry for
+  `UserDaysOverview.tsx`; columns moved to `userDailyColumns.tsx` (`dailyColumns(userKey, linkQuery)`, memoised) and
+  the day bar to `DayStrip.tsx`. Totals read Active days / Tab visible time ("added up over the active days"); the
+  row shows Tab visible time, its apps as `AppChip`s, "Pages and calls" (page views, feature uses, API calls ·
+  failed) and the visit count as a link to Visits for this person and that one IST day (`dayVisitsQuery`:
+  `userKey` + `range=custom` midnight to midnight + app / env; the read is the existing admin-only, logged
+  `person_visits`). The list ends with "End of list · N days" and an "About these numbers" panel
+  (`AboutTheseNumbers.tsx`, static caveats). `dailyActivity.ts`: `activeDays` / `totalTabVisibleMs` renames,
+  `dayWindowQuery`, `dayVisitsQuery`, `countLabel`.
+- **Labels elsewhere:** identity card First activity / Last activity; the visit page heads its steps "Visit steps"
+  (panel and list name), and the person timeline's link says "Visit steps". `lib/metricCopy.ts`: `activeTime` is
+  "Tab visible time" (its text says it is not keyboard or mouse use and two visible tabs both count),
+  `daysActive` is "Active days", new `dayApps`, `dayCounts`, `dayVisits` (`featureUses` comes with the one-day
+  view that shows it). The Visits page copy and the timeline link icon (a list, not a play button) say visit
+  steps too, so the drill-down uses one name.
+- **Safeguard tests:** `lib/neutralCopy.ts` (`NEUTRAL_COPY_BANNED`, `findBannedWords`, `collectRenderedText`; test
+  only) with `neutralCopy.test.ts`; `features/users/personCopy.test.tsx` renders every person page tab, the
+  identity card, the admins-only state, the visit page and Privacy & access and finds no banned word in text,
+  aria-labels, titles, alt or placeholders; `metricCopy.test.ts` checks every label and definition;
+  `packages/shared/src/dto-safeguards.test.ts` reads the DTO sources and fails on a grading or ordering field name.
+  New `features/users/UserDailyActivityTab.test.tsx` (labels, chips, counts, Visits href bounds, end marker,
+  caveats, empty state).
+- **Gates:** `npm run typecheck` and `npm test` green (DB suites skipped without `RUN_DB_TESTS`).
+
+**Next / known issues**
+- Step 2: per-app split of each day and the tab-visible-time-per-day chart (contract change, no migration).
+- The Date column is still plain text; it links to the one-day view once that view exists.
+- Not yet checked in the running app at 1280 px (the six columns must fit without sideways scroll) or on a phone.
+
 ## 2026-11-24 — Docs in line with the English-only, icons and illustrations passes (ADR 0016)
 
 Docs-only step over the three uncommitted UI passes below (English-only copy; page icons and art; one name

@@ -155,10 +155,10 @@ export const METRIC_COPY = {
   },
   // ─── One person, per day ─────────────────────────────────────────────────────
   activeTime: {
-    label: 'Active time (tab visible)',
+    label: 'Tab visible time',
     short:
       'How long an app page was on screen in a browser tab in front, added up over the day (India time).',
-    long: 'A tab in the background or a minimised window adds nothing. API calls alone add no time.',
+    long: 'It is not keyboard or mouse use: a tab left open on screen keeps counting. Two visible tabs both count. API calls alone add no time.',
   },
   firstActivity: {
     label: 'First activity',
@@ -177,10 +177,26 @@ export const METRIC_COPY = {
     long: 'They are not sign-in or sign-out times. Today is not over yet, so its last activity is “so far”.',
   },
   daysActive: {
-    label: 'Days active',
+    label: 'Active days',
     short:
       'Calendar days (India time) in the selected range with at least one API call or browser event.',
     long: 'Days without any activity are not listed and do not count in the averages.',
+  },
+  dayApps: {
+    label: 'Apps',
+    short: 'Each app with at least one API call or browser event that day, India time.',
+    long: 'An app that sends only server calls still appears here, from its API calls.',
+  },
+  dayCounts: {
+    label: 'Pages and calls',
+    short: 'Page views, feature uses and API calls of the day, India time.',
+    long: 'Failed counts the API calls answered with HTTP status 400 or higher.',
+  },
+  dayVisits: {
+    label: 'Visits',
+    short:
+      'Browser visits of the day: one browser tab’s activity until it is closed or idle for 30 minutes.',
+    long: 'The number opens the Visits page for this person and this day. API calls alone open no visit.',
   },
   // ─── Devices (browser) ──────────────────────────────────────────────────────
   devices: {

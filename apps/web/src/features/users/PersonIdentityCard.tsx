@@ -76,8 +76,10 @@ export function PersonIdentityCard({
             <Fact label="Apps">
               <AppChipList apps={profile.summary.apps} linkQuery={linkQuery} max={6} />
             </Fact>
-            <Fact label="First seen">{withUnit(formatDateTime(profile.firstSeenAt), 'IST')}</Fact>
-            <Fact label="Last seen">
+            <Fact label="First activity">
+              {withUnit(formatDateTime(profile.firstSeenAt), 'IST')}
+            </Fact>
+            <Fact label="Last activity">
               {withUnit(formatDateTime(profile.summary.lastSeenAt), 'IST')}
             </Fact>
             <p className="text-2xs text-muted-foreground">Both in the selected range.</p>

@@ -137,7 +137,7 @@ IP, geo and client columns as `api_requests`, plus:
 | `referrer_path` | previous in-app path; `referrer_host` the external site's host only (never a full URL). |
 | `nav` | `load` (full page load) or `route` (client-side navigation). |
 | `page_view_id` | for `page_time`: the `event_id` of the page view it belongs to. **Required** for `page_time`. |
-| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. Summed per IST day for one person = the person page's "Active time (tab visible)" (`listUserDailyActivity`). |
+| `visible_ms` | for `page_time`: milliseconds the page was visible **since the previous `page_time` of the same view** (a delta; sum them per page view). 0 – 86 400 000. Required for `page_time`. Summed per IST day for one person = the person page's "Tab visible time" (`listUserDailyActivity`, [ADR 0017](decisions/0017-person-daily-depth.md)). |
 | `is_final`, `time_reason` | for `page_time`: whether this was the last delta of the view, and why it was sent (`hidden`, `route`, `pagehide`, `idle`). Required for `page_time`. |
 | `tool` | for `tool_use`: the UI tool, e.g. `audits.export-csv` (`^[a-z0-9][a-z0-9_.:-]{0,63}$`). Required for `tool_use`. |
 | `action` | optional verb: `click`, `open`, `submit`, `export`, `toggle`, `search`, `other`. |

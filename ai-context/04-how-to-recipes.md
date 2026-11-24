@@ -37,7 +37,9 @@ reading order.
    and drawn with token utilities only (ADR 0016). An empty or error state uses `EmptyState` / `ErrorState`,
    which already open with `components/StateArt.tsx`. A
    paged list uses `components/LoadMoreButton.tsx` so the page end does not claim the page is over. Keep
-   on-screen labels descriptive; no per-person scores, ranks or comparisons between people.
+   on-screen labels descriptive; no per-person grading, no ordering of people and no comparisons between people. A person-level
+   screen uses the neutral labels of [ADR 0017](decisions/0017-person-daily-depth.md) and is added to
+   `apps/web/src/features/users/personCopy.test.tsx`, which scans its rendered text with `lib/neutralCopy.ts`.
 6. **Tests**: service unit test with fakes (`apps/api/test/fixtures/fake-query-repositories.ts`), a DB block in
    `apps/api/test/db/analytics-queries.integration.test.ts`, a view test with MSW. The route contract test
    (`apps/api/test/routes-contract.test.ts`) and `apps/web/src/lib/api.test.ts` fail until steps 4–5 exist.

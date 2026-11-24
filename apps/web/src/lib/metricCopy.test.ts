@@ -2,6 +2,7 @@ import { COVERAGE_TARGET_RATIO } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
 import { COVERAGE_WARN_PCT, METRIC_COPY, metricInfo, type MetricKey } from './metricCopy';
+import { findBannedWords } from './neutralCopy';
 
 /** Every metric a page shows behind an (i) — adding a metric to a page means adding it here. */
 const REQUIRED: readonly MetricKey[] = [
@@ -42,6 +43,9 @@ const REQUIRED: readonly MetricKey[] = [
   'firstActivity',
   'lastActivity',
   'daysActive',
+  'dayApps',
+  'dayCounts',
+  'dayVisits',
 ];
 
 describe('METRIC_COPY', () => {
@@ -59,6 +63,26 @@ describe('METRIC_COPY', () => {
       expect(`${copy.short} ${copy.long}`.length).toBeLessThanOrEqual(260);
     },
   );
+
+  it.each(Object.entries(METRIC_COPY))(
+    '%s uses neutral words only (no score, rank or attendance framing, ADR 0017)',
+    (_, copy) => {
+      expect(
+        findBannedWords(`${copy.label}
+${copy.short}
+${copy.long}`),
+      ).toEqual([]);
+    },
+  );
+
+  it('names the per-person day metrics with the neutral labels', () => {
+    expect(METRIC_COPY.activeTime.label).toBe('Tab visible time');
+    expect(METRIC_COPY.daysActive.label).toBe('Active days');
+    expect(METRIC_COPY.firstActivity.label).toBe('First activity');
+    expect(METRIC_COPY.lastActivity.label).toBe('Last activity');
+    // Tab visible time is screen time of a front tab, not input: the copy says so.
+    expect(METRIC_COPY.activeTime.long).toMatch(/not keyboard or mouse use/);
+  });
 
   it('explains 4xx versus 5xx under error rate', () => {
     expect(METRIC_COPY.errorRate.long).toMatch(/4xx/);

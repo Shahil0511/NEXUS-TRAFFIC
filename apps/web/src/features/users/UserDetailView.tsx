@@ -94,7 +94,7 @@ export function PersonAdminOnly() {
 
 /**
  * One verified person over the GLOBAL range: an identity card that never disappears (email,
- * online now, apps, first / last seen, latest known device facts; a left column on 2xl screens, a
+ * online now, apps, first / last activity, latest known device facts; a left column on 2xl screens, a
  * band above the tabs below that, so the tab tables get the full width) and the tabs,
  * kept in the URL (`?tab=`): Summary, Daily activity, Devices, Activity. The profile read (header,
  * identity card and Summary) is sent on every open, so the access log names that row "Identity
