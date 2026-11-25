@@ -31,6 +31,7 @@ import type {
   UserDailyActivityDto,
   UserDayActivityDto,
   UserDayAppActivityDto,
+  UserDayDetailDto,
   UserDevicesDto,
   UserProfileDto,
   UserSummaryDto,
@@ -437,6 +438,126 @@ export const USER_DAILY: UserDailyActivityDto = {
       }),
     ]),
   ],
+};
+
+/**
+ * ONE IST day (1 Oct 2026) of the person, as ROUTES.users.day answers it. hr-portal is used first
+ * (07:30-08:00 IST, 10 min on screen), then ebo-sales (09:10-18:40 IST, 3 h 12 min). Two blocks;
+ * time in app 3 h (tabs overlapped in the second block), tab visible time 3 h 22 min. 50 API calls
+ * fall outside the blocks; 2 of 32 pages, 1 feature and 2 of 5 visits are listed.
+ */
+export const USER_DAY_DETAIL: UserDayDetailDto = {
+  window: { from: '2026-09-30T18:30:00.000Z', to: '2026-10-01T18:30:00.000Z', grain: 'hour' },
+  day: '2026-10-01',
+  summary: userDayFrom('2026-09-30T18:30:00.000Z', [
+    userDayApp('ebo-sales'),
+    userDayApp('hr-portal', {
+      firstActivityAt: '2026-10-01T02:00:00.000Z',
+      lastActivityAt: '2026-10-01T02:30:00.000Z',
+      activeMs: 600_000,
+      pageViews: 2,
+      requests: 0,
+      failedRequests: 0,
+      toolUses: 0,
+      visits: 1,
+    }),
+  ]),
+  timeInAppMs: 10_800_000,
+  blocks: [
+    {
+      startAt: '2026-10-01T02:00:00.000Z',
+      endAt: '2026-10-01T02:30:00.000Z',
+      spanMs: 1_800_000,
+      timeInAppMs: 600_000,
+      activeMs: 600_000,
+      apps: ['hr-portal'],
+      pageViews: 2,
+      toolUses: 0,
+      requests: 0,
+    },
+    {
+      startAt: '2026-10-01T03:40:00.000Z',
+      endAt: '2026-10-01T13:10:00.000Z',
+      spanMs: 34_200_000,
+      timeInAppMs: 10_200_000,
+      activeMs: 11_520_000,
+      apps: ['ebo-sales'],
+      pageViews: 40,
+      toolUses: 5,
+      requests: 850,
+    },
+  ],
+  blockCount: 2,
+  blocksTruncated: false,
+  requestsOutsideBlocks: 50,
+  pages: [
+    {
+      pageId: PAGE_ID,
+      app: 'hr-portal',
+      pathTemplate: '/leaves',
+      firstViewAt: '2026-10-01T02:00:00.000Z',
+      views: 2,
+      activeMs: 600_000,
+    },
+    {
+      pageId: '0d6e9a51-3f7e-5a7e-9a51-2a596f1c3f7f',
+      app: 'ebo-sales',
+      pathTemplate: '/stores/:id',
+      firstViewAt: '2026-10-01T03:40:00.000Z',
+      views: 40,
+      activeMs: 11_520_000,
+    },
+  ],
+  pagesTotal: 32,
+  tools: [
+    {
+      toolId: TOOL_ID,
+      app: 'ebo-sales',
+      tool: 'export-csv',
+      firstUseAt: '2026-10-01T04:00:00.000Z',
+      uses: 5,
+    },
+  ],
+  toolsTotal: 1,
+  visits: [
+    {
+      app: 'ebo-sales',
+      sessionId: SESSION_ID,
+      startedAt: '2026-10-01T03:40:00.000Z',
+      lastActivityAt: '2026-10-01T13:10:00.000Z',
+      entryPath: '/home',
+      exitPath: '/stores/:id',
+      pageViews: 40,
+      toolUses: 5,
+      activeMs: 11_520_000,
+    },
+    {
+      app: 'hr-portal',
+      sessionId: '7c1d2e3f-4a5b-4c6d-8e7f-001122334466',
+      startedAt: '2026-10-01T02:00:00.000Z',
+      lastActivityAt: '2026-10-01T02:30:00.000Z',
+      entryPath: '/leaves',
+      exitPath: '/leaves',
+      pageViews: 2,
+      toolUses: 0,
+      activeMs: 600_000,
+    },
+  ],
+};
+
+/** The same day with no activity: a 200 with no summary and empty lists. */
+export const EMPTY_USER_DAY: UserDayDetailDto = {
+  ...USER_DAY_DETAIL,
+  summary: null,
+  timeInAppMs: 0,
+  blocks: [],
+  blockCount: 0,
+  requestsOutsideBlocks: 0,
+  pages: [],
+  pagesTotal: 0,
+  tools: [],
+  toolsTotal: 0,
+  visits: [],
 };
 
 export function timelineItem(

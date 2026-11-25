@@ -1,11 +1,12 @@
 /**
- * ROUTES.users.* — the Users page (user list, profile, devices, days, combined timeline).
- * profile / timeline / devices / daily are admin-only (requireAdmin in the route table) and pass
- * the viewer on, so the service can record the access.
+ * ROUTES.users.* — the Users page (user list, profile, devices, days, one day, combined timeline).
+ * profile / timeline / devices / daily / day are admin-only (requireAdmin in the route table) and
+ * pass the viewer on, so the service can record the access.
  */
 import {
   userActivityQuerySchema,
   userDailyQuerySchema,
+  userDayQuerySchema,
   userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
@@ -79,6 +80,15 @@ export class UserController {
     const viewer = requireViewer(res);
     const { userKey } = validParams(res, userKeyParamsSchema);
     const body = await this.users.daily(userKey, validQuery(res, userDailyQuerySchema), viewer);
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/user.service.ts UserService.day */
+  day: RequestHandler = async (_req, res) => {
+    const viewer = requireViewer(res);
+    const { userKey } = validParams(res, userKeyParamsSchema);
+    const body = await this.users.day(userKey, validQuery(res, userDayQuerySchema), viewer);
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

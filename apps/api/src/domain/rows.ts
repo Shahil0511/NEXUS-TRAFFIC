@@ -440,6 +440,67 @@ export interface UserDayAppActivityRow {
 }
 
 /**
+ * One activity block of one person-day, plus the day totals over ALL blocks (window functions,
+ * computed before the LIMIT, so they cover the whole day even when the blocks are cut).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayBlocks
+ */
+export interface UserActivityBlockRow {
+  start_at: Date;
+  end_at: Date;
+  /** Σ credited page_time deltas of the block (tab visible time). */
+  active_ms: number;
+  /** Length of the union of the block's page-visible intervals. */
+  time_in_app_ms: number;
+  /** App slugs, sorted. */
+  apps: string[];
+  page_views: number;
+  tool_uses: number;
+  requests: number;
+  /** Σ time_in_app_ms of every block of the day. */
+  day_time_in_app_ms: number;
+  /** Σ requests of every block of the day. */
+  requests_in_blocks: number;
+  /** How many blocks the day has (more than the rows returned = truncated). */
+  block_count: number;
+}
+
+/**
+ * One page (app, path template) of one person-day; `total` = the pages of the day before the LIMIT.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayPages
+ */
+export interface UserDayPageRow {
+  app_slug: string;
+  path_template: string;
+  first_view_at: Date | null;
+  views: number;
+  active_ms: number;
+  total: number;
+}
+
+/**
+ * One tool of one person-day; `total` = the tools of the day before the LIMIT.
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayTools
+ */
+export interface UserDayToolRow {
+  app_slug: string;
+  tool: string;
+  first_use_at: Date;
+  uses: number;
+  total: number;
+}
+
+/** Everything the one-day view reads (UserService.day), before mapping. */
+export interface UserDayRows {
+  /** The day's (day, app) rows (listUserDailyActivity over the one-day window). */
+  days: UserDayAppActivityRow[];
+  blocks: UserActivityBlockRow[];
+  pages: UserDayPageRow[];
+  tools: UserDayToolRow[];
+  /** The person's visits of the day (listSessions narrowed to the user_key). */
+  visits: SessionSummaryRow[];
+}
+
+/**
  * One API call or browser event of a user, merged by time (`page_time` folded into `visible_ms`).
  * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserTimeline
  */

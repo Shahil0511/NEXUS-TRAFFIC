@@ -43,7 +43,8 @@
      `JourneyService.session` for a verified person's visit,
      `ErrorService.summary` / `.list`). No row for a refused or failed read (403, 404 profile, unknown app,
      range too large). A failed INSERT never fails the read: it logs a warning with the surface and the
-     pg error code only.
+     pg error code only. Since ADR 0017 (point 8) a caller may pass a wider `emailLookup` window, so an
+     EMPTY answer (the one-day view of a day without activity) is still recorded.
   4. **Coalescing: rows mean looks, not requests.** The same viewer + person + surface is recorded at
      most once per `PERSON_ACCESS_COALESCE_MS` (10 min), decided in memory per api process
      (`apps/api/src/services/person-access.coalescer.ts`), so repeats cost no database call. The error is

@@ -38,7 +38,10 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserActivityBlockRow,
   UserDayAppActivityRow,
+  UserDayPageRow,
+  UserDayToolRow,
   UserDeviceRow,
   UserEndpointRow,
   UserLatestContextRow,
@@ -191,6 +194,9 @@ type WebQueryMethods =
   | 'listUserDevices'
   | 'getUserLatestContext'
   | 'listUserDailyActivity'
+  | 'listUserDayBlocks'
+  | 'listUserDayPages'
+  | 'listUserDayTools'
   | 'listSessions'
   | 'getSession'
   | 'findSessionUserKey'
@@ -222,6 +228,13 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   latestContext: UserLatestContextRow | null = null;
   /** Per-app day rows (newest day first, then first activity), as the SQL answers them. */
   userDays: UserDayAppActivityRow[] = [];
+  /** The one-day view's reads (ROUTES.users.day). */
+  dayBlocks: UserActivityBlockRow[] = [];
+  dayPages: UserDayPageRow[] = [];
+  dayTools: UserDayToolRow[] = [];
+  /** Calls still running right now, and the most that ran at once (concurrency checks). */
+  private running = 0;
+  maxConcurrent = 0;
   sessions: SessionSummaryRow[] = [];
   session: SessionRows | null = null;
   /** The session's verified user_key over the WIDENED window (findSessionUserKey). */
@@ -350,7 +363,34 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
     filter: TrafficFilter,
   ): Promise<UserDayAppActivityRow[]> {
     this.calls.push({ method: 'listUserDailyActivity', args: [userKey, filter] });
-    return this.userDays;
+    return this.counted(this.userDays);
+  }
+
+  async listUserDayBlocks(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<UserActivityBlockRow[]> {
+    this.calls.push({ method: 'listUserDayBlocks', args: [userKey, filter, limit] });
+    return this.counted(this.dayBlocks);
+  }
+
+  async listUserDayPages(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<UserDayPageRow[]> {
+    this.calls.push({ method: 'listUserDayPages', args: [userKey, filter, limit] });
+    return this.counted(this.dayPages);
+  }
+
+  async listUserDayTools(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+  ): Promise<UserDayToolRow[]> {
+    this.calls.push({ method: 'listUserDayTools', args: [userKey, filter, limit] });
+    return this.counted(this.dayTools);
   }
 
   async listSessions(
@@ -358,7 +398,7 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
     options: SessionListOptions,
   ): Promise<SessionSummaryRow[]> {
     this.calls.push({ method: 'listSessions', args: [filter, options] });
-    return this.sessions;
+    return this.counted(this.sessions);
   }
 
   async getSession(
@@ -406,6 +446,15 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
 
   argsOf(method: WebQueryMethods): unknown[][] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args);
+  }
+
+  /** Answers `rows` one macrotask later, tracking how many calls are in flight at once. */
+  private async counted<T>(rows: T): Promise<T> {
+    this.running += 1;
+    this.maxConcurrent = Math.max(this.maxConcurrent, this.running);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    this.running -= 1;
+    return rows;
   }
 }
 

@@ -33,6 +33,7 @@
 import {
   IDENTITY_SOURCE_VALUES,
   USER_DAILY_APP_ROWS_LIMIT,
+  USER_DAY_BLOCK_GAP_MS,
   type BreakdownDimension,
   type BrowserEventType,
   type Grain,
@@ -83,8 +84,11 @@ import type {
   ToolUsageRow,
   ToolUsageRows,
   TopPathRow,
+  UserActivityBlockRow,
   UserAppRow,
   UserDayAppActivityRow,
+  UserDayPageRow,
+  UserDayToolRow,
   UserDeviceRow,
   UserLatestContextRow,
   UserPageCountRow,
@@ -1012,6 +1016,181 @@ export class WebEventQueryRepository {
         GROUP BY 1, 2
         ORDER BY 1 DESC, 3 ASC, 2 ASC
         LIMIT ${params.add(USER_DAILY_APP_ROWS_LIMIT + 1)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  // ─── One person-day (ROUTES.users.day) ────────────────────────────────────
+
+  /**
+   * The activity blocks of one person over `filter` (one IST day), in start order, at most `limit`.
+   * ONE statement:
+   * - Every browser event of the person is an interval: a `page_time` row covers its credited
+   *   delta before `occurred_at` (creditedVisibleMs; a missing value covers nothing), CLAMPED to
+   *   `filter.from` so a tick at 00:00:03 IST does not reach into the day before; every other event
+   *   is a point.
+   * - Sorted by (start, end, event_id), a running max of the previous ends (fixed frame head, so
+   *   O(n)) starts a new block when an interval begins USER_DAY_BLOCK_GAP_MS or more after
+   *   everything before it ended; the same running max over page_time rows alone starts a new
+   *   island when a page interval overlaps no earlier one (islands never cross blocks).
+   * - Time in app = Σ island lengths (the union: tabs open at once count once); tab visible time
+   *   (`active_ms`) = Σ credited deltas (each tab counts).
+   * - The API calls of each block come from a LATERAL count over [start, end], bounded by the same
+   *   window, app, environment and user_key (one index range scan per block). Blocks are disjoint,
+   *   so no call is counted twice.
+   * - The day totals (`day_time_in_app_ms`, `requests_in_blocks`, `block_count`) are window
+   *   functions, evaluated BEFORE the LIMIT, so they cover every block of the day.
+   * Selects no label, props, value, name, ip or email.
+   * @see ../db/sql.ts creditedVisibleMs
+   * @see ../../migrations/0005_web_events.sql
+   * @see ../../migrations/0004_api_requests.sql
+   */
+  async listUserDayBlocks(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<UserActivityBlockRow[]> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const dayStart = params.add(filter.from);
+    const credited = creditedVisibleMs('w');
+    const { rows } = await exec.query<UserActivityBlockRow>(
+      `WITH iv AS (
+         SELECT w.app_id, w.event_type, w.event_id,
+                CASE WHEN w.event_type = '${PAGE_TIME}'
+                     THEN greatest(w.occurred_at - coalesce(${credited}, 0) * interval '1 millisecond', ${dayStart}::timestamptz)
+                     ELSE w.occurred_at END AS s,
+                w.occurred_at AS e,
+                CASE WHEN w.event_type = '${PAGE_TIME}' THEN ${credited} END AS credited_ms
+           FROM traffic.web_events w
+          WHERE ${web}
+       ),
+       o AS (
+         SELECT iv.*,
+                max(iv.e) OVER before_row AS prev_end,
+                max(iv.e) FILTER (WHERE iv.event_type = '${PAGE_TIME}') OVER before_row AS prev_page_end
+           FROM iv
+         WINDOW before_row AS (ORDER BY iv.s, iv.e, iv.event_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+       ),
+       g AS (
+         SELECT o.*,
+                sum(CASE WHEN o.prev_end IS NULL
+                           OR o.s >= o.prev_end + interval '${USER_DAY_BLOCK_GAP_MS} milliseconds'
+                         THEN 1 ELSE 0 END) OVER up_to_row AS block_no,
+                sum(CASE WHEN o.event_type = '${PAGE_TIME}'
+                          AND (o.prev_page_end IS NULL OR o.s > o.prev_page_end)
+                         THEN 1 ELSE 0 END) OVER up_to_row AS island_no
+           FROM o
+         WINDOW up_to_row AS (ORDER BY o.s, o.e, o.event_id ROWS UNBOUNDED PRECEDING)
+       ),
+       islands AS (
+         SELECT g.block_no, g.island_no, min(g.s) AS island_start, max(g.e) AS island_end
+           FROM g
+          WHERE g.event_type = '${PAGE_TIME}'
+          GROUP BY g.block_no, g.island_no
+       ),
+       covered AS (
+         SELECT i.block_no,
+                (sum(extract(epoch FROM i.island_end - i.island_start)) * 1000)::int8 AS time_in_app_ms
+           FROM islands i
+          GROUP BY i.block_no
+       ),
+       b AS (
+         SELECT g.block_no, min(g.s) AS start_at, max(g.e) AS end_at,
+                coalesce(sum(g.credited_ms), 0)::int8 AS active_ms,
+                array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps,
+                count(*) FILTER (WHERE g.event_type = '${PAGE_VIEW}') AS page_views,
+                count(*) FILTER (WHERE g.event_type = '${TOOL_USE}') AS tool_uses
+           FROM g
+           JOIN traffic.apps a ON a.id = g.app_id
+          GROUP BY g.block_no
+       )
+       SELECT b.start_at, b.end_at, b.active_ms,
+              coalesce(c.time_in_app_ms, 0)::int8 AS time_in_app_ms,
+              b.apps, b.page_views, b.tool_uses, q.requests,
+              (sum(coalesce(c.time_in_app_ms, 0)) OVER ())::int8 AS day_time_in_app_ms,
+              (sum(q.requests) OVER ())::int8 AS requests_in_blocks,
+              count(*) OVER () AS block_count
+         FROM b
+         LEFT JOIN covered c ON c.block_no = b.block_no
+        CROSS JOIN LATERAL (
+          SELECT count(*) AS requests
+            FROM traffic.api_requests r
+           WHERE ${api} AND r.occurred_at >= b.start_at AND r.occurred_at <= b.end_at
+        ) q
+        ORDER BY b.start_at ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * The pages (app, path template) one person saw over `filter` (one IST day), in the order they
+   * were first seen (then slug, template), at most `limit`; `total` = every page of the day (a
+   * window over the groups, before the LIMIT). Views = page_view rows; tab visible time = Σ
+   * credited page_time deltas of the page that day (path_template is set on page_time rows too).
+   * @see ../db/sql.ts creditedVisibleMs
+   */
+  async listUserDayPages(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<UserDayPageRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      `w.user_key = ${params.add(userKey)}`,
+      `w.event_type IN ('${PAGE_VIEW}', '${PAGE_TIME}')`,
+    ];
+    const { rows } = await exec.query<UserDayPageRow>(
+      `SELECT a.slug AS app_slug, w.path_template,
+              min(w.occurred_at) FILTER (WHERE ${IS_PAGE_VIEW}) AS first_view_at,
+              count(*) FILTER (WHERE ${IS_PAGE_VIEW}) AS views,
+              coalesce(sum(${creditedVisibleMs('w')}) FILTER (WHERE w.event_type = '${PAGE_TIME}'), 0)::int8 AS active_ms,
+              count(*) OVER () AS total
+         FROM traffic.web_events w
+         JOIN traffic.apps a ON a.id = w.app_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY a.slug, w.path_template
+        ORDER BY min(w.occurred_at) ASC, a.slug ASC, w.path_template ASC
+        LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  /**
+   * The features (tools) one person used over `filter` (one IST day), in the order they were first
+   * used (then slug, tool), at most `limit`; `total` = every tool of the day (before the LIMIT).
+   * NOT countUserTools: that one is the profile's, ordered by uses.
+   */
+  async listUserDayTools(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    limit: number,
+    exec: Executor = this.db,
+  ): Promise<UserDayToolRow[]> {
+    const params = new ParamList();
+    const where = [
+      ...windowConditions('w', filter, params),
+      `w.user_key = ${params.add(userKey)}`,
+      IS_TOOL_USE,
+    ];
+    const { rows } = await exec.query<UserDayToolRow>(
+      `SELECT a.slug AS app_slug, w.tool, min(w.occurred_at) AS first_use_at, count(*) AS uses,
+              count(*) OVER () AS total
+         FROM traffic.web_events w
+         JOIN traffic.apps a ON a.id = w.app_id
+        WHERE ${where.join(' AND ')}
+        GROUP BY a.slug, w.tool
+        ORDER BY first_use_at ASC, a.slug ASC, w.tool ASC
+        LIMIT ${params.add(limit)}`,
       params.values,
     );
     return rows;

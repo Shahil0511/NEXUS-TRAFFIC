@@ -160,8 +160,25 @@ Per app: tab visible time = Σ credited `visible_ms` of its `page_time` rows (0 
 shown as "no browser time"); visits = distinct `session_id` of its browser rows (a visit is (app, session), so the
 day's visits are the Σ). *Credited* visible time: each `page_time` row counts at most `VISIBLE_DELTA_CREDIT_CAP_MS`
 (a longer delta means the tracker's tick did not run, e.g. a sleeping laptop); the CASE keeps NULL as NULL, so API
-rows of the UNION add nothing. Activity blocks and time in app (the union of visible intervals) come with later
-steps of ADR 0017.
+rows of the UNION add nothing.
+
+**One person-day (read side, `users.day`, ADR 0017).** Over ONE IST day (`reportingDayWindow`) of one `user_key`,
+app and environment applied:
+- *Interval* of a browser event: a `page_time` row covers its credited delta BEFORE `occurred_at`, clamped to the
+  day's 00:00 IST (a tick at 00:00:03 covers 3 s of this day); every other event is a point.
+- *Activity block*: intervals sorted by (start, end, event_id) are joined while each starts less than
+  `USER_DAY_BLOCK_GAP_MS` (5 min) after everything before it ended (a running max of the earlier ends). A block's
+  length is end − start; lengths are never summed. `listUserDayBlocks` returns at most `USER_DAY_BLOCKS_LIMIT`
+  blocks in start order, with the day totals (time in app, calls inside blocks, block count = DTO `blockCount`)
+  as window functions computed before the LIMIT.
+- *Time in app* = the length of the union of the `page_time` intervals (islands of overlapping intervals; two tabs
+  at once count once), per block and for the day. *Tab visible time* stays the Σ of credited deltas, so it can be
+  higher.
+- API calls of a block = the person's `api_requests` between its start and end (a LATERAL count, same window, app,
+  environment and key); calls outside blocks = the day's calls − those.
+- Pages (`listUserDayPages`, at most `USER_DAY_PAGES_LIMIT`) and features (`listUserDayTools`,
+  `USER_DAY_TOOLS_LIMIT`) are in first-use order with a total over all of them; visits are `listSessions` narrowed
+  to the key (newest first, `USER_DAY_VISITS_LIMIT`), mapped without IP or email.
 
 ## `ingest_counters` — ingest health
 

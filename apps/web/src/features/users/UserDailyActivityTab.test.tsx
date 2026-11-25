@@ -1,15 +1,27 @@
 import {
+  addReportingDays,
   ROUTES,
+  USER_DAY_LOOKBACK_DAYS,
+  type MeDto,
   type TimeWindowQuery,
   type UserDailyActivityDto,
   type UserDayActivityDto,
+  type UserDayDetailDto,
 } from '@nexus/shared';
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import type { UrlUpdateEvent } from 'nuqs/adapters/testing';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { USER_DAILY, USER_KEY, userDayApp, userDayFrom } from '@/test/fixtures';
+import {
+  EMPTY_USER_DAY,
+  USER_DAILY,
+  USER_DAY_DETAIL,
+  USER_KEY,
+  userDayApp,
+  userDayFrom,
+} from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -118,6 +130,21 @@ describe('UserDailyActivityTab — all days', () => {
     expect(second).toHaveTextContent('1 feature use');
     expect(second).toHaveTextContent('1 API call');
     expect(second).not.toHaveTextContent('failed');
+  });
+
+  it('links each date to the one-day view of that day, keeping the filters', async () => {
+    await renderTab();
+    const table = await screen.findByRole('table', { name: 'Daily activity' });
+    const link = await within(table).findByRole('link', { name: /^Thu, 1 Oct,? 2026$/ });
+    const [path, search] = (link.getAttribute('href') ?? '').split('?');
+    expect(path).toBe(`/users/${USER_KEY}`);
+    expect(Object.fromEntries(new URLSearchParams(search))).toEqual({
+      app: 'ebo-sales',
+      range: '7d',
+      env: 'staging',
+      tab: 'daily',
+      day: '2026-10-01',
+    });
   });
 
   it("links each day's visits to the Visits page for this person and that one day", async () => {
@@ -294,5 +321,327 @@ describe('UserDailyActivityTab — the table fits its container', () => {
     expect(table).toHaveClass('table-fixed', 'w-full');
     expect(table).not.toHaveClass('min-w-[54rem]');
     expect(within(table).getByRole('button', { name: /Show the last/ })).toBeInTheDocument();
+  });
+});
+
+// ─── One-day view (?tab=daily&day=YYYY-MM-DD) ───────────────────────────────
+
+/** 15:30 IST on 1 Oct 2026: the fixture day is today. */
+const NOW = new Date('2026-10-01T10:00:00.000Z');
+const DAY = '2026-10-01';
+
+function serveDay(body: UserDayDetailDto = USER_DAY_DETAIL): URLSearchParams[] {
+  const queries: URLSearchParams[] = [];
+  server.use(
+    http.get(routeUrl(ROUTES.users.day), ({ request }) => {
+      queries.push(new URL(request.url).searchParams);
+      return HttpResponse.json(body);
+    }),
+  );
+  return queries;
+}
+
+async function renderDay(
+  day: string = DAY,
+  body: UserDayDetailDto = USER_DAY_DETAIL,
+  onUrlUpdate?: (event: UrlUpdateEvent) => void,
+) {
+  const queries = serveDay({ ...body, day });
+  renderWithProviders(<UserDailyActivityTab userKey={USER_KEY} filters={FILTERS} />, {
+    searchParams: `?tab=daily&day=${day}`,
+    onUrlUpdate,
+  });
+  return { queries };
+}
+
+describe('UserDailyActivityTab — one day', () => {
+  beforeEach(() => {
+    // Only Date is faked: React Query and MSW keep their real timers.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('reads that one day with the app and env, never the global range', async () => {
+    const { queries } = await renderDay();
+    await screen.findByRole('region', { name: 'This day' });
+    expect(queries).toHaveLength(1);
+    expect(Object.fromEntries(queries[0] ?? [])).toEqual({
+      day: DAY,
+      app: 'ebo-sales',
+      env: 'staging',
+    });
+    expect(screen.queryByRole('table', { name: 'Daily activity' })).toBeNull();
+  });
+
+  it('titles the day in India time and shows the five KPIs', async () => {
+    await renderDay();
+    expect(
+      await screen.findByRole('heading', { name: /^Thu, 1 Oct,? 2026 \(India time\)$/ }),
+    ).toBeInTheDocument();
+    const kpis = await screen.findByRole('region', { name: 'This day' });
+    const card = (label: string) =>
+      within(kpis).getByText(label).closest('[data-slot="card"]') as HTMLElement;
+    expect(card('First activity')).toHaveTextContent('07:30 IST');
+    expect(card('Last activity')).toHaveTextContent('18:40 IST');
+    expect(card('Time in app')).toHaveTextContent('3 h');
+    expect(card('Time in app')).toHaveTextContent('Tab visible time 3 h 22 min');
+    expect(card('Apps')).toHaveTextContent('2');
+    expect(card('Visits')).toHaveTextContent('5');
+    expect(
+      screen.getByText('This view shows one whole day; the range picker above does not change it.'),
+    ).toBeInTheDocument();
+  });
+
+  it('lists the activity blocks as text under the decorative timeline', async () => {
+    await renderDay();
+    const table = await screen.findByRole('table', { name: 'Activity blocks' });
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(3);
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual([
+      'Start',
+      'End',
+      'Length',
+      'Time in app',
+      'Tab visible time',
+      'Apps',
+      'Page views',
+      'Feature uses',
+      'API calls',
+    ]);
+    expect(rows[1]).toHaveTextContent(/07:30.*08:00.*30 min/);
+    expect(rows[2]).toHaveTextContent(/09:10.*18:40.*9 h 30 min.*2 h 50 min.*3 h 12 min/);
+    const timeline = document.querySelector('[data-slot="day-timeline"]');
+    expect(timeline).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getAllByTestId('day-timeline-segment')).toHaveLength(2);
+    // From METRIC_COPY, with its explanation one tap away.
+    expect(screen.getByText('API calls outside these blocks:')).toHaveTextContent(
+      'API calls outside these blocks: 50',
+    );
+    expect(
+      screen.getByRole('button', { name: 'What is API calls outside these blocks?' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Showing the first/)).toBeNull();
+    // It is a fixed-layout table that fits its container.
+    expect(table).toHaveClass('table-fixed', 'w-full');
+  });
+
+  it('shows the truncation line when the day has more blocks than listed; the end marker counts them all', async () => {
+    await renderDay(DAY, { ...USER_DAY_DETAIL, blockCount: 120, blocksTruncated: true });
+    expect(await screen.findByText('Showing the first 2 blocks of the day.')).toBeInTheDocument();
+    expect(screen.getByText('End of day · 120 blocks · 5 visits')).toBeInTheDocument();
+  });
+
+  it('names India time in every clock column of the apps, pages and features tables', async () => {
+    await renderDay();
+    const headers = (name: string) =>
+      within(screen.getByRole('table', { name }))
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent);
+    await screen.findByRole('table', { name: 'Apps on this day' });
+    expect(headers('Apps on this day')).toContain('First – last activity (IST)');
+    expect(headers('Pages')).toContain('First view (IST)');
+    expect(headers('Feature uses')).toContain('First use (IST)');
+  });
+
+  it('lets the pages / features pair shrink below xl so their tables scroll inside the panel', async () => {
+    await renderDay();
+    await screen.findByRole('table', { name: 'Pages' });
+    // grid-cols-1 is minmax(0, 1fr): without it the implicit auto track takes the tables' min width.
+    expect(document.querySelector('[data-slot="day-pages-features"]')).toHaveClass(
+      'grid',
+      'grid-cols-1',
+      'xl:grid-cols-2',
+    );
+  });
+
+  it('lists apps, pages and features in first-use order, with "+N more"', async () => {
+    await renderDay();
+    const apps = await screen.findByRole('table', { name: 'Apps on this day' });
+    const appRows = within(apps).getAllByRole('row').slice(1);
+    expect(appRows.map((row) => within(row).getAllByRole('link')[0]?.textContent)).toEqual([
+      'hr-portal',
+      'ebo-sales',
+    ]);
+    expect(appRows[1]).toHaveTextContent('900 · 3 failed');
+    const pages = screen.getByRole('table', { name: 'Pages' });
+    expect(
+      within(pages)
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => within(row).getAllByRole('link')[1]?.textContent),
+    ).toEqual(['/leaves', '/stores/:id']);
+    expect(screen.getByText('+30 more pages on this day')).toBeInTheDocument();
+    const tools = screen.getByRole('table', { name: 'Feature uses' });
+    expect(within(tools).getByRole('link', { name: 'export-csv' })).toBeInTheDocument();
+    expect(screen.queryByText(/more features on this day/)).toBeNull();
+  });
+
+  it('opens each visit\'s steps over this day (custom range) and continues "+N more" on Visits', async () => {
+    await renderDay();
+    const table = await screen.findByRole('table', { name: 'Visits on this day' });
+    const steps = within(table).getAllByRole('link', { name: /^Visit steps/ });
+    expect(steps).toHaveLength(2);
+    const [path, search] = (steps[0]?.getAttribute('href') ?? '').split('?');
+    expect(path).toBe(`/journeys/ebo-sales/${USER_DAY_DETAIL.visits[0]?.sessionId}`);
+    expect(Object.fromEntries(new URLSearchParams(search))).toEqual({
+      range: 'custom',
+      from: USER_DAY_DETAIL.window.from,
+      to: USER_DAY_DETAIL.window.to,
+      app: 'ebo-sales',
+      env: 'staging',
+    });
+    const more = screen.getByRole('link', { name: '+3 more visits on this day' });
+    const query = new URLSearchParams(more.getAttribute('href')?.split('?')[1]);
+    expect(Object.fromEntries(query)).toMatchObject({
+      userKey: USER_KEY,
+      range: 'custom',
+      from: USER_DAY_DETAIL.window.from,
+      to: USER_DAY_DETAIL.window.to,
+    });
+    expect(screen.getByText('End of day · 2 blocks · 5 visits')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
+  });
+
+  it('disables Next day and Today on today; Previous day moves one day back in the URL', async () => {
+    const user = userEvent.setup();
+    const updates: string[] = [];
+    await renderDay(DAY, USER_DAY_DETAIL, (event) => updates.push(event.queryString));
+    await screen.findByRole('region', { name: 'This day' });
+    expect(screen.getByRole('button', { name: 'Next day' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Today' })).toBeDisabled();
+    const previous = screen.getByRole('button', { name: 'Previous day' });
+    expect(previous).toBeEnabled();
+    await user.click(previous);
+    await waitFor(() => expect(updates.at(-1)).toContain('day=2026-09-30'));
+    expect(updates.at(-1)).toContain('tab=daily');
+  });
+
+  it('disables Previous day at the lookback limit', async () => {
+    const oldest = addReportingDays(DAY, -USER_DAY_LOOKBACK_DAYS);
+    await renderDay(oldest);
+    await screen.findByRole('region', { name: 'This day' });
+    expect(screen.getByRole('button', { name: 'Previous day' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next day' })).toBeEnabled();
+    expect(screen.getByLabelText('Day to show')).toHaveAttribute('min', oldest);
+    expect(screen.getByLabelText('Day to show')).toHaveAttribute('max', DAY);
+  });
+
+  it('opens a typed day only on Enter or "Show day", never an in-between or out-of-range value', async () => {
+    const updates: string[] = [];
+    await renderDay(DAY, USER_DAY_DETAIL, (event) => updates.push(event.queryString));
+    await screen.findByRole('region', { name: 'This day' });
+    const input = screen.getByLabelText('Day to show');
+    const show = screen.getByRole('button', { name: 'Show day' });
+    expect(show).toBeDisabled();
+    // Typing a month digit by digit gives an out-of-range day first: kept as typed, nothing opens.
+    fireEvent.change(input, { target: { value: '2026-01-15' } });
+    expect(input).toHaveValue('2026-01-15');
+    expect(show).toBeDisabled();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    // An in-range step does not open on its own either.
+    fireEvent.change(input, { target: { value: '2026-09-20' } });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(updates).toEqual([]);
+    expect(show).toBeEnabled();
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(updates.at(-1)).toContain('day=2026-09-20'));
+    expect(updates.at(-1)).toContain('tab=daily');
+  });
+
+  it('"Show day" opens the picked day', async () => {
+    const user = userEvent.setup();
+    const updates: string[] = [];
+    await renderDay(DAY, USER_DAY_DETAIL, (event) => updates.push(event.queryString));
+    await screen.findByRole('region', { name: 'This day' });
+    fireEvent.change(screen.getByLabelText('Day to show'), { target: { value: '2026-09-15' } });
+    await user.click(screen.getByRole('button', { name: 'Show day' }));
+    await waitFor(() => expect(updates.at(-1)).toContain('day=2026-09-15'));
+  });
+
+  it('a future day in the URL sends no read, says which days open, and "Show today" goes to today', async () => {
+    const user = userEvent.setup();
+    const updates: string[] = [];
+    const { queries } = await renderDay('2026-10-05', USER_DAY_DETAIL, (event) =>
+      updates.push(event.queryString),
+    );
+    expect(await screen.findByText('This day cannot be shown')).toBeInTheDocument();
+    const oldest = addReportingDays(DAY, -USER_DAY_LOOKBACK_DAYS);
+    expect(screen.getByText(/^Pick a day from .+ to today\.$/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Day to show')).toHaveAttribute('min', oldest);
+    expect(screen.getByRole('button', { name: 'Next day' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous day' })).toBeEnabled();
+    expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
+    expect(queries).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Show today' }));
+    await waitFor(() => expect(updates.at(-1)).toContain(`day=${DAY}`));
+  });
+
+  it('a day older than the lookback sends no read; Next day goes to the oldest day', async () => {
+    const user = userEvent.setup();
+    const updates: string[] = [];
+    const tooOld = addReportingDays(DAY, -USER_DAY_LOOKBACK_DAYS - 10);
+    const { queries } = await renderDay(tooOld, USER_DAY_DETAIL, (event) =>
+      updates.push(event.queryString),
+    );
+    expect(await screen.findByText('This day cannot be shown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous day' })).toBeDisabled();
+    expect(queries).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Next day' }));
+    const oldest = addReportingDays(DAY, -USER_DAY_LOOKBACK_DAYS);
+    await waitFor(() => expect(updates.at(-1)).toContain(`day=${oldest}`));
+  });
+
+  it('"All days" goes back to the list of days (day removed from the URL)', async () => {
+    const user = userEvent.setup();
+    const updates: string[] = [];
+    await renderDay(DAY, USER_DAY_DETAIL, (event) => updates.push(event.queryString));
+    serveDaily(days());
+    await screen.findByRole('region', { name: 'This day' });
+    await user.click(screen.getByRole('button', { name: 'All days' }));
+    await waitFor(() => expect(updates.at(-1)).not.toContain('day='));
+    expect(updates.at(-1)).toContain('tab=daily');
+    expect(await screen.findByRole('table', { name: 'Daily activity' })).toBeInTheDocument();
+  });
+
+  it('an empty day says so and keeps Previous working; the caveats stay', async () => {
+    await renderDay('2026-09-28', EMPTY_USER_DAY);
+    expect(await screen.findByText('No activity on this day')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous day' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next day' })).toBeEnabled();
+    expect(screen.queryByRole('region', { name: 'This day' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
+  });
+
+  it('an invalid day in the URL falls back to all days', async () => {
+    serveDaily(days());
+    const { queries } = { queries: serveDay() };
+    renderWithProviders(<UserDailyActivityTab userKey={USER_KEY} filters={FILTERS} />, {
+      searchParams: '?tab=daily&day=2026-02-30',
+    });
+    expect(await screen.findByRole('table', { name: 'Daily activity' })).toBeInTheDocument();
+    expect(queries).toEqual([]);
+  });
+
+  it('sends no read for a viewer who is not an admin', async () => {
+    const notAdmin: MeDto = { email: 'viewer@libas.in', isAdmin: false };
+    let meCalls = 0;
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () => {
+        meCalls += 1;
+        return HttpResponse.json(notAdmin);
+      }),
+    );
+    const { queries } = await renderDay();
+    await waitFor(() => expect(meCalls).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(queries).toEqual([]);
   });
 });

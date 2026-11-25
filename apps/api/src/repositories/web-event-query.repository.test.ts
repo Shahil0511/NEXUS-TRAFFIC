@@ -6,6 +6,7 @@
 import {
   BREAKDOWN_DIMENSION_VALUES,
   USER_DAILY_APP_ROWS_LIMIT,
+  USER_DAY_BLOCK_GAP_MS,
   VISIBLE_DELTA_CREDIT_CAP_MS,
 } from '@nexus/shared';
 import type { Pool } from 'pg';
@@ -72,7 +73,10 @@ describe('WebEventQueryRepository SQL (S3)', () => {
     await repo.listUserDevices(USER_KEY, FILTER, 5);
     await repo.getUserLatestContext(USER_KEY, FILTER);
     await repo.listUserDailyActivity(USER_KEY, FILTER);
-    expect(exec.statements).toHaveLength(12);
+    await repo.listUserDayBlocks(USER_KEY, FILTER, 96);
+    await repo.listUserDayPages(USER_KEY, FILTER, 30);
+    await repo.listUserDayTools(USER_KEY, FILTER, 30);
+    expect(exec.statements).toHaveLength(15);
     for (const { text } of exec.statements) expectEveryTableBounded(text);
   });
 
@@ -189,6 +193,123 @@ describe('WebEventQueryRepository person reads (devices, daily)', () => {
   });
 });
 
+describe('WebEventQueryRepository one person-day (blocks, pages, tools)', () => {
+  /** The bound value of the LAST `LIMIT $n` of a statement. */
+  function limitOf(statement: { text: string; values: unknown[] } | undefined): unknown {
+    const match = /LIMIT \$(\d+)\s*$/.exec(statement?.text ?? '');
+    return match ? statement?.values[Number(match[1]) - 1] : undefined;
+  }
+  /** Columns that carry free text or identity; the one-day reads touch none of them. */
+  const NEVER_READ = /\b(?:label|props|value|ip|user_email|claimed_email|name)\b|host\(/;
+
+  it('blocks: page_time covers its credited delta, clamped to the day start; other events are points', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayBlocks(USER_KEY, FILTER, 96);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    expect(text).toContain(
+      `greatest(w.occurred_at - coalesce(${CAPPED('w')}, 0) * interval '1 millisecond', $`,
+    );
+    const clamp = /interval '1 millisecond', \$(\d+)::timestamptz\)/.exec(text);
+    expect(statement?.values[Number(clamp?.[1]) - 1]).toBe(FILTER.from);
+    expect(text).toContain(
+      `CASE WHEN w.event_type = 'page_time' THEN ${CAPPED('w')} END AS credited_ms`,
+    );
+    expect(text).toContain('ELSE w.occurred_at END AS s');
+  });
+
+  it('blocks: a running max of the earlier ends splits at the join gap; islands give time in app', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayBlocks(USER_KEY, FILTER, 96);
+    const text = exec.statements[0]?.text ?? '';
+    expect(text).toContain(
+      'WINDOW before_row AS (ORDER BY iv.s, iv.e, iv.event_id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)',
+    );
+    expect(text).toContain(`o.s >= o.prev_end + interval '${USER_DAY_BLOCK_GAP_MS} milliseconds'`);
+    expect(text).toContain(
+      "max(iv.e) FILTER (WHERE iv.event_type = 'page_time') OVER before_row AS prev_page_end",
+    );
+    expect(text).toContain('(o.prev_page_end IS NULL OR o.s > o.prev_page_end)');
+    expect(text).toContain('extract(epoch FROM i.island_end - i.island_start)');
+    expect(text).toContain('array_agg(DISTINCT a.slug ORDER BY a.slug) AS apps');
+  });
+
+  it('blocks: the LATERAL call count is bounded, env-filtered and keyed like the outer read', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayBlocks(USER_KEY, STAGING, 96);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    const lateral = text.slice(text.indexOf('CROSS JOIN LATERAL'));
+    expect(lateral).toMatch(/r\.occurred_at >= \$\d+ AND r\.occurred_at < \$\d+/);
+    expect(lateral).toMatch(/r\.app_id = \$\d+/);
+    expect(lateral).toMatch(/r\.environment = ANY\(\$\d+::text\[\]\)/);
+    expect(lateral).toMatch(/r\.user_key = \$1(?!\d)/);
+    expect(lateral).toContain('r.occurred_at >= b.start_at AND r.occurred_at <= b.end_at');
+    expect(text).toMatch(/w\.user_key = \$1(?!\d)/);
+    expect(statement?.values[0]).toBe(USER_KEY);
+  });
+
+  it('blocks: the day totals are window functions before the LIMIT, in start order', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayBlocks(USER_KEY, FILTER, 96);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    expect(text).toContain(
+      '(sum(coalesce(c.time_in_app_ms, 0)) OVER ())::int8 AS day_time_in_app_ms',
+    );
+    expect(text).toContain('(sum(q.requests) OVER ())::int8 AS requests_in_blocks');
+    expect(text).toContain('count(*) OVER () AS block_count');
+    expect(text.indexOf('OVER ()')).toBeLessThan(text.lastIndexOf('LIMIT'));
+    expect(text).toMatch(/ORDER BY b\.start_at ASC\s+LIMIT \$\d+\s*$/);
+    expect(limitOf(statement)).toBe(96);
+  });
+
+  it('pages: first-view order, credited tab visible time, the total over every page', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayPages(USER_KEY, FILTER, 30);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    expect(text).toMatch(/w\.user_key = \$\d+/);
+    expect(text).toContain("w.event_type IN ('page_view', 'page_time')");
+    expect(text).toContain(
+      `coalesce(sum(${CAPPED('w')}) FILTER (WHERE w.event_type = 'page_time'), 0)::int8 AS active_ms`,
+    );
+    expect(text).toContain('count(*) OVER () AS total');
+    expect(text).toContain('GROUP BY a.slug, w.path_template');
+    expect(text).toContain('ORDER BY min(w.occurred_at) ASC, a.slug ASC, w.path_template ASC');
+    expect(limitOf(statement)).toBe(30);
+  });
+
+  it('tools: first-use order (not by uses), the partial-index predicate, the total', async () => {
+    const { exec, repo } = build();
+    await repo.listUserDayTools(USER_KEY, FILTER, 30);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    expect(text).toMatch(/w\.user_key = \$\d+/);
+    expect(text).toContain("w.tool IS NOT NULL AND w.event_type = 'tool_use'");
+    expect(text).toContain('ORDER BY first_use_at ASC, a.slug ASC, w.tool ASC');
+    expect(text).not.toContain('ORDER BY uses');
+    expect(text).toContain('count(*) OVER () AS total');
+    expect(limitOf(statement)).toBe(30);
+  });
+
+  it.each([
+    [
+      'listUserDayBlocks',
+      (r: WebEventQueryRepository) => r.listUserDayBlocks(USER_KEY, FILTER, 96),
+    ],
+    ['listUserDayPages', (r: WebEventQueryRepository) => r.listUserDayPages(USER_KEY, FILTER, 30)],
+    ['listUserDayTools', (r: WebEventQueryRepository) => r.listUserDayTools(USER_KEY, FILTER, 30)],
+  ] as const)(
+    '%s selects no label, props, value, name, ip or email column',
+    async (_name, read) => {
+      const { exec, repo } = build();
+      await read(repo);
+      expect(exec.statements[0]?.text ?? '').not.toMatch(NEVER_READ);
+    },
+  );
+});
+
 // ─── Environment filter (ADR 0008) ──────────────────────────────────────────
 
 /** Each `FROM traffic.<table> <alias>` must carry `<alias>.environment = ANY($n::text[])`. */
@@ -227,6 +348,9 @@ const READS: Record<string, (repo: WebEventQueryRepository) => Promise<unknown>>
   getUserLatestContext: (r) => r.getUserLatestContext(USER_KEY, STAGING),
   findUserEmail: (r) => r.findUserEmail(USER_KEY, STAGING),
   listUserDailyActivity: (r) => r.listUserDailyActivity(USER_KEY, STAGING),
+  listUserDayBlocks: (r) => r.listUserDayBlocks(USER_KEY, STAGING, 96),
+  listUserDayPages: (r) => r.listUserDayPages(USER_KEY, STAGING, 30),
+  listUserDayTools: (r) => r.listUserDayTools(USER_KEY, STAGING, 30),
   listSessions: (r) => r.listSessions(STAGING, { userKey: USER_KEY, limit: 3, offset: 0 }),
   getSession: (r) => r.getSession('app-id', SESSION_ID, STAGING),
   findSessionUserKey: (r) => r.findSessionUserKey('app-id', SESSION_ID, STAGING),

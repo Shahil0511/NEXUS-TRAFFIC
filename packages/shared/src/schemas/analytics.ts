@@ -14,8 +14,10 @@ import {
 import {
   appSlugSchema,
   pageQueryShape,
+  reportingDaySchema,
   SORT_DIRECTION_VALUES,
   timeWindowQuerySchema,
+  timeWindowShape,
 } from './common';
 
 // ─── overview ───────────────────────────────────────────────────────────────
@@ -157,6 +159,18 @@ export type UserDevicesQuery = z.infer<typeof userDevicesQuerySchema>;
 /** ROUTES.users.daily: the window + app + env, like the profile (days bucketed in IST). */
 export const userDailyQuerySchema = timeWindowQuerySchema;
 export type UserDailyQuery = z.infer<typeof userDailyQuerySchema>;
+
+/**
+ * ROUTES.users.day: ONE IST calendar day + app + env. The global range does not apply (the day is
+ * the window), so there is no `range` / `from` / `to`: built from the plain shape (a refined schema
+ * cannot be picked), and not strict, so a stray `range` from a shared link is stripped, not refused.
+ */
+export const userDayQuerySchema = z.object({
+  app: timeWindowShape.app,
+  env: timeWindowShape.env,
+  day: reportingDaySchema,
+});
+export type UserDayQuery = z.infer<typeof userDayQuerySchema>;
 
 // ─── journeys ───────────────────────────────────────────────────────────────
 export const sessionListQuerySchema = timeWindowQuerySchema.safeExtend({

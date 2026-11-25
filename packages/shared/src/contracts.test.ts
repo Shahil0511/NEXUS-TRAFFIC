@@ -14,6 +14,12 @@ import {
   SSO_COOKIE_OUTCOME_VALUES,
   type SsoCookieOutcome,
   USER_DAILY_APP_ROWS_LIMIT,
+  USER_DAY_BLOCK_GAP_MS,
+  USER_DAY_BLOCKS_LIMIT,
+  USER_DAY_LOOKBACK_DAYS,
+  USER_DAY_PAGES_LIMIT,
+  USER_DAY_TOOLS_LIMIT,
+  USER_DAY_VISITS_LIMIT,
   VISIBLE_DELTA_CREDIT_CAP_MS,
 } from './constants';
 import { toEndpointId, uuidV5 } from './endpoint-id';
@@ -92,6 +98,7 @@ describe('ROUTES', () => {
     expect(ROUTES.users.devices).toEqual({ method: 'GET', path: '/v1/users/:userKey/devices' });
     expect(ROUTES.users.daily).toEqual({ method: 'GET', path: '/v1/users/:userKey/daily' });
     expect(buildPath(ROUTES.users.daily, { userKey: 'ab' })).toBe('/v1/users/ab/daily');
+    expect(ROUTES.users.day).toEqual({ method: 'GET', path: '/v1/users/:userKey/day' });
   });
 
   it('names the person-level leaves (admin-only, access-logged): one surface each', () => {
@@ -102,8 +109,8 @@ describe('ROUTES', () => {
       expect(ROUTES.users[leaf].path).toMatch(/^\/v1\/users\/:userKey(\/[a-z]+)?$/);
     }
     // One per person leaf, + person_visits and person_failures (the lists narrowed to one person by
-    // ?userKey=), + the ADR 0017 surfaces: one day, usual activity hours (their leaves come in
-    // later steps) and the visit steps of a verified person (journeys.session, guarded by data).
+    // ?userKey=), + the ADR 0017 surfaces: one day (users.day), usual activity hours (its leaf comes
+    // in a later step) and the visit steps of a verified person (journeys.session, guarded by data).
     expect(PERSON_ACCESS_SURFACE_VALUES).toEqual([
       'person_profile',
       'person_timeline',
@@ -117,22 +124,30 @@ describe('ROUTES', () => {
     ]);
     // Each person leaf has its own surface (the Record makes a new leaf without one a type error).
     // What is left is exactly: the two narrowed lists, the visit steps of a verified person, and the
-    // surfaces of person leaves still to come (users.day in step 5, users.pattern in step 6; move
-    // each into SURFACE_OF_LEAF when its leaf lands).
+    // surface of the person leaf still to come (users.pattern in step 6; move it into
+    // SURFACE_OF_LEAF when its leaf lands).
     const SURFACE_OF_LEAF: Record<(typeof PERSON_ROUTE_LEAVES)[number], PersonAccessSurface> = {
       'users.profile': 'person_profile',
       'users.timeline': 'person_timeline',
       'users.devices': 'person_devices',
       'users.daily': 'person_daily',
+      'users.day': 'person_day',
     };
-    const SURFACES_OF_LEAVES_TO_COME: PersonAccessSurface[] = ['person_day', 'person_pattern'];
-    const leafSurfaces: PersonAccessSurface[] = PERSON_ROUTE_LEAVES.map((id) => SURFACE_OF_LEAF[id]);
+    const SURFACES_OF_LEAVES_TO_COME: PersonAccessSurface[] = ['person_pattern'];
+    const leafSurfaces: PersonAccessSurface[] = PERSON_ROUTE_LEAVES.map(
+      (id) => SURFACE_OF_LEAF[id],
+    );
     expect(new Set(leafSurfaces).size).toBe(PERSON_ROUTE_LEAVES.length);
     for (const surface of leafSurfaces) expect(PERSON_ACCESS_SURFACE_VALUES).toContain(surface);
     expect(
       PERSON_ACCESS_SURFACE_VALUES.filter((surface) => !leafSurfaces.includes(surface)).sort(),
     ).toEqual(
-      ['person_visits', 'person_failures', 'person_visit_steps', ...SURFACES_OF_LEAVES_TO_COME].sort(),
+      [
+        'person_visits',
+        'person_failures',
+        'person_visit_steps',
+        ...SURFACES_OF_LEAVES_TO_COME,
+      ].sort(),
     );
     for (const id of PERSON_FILTERED_ROUTE_LEAVES) expect(known.has(id), id).toBe(true);
     const narrowable = [
@@ -297,6 +312,18 @@ describe('Phase A contract invariants', () => {
     const widestDays = Math.ceil(MAX_COUNT_RANGE_MS / 86_400_000) + 1;
     expect(Number.isInteger(USER_DAILY_APP_ROWS_LIMIT)).toBe(true);
     expect(USER_DAILY_APP_ROWS_LIMIT).toBeGreaterThanOrEqual(widestDays * 30);
+  });
+
+  it('the one-day view joins breaks under 5 min, caps its lists and looks back about 6 months', () => {
+    expect(USER_DAY_BLOCK_GAP_MS).toBe(5 * 60_000);
+    // A block every 15 min of a whole day still fits.
+    expect(USER_DAY_BLOCKS_LIMIT).toBe(86_400_000 / (15 * 60_000));
+    expect([USER_DAY_PAGES_LIMIT, USER_DAY_TOOLS_LIMIT, USER_DAY_VISITS_LIMIT]).toEqual([
+      30, 30, 50,
+    ]);
+    // Longer than the widest counted range (93 days), so a day the daily list shows always opens.
+    expect(USER_DAY_LOOKBACK_DAYS).toBe(183);
+    expect(USER_DAY_LOOKBACK_DAYS * 86_400_000).toBeGreaterThan(MAX_COUNT_RANGE_MS);
   });
 
   it('a page_time delta is credited at most 12 browser flush ticks (60 s, ADR 0017)', () => {

@@ -171,6 +171,98 @@ export interface UserDayActivityDto {
  */
 export type UserDailyActivityDto = WindowedListDto<UserDayActivityDto>;
 
+/**
+ * One activity block of a day: a stretch of browser events whose breaks are all shorter than
+ * USER_DAY_BLOCK_GAP_MS. A `page_time` row covers the credited time before it (clamped to the
+ * day's start), the other events are points. `spanMs` = end − start; spans are never summed.
+ */
+export interface UserActivityBlockDto {
+  startAt: string;
+  endAt: string;
+  spanMs: number;
+  /** Length of the union of the block's page-visible intervals: tabs open at once count once. */
+  timeInAppMs: number;
+  /** Σ credited page_time deltas of the block (tab visible time): tabs open at once each count. */
+  activeMs: number;
+  /** App slugs, sorted. */
+  apps: string[];
+  pageViews: number;
+  toolUses: number;
+  /** API calls of the person between the block's start and end (any app in scope). */
+  requests: number;
+}
+
+/** One page (app + path template) seen on the day, in first-view order. */
+export interface UserDayPageDto {
+  /** toPageId(app, pathTemplate): the page's detail link, never the template in a URL. */
+  pageId: string;
+  app: string;
+  pathTemplate: string;
+  /** null when the day has only time ticks of a page view opened the day before. */
+  firstViewAt: string | null;
+  views: number;
+  /** Σ credited page_time deltas of the page that day (tab visible time). */
+  activeMs: number;
+}
+
+/** One feature (tool) used on the day, in first-use order. */
+export interface UserDayToolDto {
+  /** toToolId(app, tool): the tool's detail link. */
+  toolId: string;
+  app: string;
+  tool: string;
+  firstUseAt: string;
+  uses: number;
+}
+
+/**
+ * One visit (app, session) of the person on the day, the facts of its events INSIDE the day. No
+ * IP and no email: the person is known from the page.
+ */
+export interface UserDayVisitDto {
+  app: string;
+  sessionId: string;
+  startedAt: string;
+  lastActivityAt: string;
+  entryPath: string | null;
+  exitPath: string | null;
+  pageViews: number;
+  toolUses: number;
+  /** Σ credited page_time deltas of the visit that day (tab visible time). */
+  activeMs: number;
+}
+
+/**
+ * GET ROUTES.users.day — ONE IST calendar day of one person (`?day=YYYY-MM-DD`, at most
+ * USER_DAY_LOOKBACK_DAYS back, never in the future). The window echoed is that day. A day without
+ * activity is a 200 with `summary: null` and empty lists, never a 404.
+ */
+export interface UserDayDetailDto {
+  window: TimeWindowDto;
+  /** The day asked for, `YYYY-MM-DD` (IST). */
+  day: string;
+  /** The day's facts and its per-app split, as one item of ROUTES.users.daily; null = no activity. */
+  summary: UserDayActivityDto | null;
+  /** Σ timeInAppMs of EVERY block of the day (not only the ones returned). */
+  timeInAppMs: number;
+  /** In start order, at most USER_DAY_BLOCKS_LIMIT. */
+  blocks: UserActivityBlockDto[];
+  /** How many blocks the day has in all, also when `blocks` is cut at USER_DAY_BLOCKS_LIMIT. */
+  blockCount: number;
+  /** The day has more blocks than `blocks` holds (`blockCount > blocks.length`). */
+  blocksTruncated: boolean;
+  /** API calls of the day that fall in no block (between blocks or with no browser event near). */
+  requestsOutsideBlocks: number;
+  /** First-view order, at most USER_DAY_PAGES_LIMIT; `pagesTotal` counts them all. */
+  pages: UserDayPageDto[];
+  pagesTotal: number;
+  /** First-use order, at most USER_DAY_TOOLS_LIMIT; `toolsTotal` counts them all. */
+  tools: UserDayToolDto[];
+  toolsTotal: number;
+  /** Newest first, at most USER_DAY_VISITS_LIMIT; the total is `summary.visits`. */
+  visits: UserDayVisitDto[];
+}
+
 export const TIMELINE_ITEM_KIND_VALUES = [
   'api',
   'page_view',

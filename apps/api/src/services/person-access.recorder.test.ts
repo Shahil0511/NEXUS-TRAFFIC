@@ -80,6 +80,14 @@ describe('PersonAccessRecorder.record', () => {
     expect(emails.calls).toEqual([[SUBJECT, FILTER]]);
   });
 
+  it('looks the email up in emailLookup when given (an empty read is still recorded)', async () => {
+    const { recorder, log, emails } = build();
+    const wider: TrafficFilter = { ...FILTER, from: new Date('2026-07-01T10:00:00.000Z') };
+    await recorder.record(access({ surface: 'person_day', emailLookup: wider }));
+    expect(emails.calls).toEqual([[SUBJECT, wider]]);
+    expect(log.entries).toEqual([expect.objectContaining({ surface: 'person_day' })]);
+  });
+
   it('coalesces the same viewer + person + surface inside the window (no lookup either)', async () => {
     const { recorder, log, emails, clock } = build();
     await recorder.record(access());

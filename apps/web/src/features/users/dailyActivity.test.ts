@@ -10,20 +10,26 @@ import {
   appTimeLabel,
   averageLastLabel,
   averageTimeIntoDay,
+  blockSegments,
   countLabel,
   DAY_APP_LINES_SHOWN,
   DAY_MS,
+  dayDetailHref,
+  dayNavigation,
   dayStripSpan,
   dayVisitsQuery,
   dayWindowQuery,
   MIN_STRIP_WIDTH_PCT,
   msIntoDay,
   fillReportingDays,
+  isOpenableDay,
   NO_BROWSER_TIME,
   NOT_ENDED_YET,
   summarizeDays,
+  timeInAppLabel,
   trendPointNotes,
   visibleAppLines,
+  visitStepsHref,
 } from './dailyActivity';
 
 /** IST midnight of 1 Oct 2026 (= 30 Sep 18:30 UTC). */
@@ -218,5 +224,91 @@ describe('per-day chart points', () => {
     };
     expect(trendPointNotes(running)[0]).toBe('First – last activity 09:10 – 18:40 so far');
     expect(trendPointNotes({ ...point, activity: null })).toEqual(['No activity']);
+  });
+});
+
+describe('one-day view helpers', () => {
+  it('links a day row to the one-day view, keeping the filters', () => {
+    expect(dayDetailHref('ab', DAY, { app: 'ebo-sales', range: '7d', env: undefined })).toBe(
+      '/users/ab?app=ebo-sales&range=7d&tab=daily&day=2026-10-01',
+    );
+  });
+
+  it('disables Next on today and Previous at the lookback limit (183 days back)', () => {
+    expect(dayNavigation('2026-11-25', '2026-11-25')).toEqual({
+      previous: '2026-11-24',
+      next: null,
+      oldest: '2026-05-26',
+      isToday: true,
+    });
+    expect(dayNavigation('2026-11-30', '2026-12-01')).toMatchObject({
+      previous: '2026-11-29',
+      next: '2026-12-01',
+      isToday: false,
+    });
+    expect(dayNavigation('2026-05-26', '2026-11-25')).toMatchObject({
+      previous: null,
+      next: '2026-05-27',
+    });
+  });
+
+  it('steps from a day outside [today − 183 days, today] back into it, never further out', () => {
+    expect(dayNavigation('2030-01-01', '2026-11-25')).toMatchObject({
+      previous: '2026-11-25',
+      next: null,
+      isToday: false,
+    });
+    expect(dayNavigation('2026-01-01', '2026-11-25')).toMatchObject({
+      previous: null,
+      next: '2026-05-26',
+    });
+  });
+
+  it('opens a picked day only inside [today − 183 days, today]', () => {
+    expect(isOpenableDay('2026-11-25', '2026-11-25')).toBe(true);
+    expect(isOpenableDay('2026-05-26', '2026-11-25')).toBe(true);
+    expect(isOpenableDay('2026-05-25', '2026-11-25')).toBe(false);
+    expect(isOpenableDay('2026-11-26', '2026-11-25')).toBe(false);
+    expect(isOpenableDay('', '2026-11-25')).toBe(false);
+  });
+
+  it('says "no browser time" for a day of API calls only, else the time in app', () => {
+    expect(timeInAppLabel(18_720_000, 3)).toBe('5 h 12 min');
+    expect(timeInAppLabel(0, 3)).toBe(NO_BROWSER_TIME);
+    expect(timeInAppLabel(0, 0)).toBe('0 min');
+  });
+
+  it('opens Visit steps over that one day, keeping app and environment only', () => {
+    const window = { from: DAY, to: at(24) };
+    const href = visitStepsHref({ app: 'ebo-sales', sessionId: 's-1' }, window, {
+      app: 'ebo-sales',
+      env: 'staging',
+      range: '7d',
+    });
+    const [path, search] = href.split('?');
+    expect(path).toBe('/journeys/ebo-sales/s-1');
+    expect(Object.fromEntries(new URLSearchParams(search))).toEqual({
+      range: 'custom',
+      from: DAY,
+      to: at(24),
+      app: 'ebo-sales',
+      env: 'staging',
+    });
+  });
+
+  it('places each block on the 00:00-24:00 timeline, clamped, with a minimum width', () => {
+    expect(
+      blockSegments(DAY, [
+        { startAt: at(6), endAt: at(12) },
+        { startAt: at(18), endAt: at(18) },
+        { startAt: at(-1), endAt: at(1) },
+        { startAt: at(23.99), endAt: at(30) },
+      ]),
+    ).toEqual([
+      { key: at(6), startPct: 25, widthPct: 25 },
+      { key: at(18), startPct: 75, widthPct: MIN_STRIP_WIDTH_PCT },
+      { key: at(-1), startPct: 0, widthPct: (1 / 24) * 100 },
+      { key: at(23.99), startPct: 100 - MIN_STRIP_WIDTH_PCT, widthPct: MIN_STRIP_WIDTH_PCT },
+    ]);
   });
 });

@@ -2,14 +2,22 @@
  * Pure helpers of the person page's "Daily activity" tab: where a day's activity sits on the
  * 00:00-24:00 IST strip, the window totals (active days, average first / last activity, tab
  * visible time), the per-app lines of a day, the gap-filled points of the per-day chart and the
- * one-day link query of a row's Visits count.
+ * one-day link query of a row's Visits count; for the one-day view, its link, the previous / next
+ * day, the visit-steps link of a visit and where each activity block sits on the day timeline.
  *
  * WHY HERE: the arithmetic is the part that can be wrong silently (a strip drawn an hour off, an
  * average that mixes days), so it lives outside the components and is unit-tested.
  * Every `day` is the instant of an IST midnight (UserDayActivityDto.day), so "time into the day"
  * is a plain subtraction — no time-zone maths in the browser.
  */
-import type { UserDayActivityDto, UserDayAppActivityDto } from '@nexus/shared';
+import {
+  addReportingDays,
+  reportingDayOf,
+  USER_DAY_LOOKBACK_DAYS,
+  type UserActivityBlockDto,
+  type UserDayActivityDto,
+  type UserDayAppActivityDto,
+} from '@nexus/shared';
 
 import {
   EMPTY_VALUE,
@@ -19,6 +27,7 @@ import {
   formatInteger,
   withUnit,
 } from '@/lib/format';
+import { PAGES, withQuery } from '@/lib/pages';
 
 export const DAY_MS = 86_400_000;
 const PERCENT = 100;
@@ -219,4 +228,99 @@ export function trendPointNotes(point: DailyTrendPoint): string[] {
     `First – last activity ${span}${day.inProgress ? ' so far' : ''}`,
     `Apps: ${day.apps.join(', ')}`,
   ];
+}
+
+// ─── One-day view ───────────────────────────────────────────────────────────
+
+/**
+ * The person page opened on ONE day of the Daily activity tab: `?tab=daily&day=YYYY-MM-DD`, keeping
+ * the current filters of `linkQuery` (app, env, and the range the list of days returns to). `day`
+ * is the instant of an IST midnight (UserDayActivityDto.day). Pure.
+ */
+export function dayDetailHref(
+  userKey: string,
+  day: string,
+  linkQuery: Readonly<Record<string, string | undefined>>,
+): string {
+  return withQuery(PAGES.userDetail(userKey), {
+    ...linkQuery,
+    tab: 'daily',
+    day: reportingDayOf(new Date(day)),
+  });
+}
+
+/** Where the day header's buttons lead (null = the button is disabled). */
+export interface DayNavigation {
+  previous: string | null;
+  next: string | null;
+  /** The oldest day the view opens (today − USER_DAY_LOOKBACK_DAYS), for the date input's `min`. */
+  oldest: string;
+  isToday: boolean;
+}
+
+/**
+ * Previous / next day of `day` (`YYYY-MM-DD`), given today's IST day: no next day from today on,
+ * no previous day at the lookback limit or before (the API refuses older days). A day outside
+ * [oldest, today] (an edited or old link) steps INTO that range: Previous from a future day is
+ * today, Next from a too-old day is the oldest day, never another day the API refuses. Pure.
+ */
+export function dayNavigation(day: string, today: string): DayNavigation {
+  const oldest = addReportingDays(today, -USER_DAY_LOOKBACK_DAYS);
+  return {
+    previous: day > oldest ? (day > today ? today : addReportingDays(day, -1)) : null,
+    next: day < today ? (day < oldest ? oldest : addReportingDays(day, 1)) : null,
+    oldest,
+    isToday: day === today,
+  };
+}
+
+/** Whether a picked day (`YYYY-MM-DD`) is one the view can open: [oldest, today]. Pure. */
+export function isOpenableDay(day: string, today: string): boolean {
+  return day >= dayNavigation(today, today).oldest && day <= today;
+}
+
+/**
+ * "5 h 12 min" of the day's Time in app; NO_BROWSER_TIME when it is 0 but the day has API calls
+ * (an app without the browser tracker: "0 min" would read as "opened but not looked at"). Pure.
+ */
+export function timeInAppLabel(timeInAppMs: number, requests: number): string {
+  if (timeInAppMs === 0 && requests > 0) return NO_BROWSER_TIME;
+  return formatHoursMinutes(timeInAppMs);
+}
+
+/**
+ * The steps of one visit of the day, read over THAT day (a custom range): with the global range a
+ * visit of an older day would not be found. Keeps app and environment of `linkQuery`. Pure.
+ */
+export function visitStepsHref(
+  visit: { app: string; sessionId: string },
+  window: { from: string; to: string },
+  linkQuery: Readonly<Record<string, string | undefined>>,
+): string {
+  return withQuery(PAGES.sessionDetail(visit.app, visit.sessionId), {
+    range: 'custom',
+    from: window.from,
+    to: window.to,
+    app: linkQuery.app,
+    env: linkQuery.env,
+  });
+}
+
+/** One block on the day timeline, in % of 24 hours from 00:00 IST. */
+export interface DayTimelineSegment extends DayStripSpan {
+  key: string;
+}
+
+/**
+ * Where each activity block sits on the 00:00-24:00 timeline of `day` (an IST midnight instant):
+ * clamped to the day, never narrower than MIN_STRIP_WIDTH_PCT and never past the right edge. Pure.
+ */
+export function blockSegments(
+  day: string,
+  blocks: readonly Pick<UserActivityBlockDto, 'startAt' | 'endAt'>[],
+): DayTimelineSegment[] {
+  return blocks.map((block) => ({
+    key: block.startAt,
+    ...dayStripSpan(day, block.startAt, block.endAt),
+  }));
 }

@@ -910,3 +910,169 @@ export async function seedVisibleCreditCap(
   ]);
   return { now, appIds, sessionId: visit.sessionId, pageViewId };
 }
+
+// ─── S6: one person-day (users.day, ADR 0017) ───────────────────────────────
+
+/** The person of `seedUserDay`; nobody else is seeded in that database. */
+export const USER_F = 'f@libas.in';
+
+export interface UserDaySeed {
+  now: Date;
+  /** 00:00 IST of today (`now` is 12:00 IST): the day under test. */
+  dayStart: Date;
+  appIds: AnalyticsSeed['appIds'];
+}
+
+/**
+ * S6 (its own database). Times are IST on TODAY (D) unless stated; `now` = 12:00 IST.
+ * - YESTERDAY (Y): page_view /late at 23:59:50 and a custom event at 23:59:59 (session T1).
+ * - Block 1 [00:00:00, 00:00:03]: page_view /boundary at exactly 00:00:00 (T0) and a page_time
+ *   tick of /late at 00:00:03 with 5000 ms (T1): its interval is CLAMPED to 00:00:00, so time in
+ *   app 3000, tab visible 5000.
+ * - Block 2 [09:00:00, 09:04:20], two tabs at once: ebo-sales T2a page_view /home 09:00:00, ticks
+ *   10 000 ms at 09:00:10 and 09:00:20; hr-portal T2b page_view /leaves 09:00:05, tick 10 000 ms
+ *   at 09:00:15 → union 09:00:00-09:00:20 = 20 000 ms time in app, 30 000 ms tab visible. A tool
+ *   use 4 min after the last tick (09:04:20) joins the block; one API call (09:02, T2a) in it.
+ * - Block 3 [09:10:20]: a custom event 6 min after block 2 ended (a new block, span 0).
+ * - One API call at 10:00, in no block.
+ * - Block 4 [10:58:00, 11:00:00]: page_view /report 10:58 (T3) and a 3 h tick at 11:00
+ *   (credited 60 000 ms, so its interval starts 10:59).
+ * Day D: tab visible 95 000 (the NULL visible_ms of the API rows adds nothing), time in app
+ * 83 000, 2 API calls, 1 outside blocks, 4 blocks, 5 pages, 1 tool, 5 visits.
+ */
+export async function seedUserDay(db: TestDatabase, now: Date = seedNow()): Promise<UserDaySeed> {
+  const appIds = await createSeedApps(db);
+  const dayStart = new Date(now.getTime() - 12 * HOUR);
+  const at = (ms: number) => new Date(dayStart.getTime() + ms);
+  const second = 1000;
+  const sales = (sessionId: string) => ({ appId: appIds.sales, sessionId, user: USER_F });
+  const t0 = sales(randomUUID());
+  const t1 = sales(randomUUID());
+  const t2a = sales(randomUUID());
+  const t2b = { appId: appIds.hr, sessionId: randomUUID(), user: USER_F };
+  const t3 = sales(randomUUID());
+
+  const late = await insertWebEvent(db, {
+    ...t1,
+    at: at(-10 * second),
+    seq: 0,
+    type: 'page_view',
+    path: '/late',
+  });
+  await insertWebEvent(db, {
+    ...t1,
+    at: at(-1 * second),
+    seq: 1,
+    type: 'custom',
+    path: '/late',
+    name: 'filter-applied',
+  });
+  await insertWebEvent(db, { ...t0, at: at(0), seq: 0, type: 'page_view', path: '/boundary' });
+  await insertWebEvent(db, {
+    ...t1,
+    at: at(3 * second),
+    seq: 2,
+    type: 'page_time',
+    path: '/late',
+    pageViewId: late,
+    visibleMs: 5000,
+  });
+
+  const nine = 9 * HOUR;
+  const home = await insertWebEvent(db, {
+    ...t2a,
+    at: at(nine),
+    seq: 0,
+    type: 'page_view',
+    path: '/home',
+  });
+  const leaves = await insertWebEvent(db, {
+    ...t2b,
+    at: at(nine + 5 * second),
+    seq: 0,
+    type: 'page_view',
+    path: '/leaves',
+  });
+  for (const [seq, offset] of [
+    [1, 10],
+    [2, 20],
+  ] as const) {
+    await insertWebEvent(db, {
+      ...t2a,
+      at: at(nine + offset * second),
+      seq,
+      type: 'page_time',
+      path: '/home',
+      pageViewId: home,
+      visibleMs: 10_000,
+    });
+  }
+  await insertWebEvent(db, {
+    ...t2b,
+    at: at(nine + 15 * second),
+    seq: 1,
+    type: 'page_time',
+    path: '/leaves',
+    pageViewId: leaves,
+    visibleMs: 10_000,
+  });
+  await insertWebEvent(db, {
+    ...t2a,
+    at: at(nine + 4 * MINUTE + 20 * second),
+    seq: 3,
+    type: 'tool_use',
+    path: '/home',
+    tool: 'export-csv',
+  });
+  await insertWebEvent(db, {
+    ...t2a,
+    at: at(nine + 10 * MINUTE + 20 * second),
+    seq: 4,
+    type: 'custom',
+    path: '/home',
+    name: 'filter-applied',
+  });
+
+  const report = await insertWebEvent(db, {
+    ...t3,
+    at: at(10 * HOUR + 58 * MINUTE),
+    seq: 0,
+    type: 'page_view',
+    path: '/report',
+  });
+  await insertWebEvent(db, {
+    ...t3,
+    at: at(11 * HOUR),
+    seq: 1,
+    type: 'page_time',
+    path: '/report',
+    pageViewId: report,
+    visibleMs: 3 * HOUR,
+  });
+
+  await new ApiRequestIngestRepository(db.appPool).insertBatch([
+    toInsert(
+      {
+        route: 'storeLookup',
+        at: at(nine + 2 * MINUTE),
+        status: 200,
+        durationMs: 10,
+        user: USER_F,
+        sessionId: t2a.sessionId,
+      },
+      appIds,
+    ),
+    toInsert(
+      {
+        route: 'storeLookup',
+        at: at(10 * HOUR),
+        status: 500,
+        durationMs: 10,
+        user: USER_F,
+        sessionId: null,
+      },
+      appIds,
+    ),
+  ]);
+  return { now, dayStart, appIds };
+}

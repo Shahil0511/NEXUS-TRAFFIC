@@ -1,6 +1,13 @@
 import {
+  addReportingDays,
   ERROR_CODES,
+  MAX_COUNT_RANGE_MS,
   USER_DAILY_APP_ROWS_LIMIT,
+  USER_DAY_BLOCKS_LIMIT,
+  USER_DAY_LOOKBACK_DAYS,
+  USER_DAY_PAGES_LIMIT,
+  USER_DAY_TOOLS_LIMIT,
+  USER_DAY_VISITS_LIMIT,
   USER_DEVICES_LIMIT,
   type UserListQuery,
   type UserTimelineQuery,
@@ -10,10 +17,14 @@ import { describe, expect, it } from 'vitest';
 import {
   ADMIN_VIEWER,
   PLAIN_VIEWER,
+  sessionSummaryRow,
   timelineEventRow,
   USER_KEY,
   USER_KEY_HEX,
+  userActivityBlockRow,
   userDayAppActivityRow,
+  userDayPageRow,
+  userDayToolRow,
   userDeviceRow,
   userLatestContextRow,
   userSummaryRow,
@@ -27,7 +38,7 @@ import {
   KNOWN_APP_SLUG,
 } from '../../test/fixtures/fake-query-repositories';
 import { decodeOffsetCursor, encodeKeysetCursor, encodeOffsetCursor } from '../db/sql';
-import { BadRequestError, NotFoundError } from '../errors/app-error';
+import { BadRequestError, NotFoundError, ValidationError } from '../errors/app-error';
 import { FixedClock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
@@ -412,6 +423,153 @@ describe('UserService.daily', () => {
   });
 });
 
+/** NOW is 15:30 IST on 1 Oct 2026: today, its window and the oldest day the view opens. */
+const TODAY = '2026-10-01';
+const TODAY_FROM = new Date('2026-09-30T18:30:00.000Z');
+const OLDEST_DAY = addReportingDays(TODAY, -USER_DAY_LOOKBACK_DAYS);
+
+describe('UserService.day', () => {
+  /** A day with activity: one app row, one block, one page, one tool, one visit. */
+  function withActivity(webEvents: ReturnType<typeof build>['webEvents']) {
+    webEvents.userDays = [userDayAppActivityRow({ requests: 12 })];
+    webEvents.dayBlocks = [userActivityBlockRow({ requests_in_blocks: 10 })];
+    webEvents.dayPages = [userDayPageRow()];
+    webEvents.dayTools = [userDayToolRow()];
+    webEvents.sessions = [sessionSummaryRow()];
+  }
+
+  it('reads ONE IST day (not the global range) with app and env, and maps it', async () => {
+    const { service, webEvents } = build();
+    withActivity(webEvents);
+    const dto = await service.day(
+      USER_KEY_HEX,
+      { day: TODAY, app: KNOWN_APP_SLUG, env: 'staging' },
+      ADMIN_VIEWER,
+    );
+    const [userKey, filter, limit] = webEvents.argsOf('listUserDayBlocks')[0] ?? [];
+    expect(Buffer.isBuffer(userKey) && userKey.equals(USER_KEY)).toBe(true);
+    expect(filter).toEqual({
+      from: TODAY_FROM,
+      to: END_OF_TODAY,
+      appId: KNOWN_APP_ID,
+      environments: ['staging'],
+    });
+    expect(limit).toBe(USER_DAY_BLOCKS_LIMIT);
+    expect(webEvents.argsOf('listUserDailyActivity')[0]?.[1]).toEqual(filter);
+    expect(webEvents.argsOf('listUserDayPages')[0]?.slice(1)).toEqual([
+      filter,
+      USER_DAY_PAGES_LIMIT,
+    ]);
+    expect(webEvents.argsOf('listUserDayTools')[0]?.slice(1)).toEqual([
+      filter,
+      USER_DAY_TOOLS_LIMIT,
+    ]);
+    const [sessionFilter, options] = webEvents.argsOf('listSessions')[0] ?? [];
+    expect(sessionFilter).toEqual(filter);
+    expect(options).toEqual({ userKey: USER_KEY, limit: USER_DAY_VISITS_LIMIT, offset: 0 });
+
+    expect(dto.day).toBe(TODAY);
+    expect(dto.window).toMatchObject({
+      from: TODAY_FROM.toISOString(),
+      to: END_OF_TODAY.toISOString(),
+    });
+    expect(dto.summary).toMatchObject({ requests: 12, inProgress: true });
+    expect(dto.requestsOutsideBlocks).toBe(2);
+    expect(dto.blocks).toHaveLength(1);
+    expect(dto.pages).toHaveLength(1);
+    expect(dto.tools).toHaveLength(1);
+    expect(dto.visits[0]).not.toHaveProperty('ip');
+  });
+
+  it('records person_day once, and looks the email up over the day AND the last 93 days', async () => {
+    const { service, webEvents, access } = build();
+    withActivity(webEvents);
+    await service.day(USER_KEY_HEX, { day: '2026-09-20', app: KNOWN_APP_SLUG }, ADMIN_VIEWER);
+    expect(access.accesses).toHaveLength(1);
+    const [recorded] = access.accesses;
+    expect(recorded).toMatchObject({ viewer: ADMIN_VIEWER, surface: 'person_day' });
+    expect(recorded?.filter).toMatchObject({
+      from: new Date('2026-09-19T18:30:00.000Z'),
+      to: new Date('2026-09-20T18:30:00.000Z'),
+    });
+    expect(recorded?.emailLookup).toEqual({
+      from: new Date(NOW.getTime() - MAX_COUNT_RANGE_MS),
+      to: NOW,
+      appId: KNOWN_APP_ID,
+      environments: ['prod'],
+    });
+  });
+
+  it('a day older than 93 days still finds the email inside the day itself', async () => {
+    const { service, access } = build();
+    await service.day(USER_KEY_HEX, { day: OLDEST_DAY }, ADMIN_VIEWER);
+    const [recorded] = access.accesses;
+    expect(recorded?.emailLookup?.from).toEqual(recorded?.filter.from);
+    expect(recorded?.emailLookup?.to).toEqual(NOW);
+  });
+
+  it('an empty day is a 200 with no summary, skips the second wave, and is STILL recorded', async () => {
+    const { service, webEvents, access } = build();
+    const dto = await service.day(USER_KEY_HEX, { day: TODAY }, ADMIN_VIEWER);
+    expect(dto).toMatchObject({
+      summary: null,
+      blocks: [],
+      pages: [],
+      tools: [],
+      visits: [],
+      timeInAppMs: 0,
+      blockCount: 0,
+      requestsOutsideBlocks: 0,
+    });
+    expect(webEvents.argsOf('listUserDayTools')).toEqual([]);
+    expect(webEvents.argsOf('listSessions')).toEqual([]);
+    expect(access.accesses.map((a) => a.surface)).toEqual(['person_day']);
+    expect(access.accesses[0]?.emailLookup).toBeDefined();
+  });
+
+  it('runs at most 3 reads at once (wave 1: 3, wave 2: 2)', async () => {
+    const { service, webEvents } = build();
+    withActivity(webEvents);
+    await service.day(USER_KEY_HEX, { day: TODAY }, ADMIN_VIEWER);
+    expect(webEvents.calls.map((c) => c.method)).toEqual([
+      'listUserDailyActivity',
+      'listUserDayBlocks',
+      'listUserDayPages',
+      'listUserDayTools',
+      'listSessions',
+    ]);
+    expect(webEvents.maxConcurrent).toBe(3);
+  });
+
+  it('refuses a day in the future and a day beyond the lookback with a 400, recording nothing', async () => {
+    const { service, webEvents, access } = build();
+    const tomorrow = addReportingDays(TODAY, 1);
+    const tooOld = addReportingDays(OLDEST_DAY, -1);
+    for (const day of [tomorrow, tooOld]) {
+      const refused = service.day(USER_KEY_HEX, { day }, ADMIN_VIEWER);
+      await expect(refused).rejects.toBeInstanceOf(ValidationError);
+      await expect(service.day(USER_KEY_HEX, { day }, ADMIN_VIEWER)).rejects.toMatchObject({
+        statusCode: 400,
+        code: ERROR_CODES.VALIDATION_ERROR,
+      });
+    }
+    expect(webEvents.calls).toEqual([]);
+    expect(access.accesses).toEqual([]);
+    // Today and the oldest day of the lookback are both allowed.
+    await service.day(USER_KEY_HEX, { day: TODAY }, ADMIN_VIEWER);
+    await service.day(USER_KEY_HEX, { day: OLDEST_DAY }, ADMIN_VIEWER);
+    expect(access.accesses).toHaveLength(2);
+  });
+
+  it('an unknown app is a 404 and records nothing', async () => {
+    const { service, access } = build();
+    await expect(
+      service.day(USER_KEY_HEX, { day: TODAY, app: 'nope' }, ADMIN_VIEWER),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(access.accesses).toEqual([]);
+  });
+});
+
 describe('UserService person access log', () => {
   const profileRows = () => ({
     summary: userSummaryRow(),
@@ -428,17 +586,20 @@ describe('UserService person access log', () => {
     await service.timeline(USER_KEY_HEX, timelineQuery(), ADMIN_VIEWER);
     await service.devices(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
     await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    await service.day(USER_KEY_HEX, { day: TODAY }, ADMIN_VIEWER);
 
     expect(access.accesses.map((a) => a.surface)).toEqual([
       'person_profile',
       'person_timeline',
       'person_devices',
       'person_daily',
+      'person_day',
     ]);
+    const wholeDays: string[] = ['person_daily', 'person_day'];
     for (const recorded of access.accesses) {
       expect(recorded.viewer).toBe(ADMIN_VIEWER);
       expect(recorded.subjectUserKey.equals(USER_KEY)).toBe(true);
-      expect(recorded.filter.to).toEqual(recorded.surface === 'person_daily' ? END_OF_TODAY : NOW);
+      expect(recorded.filter.to).toEqual(wholeDays.includes(recorded.surface) ? END_OF_TODAY : NOW);
     }
     expect(access.accesses[0]?.filter.appId).toBe(KNOWN_APP_ID);
   });

@@ -46,6 +46,10 @@ const REQUIRED: readonly MetricKey[] = [
   'dayApps',
   'dayCounts',
   'dayVisits',
+  'timeInApp',
+  'activityBlock',
+  'requestsOutsideBlocks',
+  'featureUses',
 ];
 
 describe('METRIC_COPY', () => {
@@ -80,6 +84,9 @@ ${copy.long}`),
     expect(METRIC_COPY.daysActive.label).toBe('Active days');
     expect(METRIC_COPY.firstActivity.label).toBe('First activity');
     expect(METRIC_COPY.lastActivity.label).toBe('Last activity');
+    expect(METRIC_COPY.timeInApp.label).toBe('Time in app');
+    expect(METRIC_COPY.timeInApp.short).toMatch(/at the same time count once/);
+    expect(METRIC_COPY.featureUses.label).toBe('Feature uses');
     // Tab visible time is screen time of a front tab, not input: the copy says so.
     expect(METRIC_COPY.activeTime.long).toMatch(/not keyboard or mouse use/);
   });

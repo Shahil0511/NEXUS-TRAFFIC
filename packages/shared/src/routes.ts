@@ -99,6 +99,8 @@ export const ROUTES = {
     devices: { method: 'GET', path: '/v1/users/:userKey/devices' },
     /** One row per IST calendar day the user was active in the window, newest first. */
     daily: { method: 'GET', path: '/v1/users/:userKey/daily' },
+    /** ONE IST calendar day of one person (`?day=YYYY-MM-DD`): blocks, per app, pages, features, visits. */
+    day: { method: 'GET', path: '/v1/users/:userKey/day' },
   },
   journeys: {
     sessions: { method: 'GET', path: '/v1/journeys/sessions' },
@@ -209,6 +211,7 @@ export const PERSON_ROUTE_LEAVES = [
   'users.timeline',
   'users.devices',
   'users.daily',
+  'users.day',
 ] as const satisfies readonly RouteLeafId[];
 
 /**

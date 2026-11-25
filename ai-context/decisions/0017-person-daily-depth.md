@@ -114,6 +114,32 @@
        `apps/web/src/components/PersonAdminOnly.tsx`, shared with the person page), never a generic error; the
        Privacy & access log names the parts "One day", "Usual activity hours" (both lead to the Daily
        activity tab) and "Visit steps" (the row has no visit id, so it leads to the person's Visits list).
+  8. **One-day view (shipped in step 5).**
+     - `ROUTES.users.day` (`?day=YYYY-MM-DD`, an IST calendar day, `userDayQuerySchema` built from the plain
+       `timeWindowShape` because the refined window schema cannot be picked) is a person leaf: admin-only in the
+       route table, `PERSON_ROUTE_LEAVES`, recorded as `person_day`. App and environment apply; the global range
+       does not (a stray `range` is stripped). A day in the future or more than `USER_DAY_LOOKBACK_DAYS` (183,
+       about the raw retention) back is a 400.
+     - `UserService.day` runs at most three statements at once: the day's (day, app) rows, the blocks and the
+       pages; then, only when the day has activity, the features and the visits (`listSessions` narrowed to the
+       key, newest first, as on the Visits page). A day without activity is a 200 with `summary: null`.
+     - **Empty answers are logged too.** `PersonAccess.emailLookup` lets a caller name a wider window for the
+       email lookup than the read's own; the one-day view passes the day itself plus the last
+       `MAX_COUNT_RANGE_MS` before now, so an empty day is recorded whenever the person had any event in that
+       time, and a day older than 93 days is still found inside the day.
+     - Blocks, time in app and the clamp to the day start follow the definitions of point 4 (mechanism in
+       `07-data-model.md`); the day totals are window functions evaluated before the block LIMIT, so time in
+       app and the calls outside blocks cover the whole day even when only the first blocks are listed. Every
+       table of every statement is bounded by the day, app and environment, the LATERAL call count included.
+     - Web: the Date of each daily row links to `?tab=daily&day=…`; `UserDailyActivityTab` switches on that
+       param (`useUserDetailDay`; an invalid day means all days; changing tab drops it). `useUserDay` is sent only
+       once the viewer is known to be an admin, and its key is not refetched by live traffic
+       (`PERSON_USER_LEAVES`). The view shows five KPIs (time in app with tab visible time as its hint), the
+       00:00-24:00 timeline (decorative, its text in the Activity blocks table), apps, pages and features in
+       first-use order (no bars, no "top"), visits whose Visit steps link reads that same day (custom range), an
+       "End of day" marker (with the day's whole block count, `blockCount`) and "About these numbers". The date
+       input opens a typed day only on Enter, blur or "Show day"; a day outside [today − 183, today] in the URL
+       sends no read and says which days open, and Previous / Next step back into that range. Its tables are fixed-layout and fit 1280 px.
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
@@ -125,5 +151,5 @@
     such links for verified visits: the Visits list (`features/journeys/sessionColumns.tsx`), Online now
     (`features/live/OnlineNowPanel.tsx`) and request samples (`components/requestSampleColumns.tsx`).
     Showing them as plain text for non-admins is follow-up work, pending the owner's go-ahead.
-  - Still to come, each recorded here when it ships: the one-day view (its `person_day` surface exists
-    already) and usual activity hours (`person_pattern`).
+  - Opening a day writes a `person_day` row even when the day is empty (one per admin + person per 10 min).
+  - Still to come, recorded here when it ships: usual activity hours (`person_pattern`).

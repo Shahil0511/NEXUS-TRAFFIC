@@ -30,6 +30,7 @@ import {
   SESSION_ID,
   timelineItem,
   USER_DAILY,
+  USER_DAY_DETAIL,
   userDayApp,
   userDayFrom,
   USER_DEVICES,
@@ -70,6 +71,7 @@ function servePersonReads(me: MeDto = ME): void {
         ),
       }),
     ),
+    http.get(routeUrl(ROUTES.users.day), () => HttpResponse.json(USER_DAY_DETAIL)),
     http.get(routeUrl(ROUTES.users.timeline), () =>
       HttpResponse.json({
         items: [
@@ -122,6 +124,17 @@ describe('person pages use neutral words only (ADR 0017)', () => {
     servePersonReads();
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=daily' });
     await screen.findByText('End of list · 2 days');
+    expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
+    expect(bannedOnScreen()).toEqual([]);
+  });
+
+  it('the one-day view, with its blocks, visits, end marker and caveats', async () => {
+    servePersonReads();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, {
+      searchParams: '?tab=daily&day=2026-10-01',
+    });
+    await screen.findByText('End of day · 2 blocks · 5 visits');
+    expect(screen.getByRole('table', { name: 'Activity blocks' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
     expect(bannedOnScreen()).toEqual([]);
   });

@@ -87,20 +87,38 @@ function send(route: RouteDescriptor, who: keyof typeof VIEWERS, path = route.pa
   return call.set(INGEST_HEADERS.dashboard, '1').set(VIEWER_HEADER, who);
 }
 
+/** The query a leaf needs to pass validation (users.day requires its `day`). */
+const LEAF_QUERY: Partial<Record<(typeof PERSON_ROUTE_LEAVES)[number], string>> = {
+  'users.day': '?day=2026-11-20',
+};
+
 const personLeaves = PERSON_ROUTE_LEAVES.map((id) => {
   const leaf = id.split('.')[1] as keyof typeof ROUTES.users;
   const route = ROUTES.users[leaf];
-  return { id, route, path: buildPath(route, { userKey: USER_KEY } as never) };
+  const path = `${buildPath(route, { userKey: USER_KEY } as never)}${LEAF_QUERY[id] ?? ''}`;
+  return { id, route, path };
 });
 
 describe('person-level leaves are admin-only', () => {
-  it('covers profile, timeline, devices and daily', () => {
+  it('covers profile, timeline, devices, daily and one day', () => {
     expect(personLeaves.map((leaf) => leaf.id)).toEqual([
       'users.profile',
       'users.timeline',
       'users.devices',
       'users.daily',
+      'users.day',
     ]);
+  });
+
+  it('users.day: an admin with an invalid day gets 400 before the controller runs', async () => {
+    const route = ROUTES.users.day;
+    const base = buildPath(route, { userKey: USER_KEY });
+    for (const query of ['', '?day=2026-02-30', '?day=2026-11-20T00:00:00Z']) {
+      const res = await send(route, 'admin', `${base}${query}`);
+      expect(res.status, query).toBe(400);
+      expect(res.body).toMatchObject({ error: { code: ERROR_CODES.VALIDATION_ERROR } });
+      expect(res.body).not.toHaveProperty('ran');
+    }
   });
 
   it.each(personLeaves.map((leaf) => [leaf.id, leaf] as const))(

@@ -29,6 +29,7 @@ import type {
   TopPathsQuery,
   UserActivityQuery,
   UserDailyQuery,
+  UserDayQuery,
   UserDevicesQuery,
   UserListQuery,
   UserProfileQuery,
@@ -84,6 +85,7 @@ export const qk = {
       ['users', 'timeline', userKey, q] as const,
     devices: (userKey: string, q: UserDevicesQuery) => ['users', 'devices', userKey, q] as const,
     daily: (userKey: string, q: UserDailyQuery) => ['users', 'daily', userKey, q] as const,
+    day: (userKey: string, q: UserDayQuery) => ['users', 'day', userKey, q] as const,
   },
   journeys: {
     all: ['journeys'] as const,

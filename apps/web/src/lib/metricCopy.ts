@@ -198,6 +198,27 @@ export const METRIC_COPY = {
       'Browser visits of the day: one browser tab’s activity until it is closed or idle for 30 minutes.',
     long: 'The number opens the Visits page for this person and this day. API calls alone open no visit.',
   },
+  timeInApp: {
+    label: 'Time in app',
+    short:
+      'How long at least one app page was on screen in a front tab. Tabs open at the same time count once.',
+    long: 'It is not keyboard or mouse use. One stretch without a tick (a sleeping laptop) counts at most 1 minute.',
+  },
+  activityBlock: {
+    label: 'Activity blocks',
+    short: 'Stretches of browser events of the day in which every break is shorter than 5 minutes.',
+    long: 'Length is end minus start of one block; lengths are not added up. API calls alone start no block.',
+  },
+  requestsOutsideBlocks: {
+    label: 'API calls outside these blocks',
+    short: 'API calls of the day made while no browser event was near.',
+    long: 'Apps that call the server in the background, or without the browser tracker, add them with no page on screen.',
+  },
+  featureUses: {
+    label: 'Feature uses',
+    short: 'How many times a feature (tool) of an app was used, from the browser tracker.',
+    long: 'A feature used twice counts twice.',
+  },
   // ─── Devices (browser) ──────────────────────────────────────────────────────
   devices: {
     label: 'Devices',

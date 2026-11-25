@@ -78,6 +78,8 @@ import {
   type UserActivityDto,
   type UserActivityQuery,
   type UserDailyActivityDto,
+  type UserDayDetailDto,
+  type UserDayQuery,
   type UserDailyQuery,
   type UserDevicesDto,
   type UserDevicesQuery,
@@ -270,6 +272,11 @@ export const api = {
       }),
     daily: (userKey: string, q: UserDailyQuery, o?: CallOptions) =>
       request<UserDailyActivityDto, typeof ROUTES.users.daily>(ROUTES.users.daily, q, {
+        ...o,
+        params: { userKey },
+      }),
+    day: (userKey: string, q: UserDayQuery, o?: CallOptions) =>
+      request<UserDayDetailDto, typeof ROUTES.users.day>(ROUTES.users.day, q, {
         ...o,
         params: { userKey },
       }),

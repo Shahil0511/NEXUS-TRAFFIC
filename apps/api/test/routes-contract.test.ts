@@ -143,8 +143,8 @@ describe('ROUTES ↔ buildRouter', () => {
     for (const route of literal) expect(indexOf(route)).toBeLessThan(profileAt);
   });
 
-  it('serves the person leaves (devices, daily) under /:userKey with the params validated', () => {
-    for (const route of [ROUTES.users.devices, ROUTES.users.daily]) {
+  it('serves the person leaves (devices, daily, day) under /:userKey with the params validated', () => {
+    for (const route of [ROUTES.users.devices, ROUTES.users.daily, ROUTES.users.day]) {
       const [match] = regs.filter((reg) => sameRoute(reg, route));
       expect(match?.path).toMatch(/^\/v1\/users\/:userKey\/[a-z]+$/);
       // ...admin (ssoAuth, dashboardCsrf, requireAdmin) + validateParams + validateQuery + the

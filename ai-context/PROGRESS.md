@@ -18,6 +18,84 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Person 360 daily depth, step 5: the one-day view (ADR 0017)
+
+Contract, API and web; no migration (the `person_day` surface and its CHECK shipped with 0014 in step 4).
+
+**Done**
+- **Shared (contract first):** `schemas/common.ts` extracts `timeWindowShape` (the refined
+  `timeWindowQuerySchema` is built from it, behaviour unchanged) and adds `isRealCalendarDate` +
+  `reportingDaySchema` (`YYYY-MM-DD`, a real IST calendar day). `userDayQuerySchema` = app + env + day (not
+  strict: a stray `range` is stripped). `ROUTES.users.day` (`/v1/users/:userKey/day`) joins `PERSON_ROUTE_LEAVES`.
+  `constants/traffic.ts`: `USER_DAY_BLOCK_GAP_MS` (5 min), `USER_DAY_BLOCKS_LIMIT` (96), `USER_DAY_PAGES_LIMIT` /
+  `USER_DAY_TOOLS_LIMIT` (30), `USER_DAY_VISITS_LIMIT` (50), `USER_DAY_LOOKBACK_DAYS` (183). `time-window.ts`:
+  `reportingDayWindow`, `reportingDayOf`, `addReportingDays`. `dto/users.ts`: `UserActivityBlockDto`,
+  `UserDayPageDto`, `UserDayToolDto`, `UserDayVisitDto`, `UserDayDetailDto` (with `blockCount`, the day's real
+  block count, beside `blocksTruncated`).
+- **API:** route `...admin` + `validateParams` + `validateQuery(userDayQuerySchema)` → `UserController.day`
+  (`private, max-age=15`) → `UserService.day`: `oneDayWindow` (400 for a future day or one beyond the lookback),
+  wave 1 `listUserDailyActivity` + `listUserDayBlocks` + `listUserDayPages`, wave 2 (only when the day has rows)
+  `listUserDayTools` + `listSessions` (narrowed to the key) — at most 3 statements at once; `mapUserDayDetail`
+  (+ `mapUserActivityBlock` / `mapUserDayPage` / `mapUserDayTool` / `mapUserDayVisit`, no IP or email);
+  `person_day` recorded with `emailLookup` = the day ∪ the last 93 days (`dayEmailLookupFilter`), so an empty day
+  is logged. `PersonAccess.emailLookup` (optional, read only by `write`). New rows `UserActivityBlockRow`,
+  `UserDayPageRow`, `UserDayToolRow`, `UserDayRows`.
+- **SQL checked against the sketch:** the page_time interval is `occurred_at − coalesce(credited, 0)` clamped
+  with `greatest(…, day start)` (the sketch's `make_interval` on a NULL would have made GREATEST return the day
+  start: GREATEST ignores NULL); the running max uses a fixed frame head (`ROWS BETWEEN UNBOUNDED PRECEDING AND 1
+  PRECEDING`) ordered by (start, end, event_id) for a stable order; a gap of exactly 5 min splits ("breaks under 5
+  min are joined"); islands use the same running max over page_time rows only; the LATERAL `api_requests` count
+  carries the full window, app, environment and key conditions; day totals (`day_time_in_app_ms`,
+  `requests_in_blocks`, `block_count`) are window functions before the LIMIT, so `blockCount` = `block_count` and
+  `blocksTruncated` = `block_count > rows returned`. No `make_interval`, no LEAST, every sum of `visible_ms` through
+  `creditedVisibleMs`.
+- **Web:** `api.users.day`, `qk.users.day` (in `PERSON_USER_LEAVES`: never refetched by live traffic);
+  `userDetailParams.ts` gains the `day` param (`parseReportingDay`; only with `tab=daily`; changing tab drops it)
+  and `useUserDetailDay`; `UserDailyActivityTab` switches between `UserDaysOverview` and the new
+  `UserDayDetail.tsx` (header with All days / Previous day / Today / Next day / labelled date input, Next disabled
+  on today and Previous at the lookback; 5 KPIs; `DayTimeline.tsx` + `UserDayBlocksTable.tsx` with the "API calls
+  outside these blocks" and truncation lines; `UserDayAppsTable.tsx`; `UserDayPagesTable.tsx` +
+  `UserDayToolsTable.tsx` side by side from xl; `UserDayVisitsTable.tsx` with Visit steps links over that day and
+  "+N more visits" to Journeys; "End of day · N blocks · N visits"; `AboutTheseNumbers variant="day"`; empty day
+  → "No activity on this day"). `useUserDay` is sent only once `useMe` says admin. Every table is `layout="fit"`
+  with fixed column widths and a min width under the 992 px content width at 1280 px. The Date of each daily row
+  links to the day (`dayDetailHref`). New helpers in `dailyActivity.ts`: `dayDetailHref`, `dayNavigation`,
+  `isOpenableDay`, `timeInAppLabel`, `visitStepsHref`, `blockSegments`. `metricCopy.ts`: `timeInApp`,
+  `activityBlock`, `requestsOutsideBlocks`, `featureUses`.
+- **Tests:** shared `time-window.test.ts`, `schemas/analytics.test.ts`, contracts (leaf ↔ `person_day`, limits);
+  api repository (READS table + bounded/env checks for the three reads, clamp, gap, islands, LATERAL bounds,
+  totals before LIMIT, no free-text columns), mappers (`mapUserDayDetail`), service (window, limits, waves, ≤ 3
+  concurrent via a counting fake, empty day skips wave 2 and is still recorded, 400s, 404), recorder
+  (`emailLookup`), new `user.controller.test.ts`, person-access routes (5 leaves; invalid day → 400), routes
+  contract; DB suite `test/db/user-day.integration.test.ts` + seed S6 `seedUserDay` (written, not run: CI /
+  owner with `RUN_DB_TESTS=1`). Web: helpers, the day view in `UserDailyActivityTab.test.tsx` (KPIs, blocks,
+  order, links, buttons, empty day, invalid day, no read for a viewer), `personCopy.test.tsx` (day view),
+  `autoRefreshPolicy.test.ts`, `metricCopy.test.ts`.
+- **Docs:** ADR 0017 point 8, ADR 0015 (empty answers recorded), 03-code-navigation, 07-data-model, GLOSSARY.
+- **Review fixes (same step):**
+  - Pages / Features pair is `grid grid-cols-1 xl:grid-cols-2`: the implicit `auto` track took the tables' min
+    width and scrolled the whole page sideways on a phone; now they scroll inside their panel.
+  - The date input holds a draft (`DayPicker`, keyed by the day): typing segment by segment no longer opens
+    in-between days or snaps an out-of-range value back; the draft opens on Enter, on blur or with "Show day",
+    only inside [today − 183, today].
+  - A day outside that range in the URL sends no read (`useUserDay(…, openable)`) and shows "This day cannot be
+    shown" with "Show today"; `dayNavigation` steps from such a day into the range (Previous from a future day
+    = today, Next from a too-old day = the oldest day).
+  - "End of day · N blocks" uses `blockCount` (the day's count), not the listed rows.
+  - The calls-outside-blocks line renders `METRIC_COPY.requestsOutsideBlocks` with its InfoTip.
+  - Clock columns name India time: "First – last activity (IST)", "First view (IST)", "First use (IST)".
+  - Tests: blockCount in mapper / service / controller / fixtures / DB suite; web tests for the draft input,
+    both out-of-range days, the end-marker count, the IST headers and the grid class; `dayNavigation` clamp.
+
+**Departures from the build notes:** the pattern parts of the shared contract (`users.pattern`, its schema, DTOs
+and `weekdayDayCounts`) wait for step 6; the email lookup of the access-log row spans the day AND the last 93
+days (not only the last 93 days), so a day older than 93 days with activity is still recorded.
+
+**Next:** look at the one-day view in the running app at 1280 px and 1536 px (identity card beside), both themes,
+and on a phone; `RUN_DB_TESTS=1 npm run test:db` for the new suite; then B10-6 (usual activity hours).
+
+---
+
 ## 2026-11-25 — Person 360 daily activity: two production fixes (table width, chart ticks)
 
 Web only; no contract, migration or API change.

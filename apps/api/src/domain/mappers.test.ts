@@ -1,4 +1,4 @@
-import { toToolId } from '@nexus/shared/endpoint-id';
+import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,7 +23,10 @@ import {
   toolUsageRow,
   trafficBucketRow,
   USER_KEY_HEX,
+  userActivityBlockRow,
   userDayAppActivityRow,
+  userDayPageRow,
+  userDayToolRow,
   userDeviceRow,
   userLatestContextRow,
   userSummaryRow,
@@ -57,6 +60,7 @@ import {
   mapToolUsage,
   mapTopPath,
   mapUserDayAppActivity,
+  mapUserDayDetail,
   mapUserDevice,
   mapUserLatestContext,
   mapUserProfile,
@@ -439,6 +443,137 @@ describe('foldUserDays / dropTruncatedOldestDay', () => {
       'hr-portal',
       'ebo-sales',
     ]);
+  });
+});
+
+describe('mapUserDayDetail (one person-day)', () => {
+  const WINDOW = {
+    from: '2026-09-30T18:30:00.000Z',
+    to: '2026-10-01T18:30:00.000Z',
+    grain: 'hour' as const,
+  };
+  /** 2 Oct 00:00 IST: 1 Oct has ended. */
+  const DAY_END = new Date('2026-10-01T18:30:00.000Z');
+  const empty = { days: [], blocks: [], pages: [], tools: [], visits: [] };
+
+  it('an empty day: no summary, empty lists, zero totals', () => {
+    expect(mapUserDayDetail(empty, WINDOW, '2026-10-01', DAY_END)).toEqual({
+      window: WINDOW,
+      day: '2026-10-01',
+      summary: null,
+      timeInAppMs: 0,
+      blocks: [],
+      blockCount: 0,
+      blocksTruncated: false,
+      requestsOutsideBlocks: 0,
+      pages: [],
+      pagesTotal: 0,
+      tools: [],
+      toolsTotal: 0,
+      visits: [],
+    });
+  });
+
+  it('takes the day totals from the block rows (window functions over ALL blocks)', () => {
+    const detail = mapUserDayDetail(
+      {
+        ...empty,
+        days: [userDayAppActivityRow({ requests: 12 })],
+        blocks: [
+          userActivityBlockRow({ day_time_in_app_ms: 5_000_000, requests_in_blocks: 9 }),
+          userActivityBlockRow({ day_time_in_app_ms: 5_000_000, requests_in_blocks: 9 }),
+        ],
+      },
+      WINDOW,
+      '2026-10-01',
+      DAY_END,
+    );
+    expect(detail.summary).toMatchObject({ day: WINDOW.from, requests: 12, inProgress: false });
+    expect(detail.timeInAppMs).toBe(5_000_000);
+    expect(detail.requestsOutsideBlocks).toBe(3);
+    expect(detail.blocks[0]).toEqual({
+      startAt: '2026-10-01T03:40:00.000Z',
+      endAt: '2026-10-01T05:10:00.000Z',
+      spanMs: 5_400_000,
+      timeInAppMs: 3_000_000,
+      activeMs: 3_600_000,
+      apps: ['ebo-sales'],
+      pageViews: 5,
+      toolUses: 3,
+      requests: 10,
+    });
+  });
+
+  it('never reports a negative count of calls outside blocks', () => {
+    const detail = mapUserDayDetail(
+      {
+        ...empty,
+        days: [userDayAppActivityRow({ requests: 4 })],
+        blocks: [userActivityBlockRow({ requests_in_blocks: 9 })],
+      },
+      WINDOW,
+      '2026-10-01',
+      DAY_END,
+    );
+    expect(detail.requestsOutsideBlocks).toBe(0);
+  });
+
+  it('flags truncated blocks when the day has more blocks than were returned', () => {
+    const rows = (count: number) =>
+      Array.from({ length: 2 }, () => userActivityBlockRow({ block_count: count }));
+    const map = (count: number) =>
+      mapUserDayDetail({ ...empty, blocks: rows(count) }, WINDOW, '2026-10-01', DAY_END);
+    expect(map(2)).toMatchObject({ blockCount: 2, blocksTruncated: false });
+    // The day's real count, not the rows returned: the end marker states it.
+    expect(map(3)).toMatchObject({ blockCount: 3, blocksTruncated: true });
+  });
+
+  it('maps pages and tools with opaque ids and their totals; visits without IP or email', () => {
+    const detail = mapUserDayDetail(
+      {
+        ...empty,
+        pages: [userDayPageRow({ total: 31 }), userDayPageRow({ first_view_at: null, total: 31 })],
+        tools: [userDayToolRow({ total: 4 })],
+        visits: [sessionSummaryRow()],
+      },
+      WINDOW,
+      '2026-10-01',
+      DAY_END,
+    );
+    expect(detail.pagesTotal).toBe(31);
+    expect(detail.pages[0]).toEqual({
+      pageId: toPageId('ebo-sales', '/stores/:id'),
+      app: 'ebo-sales',
+      pathTemplate: '/stores/:id',
+      firstViewAt: '2026-10-01T03:40:00.000Z',
+      views: 5,
+      activeMs: 3_600_000,
+    });
+    expect(detail.pages[1]?.firstViewAt).toBeNull();
+    expect(detail.toolsTotal).toBe(4);
+    expect(detail.tools[0]).toEqual({
+      toolId: toToolId('ebo-sales', 'export'),
+      app: 'ebo-sales',
+      tool: 'export',
+      firstUseAt: '2026-10-01T03:50:00.000Z',
+      uses: 3,
+    });
+    expect(detail.visits).toEqual([
+      {
+        app: 'ebo-sales',
+        sessionId: SESSION_ID,
+        startedAt: '2026-10-01T09:00:00.000Z',
+        lastActivityAt: OCCURRED_AT.toISOString(),
+        entryPath: '/home',
+        exitPath: '/reports',
+        pageViews: 3,
+        toolUses: 1,
+        activeMs: 10000,
+      },
+    ]);
+    const text = JSON.stringify(detail.visits);
+    expect(text).not.toContain('someone@libas.in');
+    expect(text).not.toContain('8.8.8.8');
   });
 });
 

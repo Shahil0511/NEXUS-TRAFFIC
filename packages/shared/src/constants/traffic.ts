@@ -215,8 +215,8 @@ export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
  * (ROUTES.users.profile / timeline / devices / daily, PERSON_ROUTE_LEAVES), plus one per list
  * narrowed to one person by `?userKey=` (PERSON_FILTERED_ROUTE_LEAVES): `person_visits` = the
  * sessions list, `person_failures` = the failed-request summary and list. ADR 0017 adds
- * `person_day` (one IST day of the Daily activity tab; its read, users.day, is added in a later
- * step), `person_pattern` (usual activity hours; users.pattern, a later step) and
+ * `person_day` (one IST day of the Daily activity tab, ROUTES.users.day), `person_pattern` (usual
+ * activity hours; users.pattern, a later step) and
  * `person_visit_steps` (the steps of ONE visit of a verified person, ROUTES.journeys.session,
  * admin-only once the visit has a user_key). Stored in
  * `traffic.person_access_log.surface` and mirrored by `person_access_log_surface_check` (0013,
@@ -258,3 +258,23 @@ export const USER_DAILY_APP_ROWS_LIMIT = 3000;
  * apps/api/src/db/sql.ts); the stored value is unchanged. @see ADR 0017
  */
 export const VISIBLE_DELTA_CREDIT_CAP_MS = 12 * SDK_DEFAULTS.browser.flushIntervalMs; // 60_000
+
+/**
+ * WHY: the one-day view (ROUTES.users.day) joins browser events into activity blocks: a break
+ * shorter than this between two events keeps them in one block, a longer one starts a new block.
+ * Block lengths are shown per block, never summed. @see ADR 0017
+ */
+export const USER_DAY_BLOCK_GAP_MS = 5 * 60_000;
+/** Safety cap on the blocks of one day: 96 = one every 15 min of a whole day. */
+export const USER_DAY_BLOCKS_LIMIT = 96;
+/** Pages of one day, in first-view order; the rest is a "+N more" count. */
+export const USER_DAY_PAGES_LIMIT = 30;
+/** Features (tools) of one day, in first-use order; the rest is a "+N more" count. */
+export const USER_DAY_TOOLS_LIMIT = 30;
+/** Visits of one day, newest first (as on the Visits page, which continues the list). */
+export const USER_DAY_VISITS_LIMIT = 50;
+/**
+ * How far back the one-day view goes, in IST days before today. WHY: the default raw retention is
+ * about 6 months, so an older day is empty anyway; the API refuses it with a 400.
+ */
+export const USER_DAY_LOOKBACK_DAYS = 183;

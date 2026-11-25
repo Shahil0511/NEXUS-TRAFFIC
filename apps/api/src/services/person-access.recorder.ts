@@ -18,8 +18,15 @@ export interface PersonAccess {
   /** The stored user_key (bytea) of the person. */
   subjectUserKey: Buffer;
   surface: PersonAccessSurface;
-  /** The window the read ran over: the person's email is looked up inside it. */
+  /** The window the read ran over: the person's email is looked up inside it (unless emailLookup). */
   filter: TrafficFilter;
+  /**
+   * Where to look the person's email up instead of `filter`. WHY: an empty answer is still a
+   * person-level answer ("nothing on that day" is a fact about the person), so a read whose own
+   * window can be empty (ROUTES.users.day) passes a wider window here and is still recorded. Only
+   * `write` reads it; the coalescing key does not change.
+   */
+  emailLookup?: TrafficFilter;
 }
 
 /**
@@ -33,7 +40,8 @@ export interface PersonAccess {
  *   event for the person, or the INSERT failed). A repeat is only skipped once a row exists, so a
  *   race can add a duplicate row, never lose one.
  * - The person is named by a MASKED email (maskEmail), computed here from their newest event in
- *   the read's window. No event there → nothing about them was shown → no row.
+ *   the read's window (or in `emailLookup`, a wider window, when given). No event there → nothing
+ *   about them was shown → no row.
  * - NEVER throws: a failed write must not break the read. It logs a warning with the surface and
  *   the pg error code only (no email, no message), and releases the claim so the next request
  *   tries again.
@@ -90,7 +98,10 @@ export class PersonAccessRecorder {
   /** One attempt: email lookup → INSERT. True when a row was written; else the claim is released. */
   private async write(access: PersonAccess, key: string): Promise<boolean> {
     try {
-      const email = await this.webEvents.findUserEmail(access.subjectUserKey, access.filter);
+      const email = await this.webEvents.findUserEmail(
+        access.subjectUserKey,
+        access.emailLookup ?? access.filter,
+      );
       if (email === null) {
         this.recent.release(key);
         return false;

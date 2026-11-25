@@ -1,11 +1,21 @@
 /**
- * ROUTES.users.* — the Users page: verified users, a user's profile, devices, days and their
- * combined timeline. The four person-level leaves (PERSON_ROUTE_LEAVES) are admin-only in the
+ * ROUTES.users.* — the Users page: verified users, a user's profile, devices, days, one day and
+ * their combined timeline. The person-level leaves (PERSON_ROUTE_LEAVES) are admin-only in the
  * route table, and each answer is recorded in the person access log (PersonAccessRecorder).
  */
 import {
+  type Environment,
   MAX_COUNT_RANGE_MS,
+  RANGE_DURATIONS_MS,
+  reportingDayWindow,
+  type ResolvedTimeWindow,
+  startOfReportingDay,
   USER_DAILY_APP_ROWS_LIMIT,
+  USER_DAY_BLOCKS_LIMIT,
+  USER_DAY_LOOKBACK_DAYS,
+  USER_DAY_PAGES_LIMIT,
+  USER_DAY_TOOLS_LIMIT,
+  USER_DAY_VISITS_LIMIT,
   USER_DEVICES_LIMIT,
   type CursorPage,
   type UserActivityDto,
@@ -13,6 +23,8 @@ import {
   type TimelineItemDto,
   type UserDailyActivityDto,
   type UserDailyQuery,
+  type UserDayDetailDto,
+  type UserDayQuery,
   type UserDevicesDto,
   type UserDevicesQuery,
   type UserListQuery,
@@ -30,6 +42,7 @@ import {
   dropTruncatedOldestDay,
   foldUserDays,
   mapTimelineItem,
+  mapUserDayDetail,
   mapUserDevice,
   mapUserProfile,
   mapUserSummary,
@@ -38,7 +51,7 @@ import { fillCountGaps } from '../domain/timeseries-gaps';
 import { pageFetchSize, parseKeysetCursor, toCursorPage } from '../domain/pagination';
 import type { Viewer } from '../domain/viewer';
 import { userKeyFromHex } from '../enrichment/user-key.hasher';
-import { NotFoundError } from '../errors/app-error';
+import { NotFoundError, ValidationError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
 import {
@@ -258,6 +271,62 @@ export class UserService {
     return body;
   }
 
+  /**
+   * ONE IST calendar day of one person (`query.day`): the day's facts and per-app split, its
+   * activity blocks with time in app, its pages and features in first-use order, and its visits
+   * (newest first). The global range does not apply; app and env do. 400 for a day in the future
+   * or more than USER_DAY_LOOKBACK_DAYS back. A day without activity is an empty answer (200), and
+   * it is STILL recorded: the email for the access-log row is looked up over a wider window
+   * (dayEmailLookupFilter), because "nothing that day" is a fact about the person too.
+   * At most 3 statements run at once: wave 1 (day rows, blocks, pages); wave 2 (tools, visits)
+   * only when the day has activity.
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayBlocks
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayPages
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDayTools
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listSessions
+   * @see ./person-access.recorder.ts PersonAccessRecorder.record
+   */
+  async day(userKey: string, query: UserDayQuery, viewer: Viewer): Promise<UserDayDetailDto> {
+    const now = this.clock.now();
+    const window = oneDayWindow(query.day, now);
+    const appId = await this.appSlugs.resolve(query.app);
+    const environments = environmentsOf(query.env);
+    const filter = currentFilter(window, appId, environments);
+    const key = userKeyFromHex(userKey);
+
+    const [days, blocks, pages] = await Promise.all([
+      this.webEvents.listUserDailyActivity(key, filter),
+      this.webEvents.listUserDayBlocks(key, filter, USER_DAY_BLOCKS_LIMIT),
+      this.webEvents.listUserDayPages(key, filter, USER_DAY_PAGES_LIMIT),
+    ]);
+    const [tools, visits] =
+      days.length === 0
+        ? [[], []]
+        : await Promise.all([
+            this.webEvents.listUserDayTools(key, filter, USER_DAY_TOOLS_LIMIT),
+            this.webEvents.listSessions(filter, {
+              userKey: key,
+              limit: USER_DAY_VISITS_LIMIT,
+              offset: 0,
+            }),
+          ]);
+    const body = mapUserDayDetail(
+      { days, blocks, pages, tools, visits },
+      toTimeWindowDto(window),
+      query.day,
+      now,
+    );
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_day',
+      filter,
+      emailLookup: dayEmailLookupFilter(window, now, appId, environments),
+    });
+    return body;
+  }
+
   /** The list + search body: window → app id → one page of users. */
   private async listMatching(
     query: UserListQuery,
@@ -282,4 +351,53 @@ export class UserService {
       encodeOffsetCursor(offset + query.limit),
     );
   }
+}
+
+/**
+ * The resolved window of ONE IST day (`YYYY-MM-DD`), refused with a 400 when the day is after
+ * today or more than USER_DAY_LOOKBACK_DAYS before it (older raw data is gone anyway).
+ */
+function oneDayWindow(day: string, now: Date): ResolvedTimeWindow {
+  const { from, to } = reportingDayWindow(day);
+  assertDayInLookback(from, now);
+  return resolveQueryWindow(
+    { range: 'custom', from: from.toISOString(), to: to.toISOString() },
+    now,
+    RANGE_DURATIONS_MS.today,
+  );
+}
+
+/** 400 VALIDATION_ERROR unless the day starting at `dayStart` lies in [today − lookback, today]. */
+function assertDayInLookback(dayStart: Date, now: Date): void {
+  const today = startOfReportingDay(now).getTime();
+  const earliest = today - USER_DAY_LOOKBACK_DAYS * DAY_MS;
+  if (dayStart.getTime() > today) throw dayRefused('day is in the future');
+  if (dayStart.getTime() < earliest) {
+    throw dayRefused(`day is more than ${USER_DAY_LOOKBACK_DAYS} days back`);
+  }
+}
+
+/** The 400 of a refused `day`, pointing at the `day` field like a schema error. */
+function dayRefused(message: string): ValidationError {
+  return new ValidationError(message, [{ path: 'day', message }]);
+}
+
+/**
+ * Where the one-day view looks up the person's email for its access-log row: the day itself plus
+ * the last MAX_COUNT_RANGE_MS before now, same app and environments. WHY: the day alone finds no
+ * email when the day was empty (and then nothing would be recorded); the recent window alone
+ * misses a day older than it. The lookup is one newest-first probe per table.
+ */
+function dayEmailLookupFilter(
+  window: ResolvedTimeWindow,
+  now: Date,
+  appId: string | undefined,
+  environments: readonly Environment[] | null,
+): TrafficFilter {
+  return {
+    from: new Date(Math.min(window.from.getTime(), now.getTime() - MAX_COUNT_RANGE_MS)),
+    to: new Date(Math.max(window.to.getTime(), now.getTime())),
+    appId,
+    environments,
+  };
 }

@@ -35,6 +35,7 @@ const PERSON_USER_LEAVES: ReadonlySet<unknown> = new Set(
     qk.users.timeline('', { range: 'today', limit: 1 }),
     qk.users.devices('', { range: 'today' }),
     qk.users.daily('', { range: 'today' }),
+    qk.users.day('', { day: '2026-01-01' }),
   ].map((key) => key[1]),
 );
 

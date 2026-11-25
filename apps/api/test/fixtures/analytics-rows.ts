@@ -18,7 +18,10 @@ import type {
   ToolUsageRow,
   TrafficBucketRow,
   TrafficSummaryRow,
+  UserActivityBlockRow,
   UserDayAppActivityRow,
+  UserDayPageRow,
+  UserDayToolRow,
   UserDeviceRow,
   UserLatestContextRow,
   UserSummaryRow,
@@ -160,6 +163,54 @@ export function userDayAppActivityRow(
     failed_requests: 2,
     tool_uses: 3,
     visits: 2,
+    ...overrides,
+  };
+}
+
+/**
+ * One activity block of 1 Oct 2026 (IST): 09:10 → 10:40 IST, with the day totals of a day that
+ * has this one block only.
+ */
+export function userActivityBlockRow(
+  overrides: Partial<UserActivityBlockRow> = {},
+): UserActivityBlockRow {
+  return {
+    start_at: new Date('2026-10-01T03:40:00.000Z'),
+    end_at: new Date('2026-10-01T05:10:00.000Z'),
+    active_ms: 3_600_000,
+    time_in_app_ms: 3_000_000,
+    apps: ['ebo-sales'],
+    page_views: 5,
+    tool_uses: 3,
+    requests: 10,
+    day_time_in_app_ms: 3_000_000,
+    requests_in_blocks: 10,
+    block_count: 1,
+    ...overrides,
+  };
+}
+
+/** One page of the day (first viewed 09:10 IST). */
+export function userDayPageRow(overrides: Partial<UserDayPageRow> = {}): UserDayPageRow {
+  return {
+    app_slug: 'ebo-sales',
+    path_template: '/stores/:id',
+    first_view_at: new Date('2026-10-01T03:40:00.000Z'),
+    views: 5,
+    active_ms: 3_600_000,
+    total: 1,
+    ...overrides,
+  };
+}
+
+/** One feature of the day (first used 09:20 IST). */
+export function userDayToolRow(overrides: Partial<UserDayToolRow> = {}): UserDayToolRow {
+  return {
+    app_slug: 'ebo-sales',
+    tool: 'export',
+    first_use_at: new Date('2026-10-01T03:50:00.000Z'),
+    uses: 3,
+    total: 1,
     ...overrides,
   };
 }

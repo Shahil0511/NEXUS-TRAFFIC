@@ -35,10 +35,16 @@ import type {
   TimeseriesPointDto,
   ToolTrendPointDto,
   ToolUsageDto,
+  TimeWindowDto,
   TopPathDto,
+  UserActivityBlockDto,
   UserAppUsageDto,
   UserDayActivityDto,
   UserDayAppActivityDto,
+  UserDayDetailDto,
+  UserDayPageDto,
+  UserDayToolDto,
+  UserDayVisitDto,
   UserDeviceDto,
   UserEndpointUsageDto,
   UserLatestContextDto,
@@ -84,8 +90,12 @@ import type {
   ToolUsageRow,
   TopPathRow,
   TrafficBucketRow,
+  UserActivityBlockRow,
   UserAppRow,
   UserDayAppActivityRow,
+  UserDayPageRow,
+  UserDayRows,
+  UserDayToolRow,
   UserDeviceRow,
   UserEndpointRow,
   UserLatestContextRow,
@@ -529,6 +539,101 @@ function foldUserDay(
     apps: perApp.map((app) => app.app).sort(),
     inProgress: day.getTime() + REPORTING_DAY_MS > now.getTime(),
     perApp,
+  };
+}
+
+// ─── One person-day (ROUTES.users.day) ──────────────────────────────────────
+
+/** WHY: one activity block of the one-day view; its span is end − start (shown, never summed). */
+export function mapUserActivityBlock(row: UserActivityBlockRow): UserActivityBlockDto {
+  return {
+    startAt: row.start_at.toISOString(),
+    endAt: row.end_at.toISOString(),
+    spanMs: row.end_at.getTime() - row.start_at.getTime(),
+    timeInAppMs: row.time_in_app_ms,
+    activeMs: row.active_ms,
+    apps: row.apps,
+    pageViews: row.page_views,
+    toolUses: row.tool_uses,
+    requests: row.requests,
+  };
+}
+
+/** WHY: one page of the day; the detail link uses the opaque pageId, never the template. */
+export function mapUserDayPage(row: UserDayPageRow): UserDayPageDto {
+  return {
+    pageId: toPageId(row.app_slug, row.path_template),
+    app: row.app_slug,
+    pathTemplate: row.path_template,
+    firstViewAt: isoOrNull(row.first_view_at),
+    views: row.views,
+    activeMs: row.active_ms,
+  };
+}
+
+/** WHY: one feature of the day; the detail link uses the opaque toolId. */
+export function mapUserDayTool(row: UserDayToolRow): UserDayToolDto {
+  return {
+    toolId: toToolId(row.app_slug, row.tool),
+    app: row.app_slug,
+    tool: row.tool,
+    firstUseAt: row.first_use_at.toISOString(),
+    uses: row.uses,
+  };
+}
+
+/**
+ * WHY: one visit of the day. Only the visit's own facts: the session row also carries the email,
+ * the claimed email, the country and the IP, and NONE of them is copied (the page names the
+ * person already).
+ */
+export function mapUserDayVisit(row: SessionSummaryRow): UserDayVisitDto {
+  return {
+    app: row.app_slug,
+    sessionId: row.session_id,
+    startedAt: row.started_at.toISOString(),
+    lastActivityAt: row.last_seen_at.toISOString(),
+    entryPath: row.entry_path,
+    exitPath: row.exit_path,
+    pageViews: row.page_views,
+    toolUses: row.tool_uses,
+    activeMs: row.visible_ms,
+  };
+}
+
+/**
+ * WHY: the one-day view from its reads. The day summary is the daily fold of the day's (day, app)
+ * rows (null = no activity). The block rows carry the day totals over ALL blocks (window
+ * functions before the LIMIT), so time in app and the calls outside blocks are true for the whole
+ * day even when the blocks are cut: `blockCount` is the day's block count before the LIMIT and
+ * `blocksTruncated` = the day has more blocks than returned.
+ * Calls outside blocks = the day's calls − the calls inside blocks, never below 0 (a call landing
+ * between the two reads cannot make it negative). Lists without rows give 0 totals.
+ */
+export function mapUserDayDetail(
+  rows: UserDayRows,
+  window: TimeWindowDto,
+  day: string,
+  now: Date,
+): UserDayDetailDto {
+  const summary = foldUserDays(rows.days, now)[0] ?? null;
+  const firstBlock = rows.blocks[0];
+  const requestsInBlocks = firstBlock?.requests_in_blocks ?? 0;
+  const blockCount = firstBlock?.block_count ?? 0;
+  return {
+    window,
+    day,
+    summary,
+    timeInAppMs: firstBlock?.day_time_in_app_ms ?? 0,
+    blocks: rows.blocks.map(mapUserActivityBlock),
+    blockCount,
+    blocksTruncated: blockCount > rows.blocks.length,
+    requestsOutsideBlocks: Math.max(0, (summary?.requests ?? 0) - requestsInBlocks),
+    pages: rows.pages.map(mapUserDayPage),
+    pagesTotal: rows.pages[0]?.total ?? 0,
+    tools: rows.tools.map(mapUserDayTool),
+    toolsTotal: rows.tools[0]?.total ?? 0,
+    visits: rows.visits.map(mapUserDayVisit),
   };
 }
 

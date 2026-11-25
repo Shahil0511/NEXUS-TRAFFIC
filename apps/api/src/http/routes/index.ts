@@ -41,6 +41,7 @@ import {
   updateSdkConfigBodySchema,
   userActivityQuerySchema,
   userDailyQuerySchema,
+  userDayQuerySchema,
   userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
@@ -277,6 +278,13 @@ export function buildRouter(c: Container): Router {
     validateParams(userKeyParamsSchema),
     validateQuery(userDailyQuerySchema),
     ctl.users.daily,
+  );
+  r.get(
+    ROUTES.users.day.path,
+    ...admin,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userDayQuerySchema),
+    ctl.users.day,
   );
 
   // ─── Dashboard: journeys ──────────────────────────────────────────────────

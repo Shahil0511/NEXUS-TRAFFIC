@@ -131,3 +131,33 @@ export function startOfReportingDay(now: Date): Date {
   const local = now.getTime() + REPORTING_UTC_OFFSET_MS;
   return new Date(Math.floor(local / day) * day - REPORTING_UTC_OFFSET_MS);
 }
+
+// ─── IST calendar days written YYYY-MM-DD (the one-day view) ────────────────
+
+/** `YYYY-MM-DD` → [year, month 1-12, day]; throws on any other text. */
+function reportingDayParts(day: string): [number, number, number] {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) throw new TimeWindowError(`"${day}" is not a YYYY-MM-DD day`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * The window of ONE IST calendar day: from 00:00 IST of `day` (`YYYY-MM-DD`) to the next 00:00 IST,
+ * 24 h later (India has no DST). Pure; the caller validates `day` (reportingDaySchema).
+ */
+export function reportingDayWindow(day: string): { from: Date; to: Date } {
+  const [year, month, date] = reportingDayParts(day);
+  const from = new Date(Date.UTC(year, month - 1, date) - REPORTING_UTC_OFFSET_MS);
+  return { from, to: new Date(from.getTime() + RANGE_DURATIONS_MS.today) };
+}
+
+/** The IST calendar day (`YYYY-MM-DD`) an instant falls in: 18:29:59Z is still that day, 18:30Z the next. */
+export function reportingDayOf(instant: Date): string {
+  return new Date(instant.getTime() + REPORTING_UTC_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** `day` moved by `n` calendar days (negative = back): 2026-11-30 + 1 → 2026-12-01. Pure. */
+export function addReportingDays(day: string, n: number): string {
+  const [year, month, date] = reportingDayParts(day);
+  return new Date(Date.UTC(year, month - 1, date + n)).toISOString().slice(0, 10);
+}
