@@ -18,6 +18,73 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Pages and Features lists without chart panels (B8-5)
+
+The Pages and Features lists open with one sentence instead of two panels above the table, gain a sortable
+People column, and the Features table shows each feature's trend under its name. Web and docs only: no contract,
+route, schema, migration or env change.
+
+**Done**
+- **Sentences** (pure, `PageHeader` headline, `HeadlineSentence` with `break-words` so a long path wraps at
+  360 px): `features/pages/pagesHeadline.ts` "{n} pages viewed {n} times in this range. People look longest at
+  {page} (median {p50}). Most visits end on {page} ({n} visits)." (`longestMedianPages`, `topExitPages` moved
+  here); without a measured time it says visible time appears once the browser tracker sends it; no exit part
+  without exits. `features/tools/toolsHeadline.ts` "{n} features used {n} times in this range. Most used: {feature}
+  ({n} uses). Used by the most people: {feature} ({n} verified people)." (`mostUsedTool`, `widestReach`); without a
+  verified person it says which identities count. Each page / feature is a link (`PAGES.pageDetail` /
+  `PAGES.toolDetail` with the filters). Empty lists: "No page was viewed / No feature was used in this range."
+  Singulars handled. On a capped list (the API limit reached, `capped` from the view) the opening is a bound,
+  never a total: "The 100 most viewed pages were viewed {n} times in this range." / "The 100 most used features
+  were used {n} times in this range."
+- **Pages** (`features/pages/PagesView.tsx`): "Time on page" chart and "Exit pages" list removed. Columns moved to
+  `features/pages/pageColumns.tsx` (`pageColumns`, exported for B8-7): mono template + app chip
+  (`w-full min-w-48 max-w-0`), Views, Visits, **People** (`distinctUsers`, hint `metricInfo('uniqueUsers')`),
+  Average visible, Median visible, Exits — every number sorts. When pages are loaded but none has a measured
+  visible time, the header actions show the integration guide button next to the tab row
+  (`needsVisibleTimeGuide`).
+- **Features** (`features/tools/ToolsView.tsx`): "Most used tools" chart and "Widest reach" list removed;
+  `mostUsedBars` deleted. `toolColumns(grain, linkQuery)` (same parameters): first column = name + app chip +
+  `Sparkline` (aria-label `trendLabel`), the Trend column is gone; "Tool" → "Feature", "Users" → "People" (hint
+  `metricInfo('uniqueUsers')`); panel, caption, filter, match count, capped note and empty states say "feature(s)".
+- **Sort** (client-side over the loaded top 100, no new request): `features/pages/usePageListSort.ts`
+  (`?sort=views|people|sessions|avg|p50|exits&dir=`, default views desc) → `features/pages/pageSort.ts`
+  `sortPages`; `features/tools/useToolListSort.ts` (`?sort=uses|people|sessions|lastUsed&dir=`, default uses desc)
+  → `features/tools/toolSort.ts` `sortTools`; both on `lib/sortLoadedRows.ts` (nulls last in both directions,
+  ties by app|template / app|name, `sortedByCaption`). An unknown value falls back to the default. The table
+  description: "Sorted by views, most first" (+ " · Showing the top 100 … — there may be more; sorting covers the
+  loaded rows" when capped). `DataTable`'s comment now names both sort modes. Text filter, match count,
+  "no match" and empty states unchanged in behaviour; the empty states offer Widen range AND the integration guide.
+
+**Nothing lost:** Time on page chart → sortable Median visible column + the sentence's longest page (and its
+"no time measured" hint → the sentence; its guide link → the header actions in that state, and the table's empty
+state); Exit pages → sortable Exits
+column + the sentence's top exit; Most used tools → default order by uses + the sentence's most used (its guide
+link → the empty state); Widest reach → sortable People column + the sentence (its "only SSO or app-attested"
+hint → the sentence when nobody is verified, and the People (i)); Trend column → the sparkline in the first column.
+
+**Tests:** `lib/sortLoadedRows.test.ts`; `features/pages/pagesHeadline.test.ts`, `features/pages/pageSort.test.ts`,
+`features/tools/toolsHeadline.test.ts`, `features/tools/toolSort.test.ts` (sentences, links, singulars, empty /
+unmeasured / unverified cases, every sort key, nulls last, ties, captions); `PagesView.test.tsx` (no chart panels,
+the sentence with two links, People column after Visits, every number header sorts, a click writes `?sort` and
+reorders with no new request, unknown `?sort` → views, a shared `?sort=exits&dir=asc` kept, capped note, filter
+never reaches the API or the URL, empty state with guide, guide link when no page has a measured time and none
+otherwise, unmeasured page never "longest", capped sentence); `ToolsView.test.tsx` (table "Features", headers,
+sparkline in the first column, the sentence links carrying `?app=&range=`, People sort, unknown `?sort` → uses,
+capped list + capped sentence, filter never reaches the API or the URL, Clear filter). Banned-word scans in every
+render test that shows the page.
+
+**Docs:** 03-code-navigation (Pages / Features row: sentences, capped wording, guide link, columns, sort chain); 05-conventions §5b (table
+sort in the URL, client-side for capped lists).
+
+**Next:** B8-6 (App profile, part 1).
+
+**Known issues:** the browser check (1280 / 360 px, both themes, scroll to the PageEnd) is for after the push;
+layout was checked by reading the classes (the sentence has `break-words` inside the hero's `min-w-0` column, the
+first column of both tables keeps `min-w-48` so the sparkline fits and the table scrolls inside its card). The
+sentences count the loaded rows only (the API's top 100); on a capped list they say "The 100 most viewed pages /
+most used features" instead of a total. The Request types list still has no People column or
+sentence (no user count in `EndpointStatsDto`).
+
 ## 2026-11-25 — Request type report sheet; one tab row for the three lists (B8-4)
 
 A request type's page is a report sheet like the page and feature pages, with its own "Speed and failures" row.

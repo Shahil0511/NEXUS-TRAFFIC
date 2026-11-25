@@ -3,18 +3,11 @@
 import type { PageStatsDto } from '@nexus/shared';
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import { AppChip } from '@/components/AppChip';
-import { PageLink } from '@/components/EntityLinks';
-import { RankedBarChart, type RankedBar } from '@/components/charts/RankedBarChart';
-import { DataTable, type DataTableColumn } from '@/components/DataTable';
+import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
-import { GuideLinkButton } from '@/components/GuideLinkButton';
 import { ErrorState } from '@/components/ErrorState';
-import { PageHeader } from '@/components/PageHeader';
-import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
-import { QueryState } from '@/components/QueryState';
-import { RankedList } from '@/components/RankedList';
-import { WidenRangeButton } from '@/components/WidenRangeButton';
+import { GuideLinkButton } from '@/components/GuideLinkButton';
+import { HeadlineSentence } from '@/components/HeadlineSentence';
 import {
   cappedListNote,
   FilterMatchCount,
@@ -22,109 +15,45 @@ import {
   LoadedRowsFilter,
   NoFilterMatch,
 } from '@/components/LoadedRowsFilter';
+import { PageHeader } from '@/components/PageHeader';
+import { Panel } from '@/components/Panel';
+import { Skeleton } from '@/components/ui/skeleton';
+import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import { formatDuration, formatInteger, formatPercent, formatWindowCaption } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { formatWindowCaption } from '@/lib/format';
 
+import { pageColumns } from './pageColumns';
+import { longestMedianPages, pagesHeadline } from './pagesHeadline';
+import { pageKey, pageSortCaption, sortPages } from './pageSort';
 import { PagesToolsTabs } from './PagesToolsTabs';
+import { usePageListSort } from './usePageListSort';
 import { usePageStats } from './usePageStats';
 
 /** Page templates fetched (the API ranks them by views). */
 const PAGE_LIMIT = 100;
-const CHART_BARS = 8;
-const EXIT_ROWS = 5;
-const PERCENT = 100;
 
-// ─── Pages ───────────────────────────────────────────────────────────────────
-
-function pageKey(page: PageStatsDto): string {
-  return `${page.app}|${page.pathTemplate}`;
-}
-
-/** The pages with the longest median visible time (pages without a measurement are skipped). */
-export function longestMedianPages(
-  pages: readonly PageStatsDto[],
-  limit = CHART_BARS,
-): RankedBar[] {
-  return pages
-    .filter((page) => page.p50VisibleMs !== null)
-    .sort((a, b) => (b.p50VisibleMs ?? 0) - (a.p50VisibleMs ?? 0))
-    .slice(0, limit)
-    .map((page) => ({ key: pageKey(page), label: page.pathTemplate, value: page.p50VisibleMs! }));
-}
-
-function topExitPages(pages: readonly PageStatsDto[]): PageStatsDto[] {
-  return pages
-    .filter((page) => page.exits > 0)
-    .sort((a, b) => b.exits - a.exits)
-    .slice(0, EXIT_ROWS);
-}
-
-/** The table columns; the app chip opens the app's page (links carry `linkQuery`). */
-function pageColumns(
-  linkQuery: Readonly<Record<string, string | undefined>>,
-): DataTableColumn<PageStatsDto>[] {
-  return [
-    {
-      id: 'page',
-      header: 'Page',
-      className: 'w-full max-w-0',
-      cell: (row) => (
-        <span className="block min-w-0 space-y-1">
-          <PageLink
-            app={row.app}
-            pageId={row.pageId}
-            pathTemplate={row.pathTemplate}
-            linkQuery={linkQuery}
-            className="block truncate text-xs"
-          />
-          <AppChip app={row.app} linkQuery={linkQuery} />
-        </span>
-      ),
-    },
-    { id: 'views', header: 'Views', align: 'right', cell: (row) => formatInteger(row.views) },
-    {
-      id: 'sessions',
-      header: 'Visits',
-      align: 'right',
-      cell: (row) => formatInteger(row.uniqueSessions),
-    },
-    {
-      id: 'avg',
-      header: 'Average visible',
-      hint: metricInfo('visibleTime'),
-      align: 'right',
-      cell: (row) => formatDuration(row.avgVisibleMs),
-    },
-    {
-      id: 'p50',
-      header: 'Median visible',
-      hint: metricInfo('visibleTime'),
-      align: 'right',
-      cell: (row) => formatDuration(row.p50VisibleMs),
-    },
-    {
-      id: 'exits',
-      header: 'Exits',
-      align: 'right',
-      cell: (row) => (
-        <span className="flex flex-col items-end">
-          <span>{formatInteger(row.exits)}</span>
-          <span className="text-2xs text-muted-foreground">
-            {formatPercent(
-              row.uniqueSessions > 0 ? (row.exits / row.uniqueSessions) * PERCENT : null,
-            )}
-            <span className="sr-only"> of visits</span>
-          </span>
-        </span>
-      ),
-    },
-  ];
+/** WHY: "Sorted by views, most first" plus, on a capped list, that the sort covers what is loaded. */
+function tableDescription(sortCaption: string, capped: string | null): string {
+  return capped ? `${sortCaption} · ${capped}; sorting covers the loaded rows` : sortCaption;
 }
 
 /**
- * The Pages tab of "Pages & Tools": how long each page is actually looked at (VISIBLE time —
- * a background tab does not count), how often it is viewed, and where sessions end.
+ * WHY: pages are loaded but none has a measured visible time — the tracker sends views without
+ * visibility ticks. The sentence says so; this keeps the integration guide one click away (the
+ * table's empty state, which also carries it, shows only when no page was viewed at all).
+ */
+function needsVisibleTimeGuide(items: readonly PageStatsDto[] | undefined): boolean {
+  return items !== undefined && items.length > 0 && longestMedianPages(items).length === 0;
+}
+
+/**
+ * The Pages tab of "Pages & features": how long each page is actually looked at (VISIBLE time —
+ * a background tab does not count), how often it is viewed, by how many people, and where visits
+ * end.
+ *
+ * WHY a sentence and no charts: the page's totals, the page people look at longest and the page
+ * most visits end on read as one sentence in the hero (pagesHeadline); the table below holds
+ * every number and sorts by any of them (usePageListSort → sortPages, on the loaded rows).
  */
 export function PagesView() {
   const { filters } = useGlobalFilters();
@@ -132,8 +61,7 @@ export function PagesView() {
   const items = pages.data?.items;
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
   const columns = useMemo(() => pageColumns(linkQuery), [linkQuery]);
-  const longest = useMemo(() => longestMedianPages(items ?? []), [items]);
-  const exits = useMemo(() => topExitPages(items ?? []), [items]);
+  const { sort, dir, setSort } = usePageListSort();
   const [filterText, setFilterText] = useState('');
   const filterInputRef = useRef<HTMLInputElement>(null);
   // WHY focus the search box: "Clear filter" unmounts itself, which would drop focus to <body>.
@@ -143,8 +71,13 @@ export function PagesView() {
   }, []);
   const filtering = filterText.trim() !== '';
   const rows = useMemo(
-    () => filterLoadedRows(items, filterText, (page) => page.pathTemplate),
-    [items, filterText],
+    () =>
+      sortPages(
+        filterLoadedRows(items, filterText, (page) => page.pathTemplate),
+        sort,
+        dir,
+      ),
+    [items, filterText, sort, dir],
   );
   const capped = cappedListNote(items?.length ?? 0, PAGE_LIMIT, 'pages');
 
@@ -155,73 +88,29 @@ export function PagesView() {
         description={
           pages.data
             ? formatWindowCaption(pages.data.window)
-            : 'Time on page and the UI tools people use'
+            : 'Time on page and the features people use'
         }
-        actions={<PagesToolsTabs active="pages" />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <PagesToolsTabs active="pages" />
+            {needsVisibleTimeGuide(items) ? <GuideLinkButton chapter="browserContract" /> : null}
+          </div>
+        }
+        headline={
+          items ? (
+            <HeadlineSentence
+              parts={pagesHeadline(items, linkQuery, capped !== null)}
+              className="break-words"
+            />
+          ) : pages.isPending ? (
+            <Skeleton className="h-7 w-full max-w-xl" />
+          ) : null
+        }
       />
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel
-          title="Time on page"
-          description={`Median visible time per view · top ${CHART_BARS}`}
-          className="lg:col-span-2"
-        >
-          <QueryState
-            query={pages}
-            skeleton={<ChartSkeleton />}
-            isEmpty={longest.length === 0}
-            empty={
-              <EmptyState
-                title="No time measured"
-                description="Visible time appears once the app's browser tracker is installed."
-                action={<GuideLinkButton chapter="browserContract" />}
-              />
-            }
-          >
-            {() => (
-              <RankedBarChart
-                bars={longest}
-                seriesLabel="Median visible time"
-                ariaLabel="Median visible time per page"
-                format={formatDuration}
-                tickFormat={formatDuration}
-                labelWidth={180}
-              />
-            )}
-          </QueryState>
-        </Panel>
-        <Panel title="Exit pages" description="Where visits end">
-          <QueryState
-            query={pages}
-            skeleton={<ListSkeleton rows={EXIT_ROWS} />}
-            isEmpty={exits.length === 0}
-            empty={<EmptyState title="No exits recorded" />}
-          >
-            {() => (
-              <RankedList
-                ariaLabel="Exit pages"
-                items={exits.map((page) => ({
-                  key: pageKey(page),
-                  label: (
-                    <PageLink
-                      app={page.app}
-                      pageId={page.pageId}
-                      pathTemplate={page.pathTemplate}
-                      linkQuery={linkQuery}
-                    />
-                  ),
-                  sublabel: page.app,
-                  value: page.exits,
-                }))}
-              />
-            )}
-          </QueryState>
-        </Panel>
-      </div>
 
       <Panel
         title="Pages"
-        description={capped ? `Most viewed first · ${capped}` : 'Most viewed first'}
+        description={tableDescription(pageSortCaption(sort, dir), capped)}
         contentClassName="px-0 pb-0"
         aside={
           items && items.length > 0 ? (
@@ -250,6 +139,8 @@ export function PagesView() {
               columns={columns}
               rows={rows}
               rowKey={pageKey}
+              sort={{ sort, dir }}
+              onSortChange={setSort}
               loading={pages.isPending}
               empty={
                 filtering && items && items.length > 0 ? (
@@ -257,8 +148,13 @@ export function PagesView() {
                 ) : (
                   <EmptyState
                     title="No page views in this window"
-                    description="Pages appear once an app sends browser events. Try a longer range."
-                    action={<WidenRangeButton />}
+                    description="Pages and their visible time appear once an app's browser tracker sends events. Try a longer range or see the integration guide."
+                    action={
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <WidenRangeButton />
+                        <GuideLinkButton chapter="browserContract" />
+                      </div>
+                    }
                   />
                 )
               }

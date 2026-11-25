@@ -121,9 +121,10 @@ function HeaderWithHint({
 }
 
 /**
- * WHY: one table for every list page. Sorting is SERVER-side: a header click only reports the
- * whitelisted sort key upward (the page puts it in the URL → new query key → new request), so
- * the order always matches what the API ranked over the whole window, not just the loaded rows.
+ * WHY: one table for every list page. A header click only reports the whitelisted sort key upward;
+ * the page puts it in the URL. A server-paged list (Request types, People) turns it into a new
+ * request, so the order matches the whole window; a capped top-N list (Pages, Features) sorts the
+ * rows it already loaded (lib/sortLoadedRows.ts) and says so in its description.
  */
 export function DataTable<T, S extends string = never>({
   columns,

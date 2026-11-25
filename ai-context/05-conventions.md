@@ -90,6 +90,9 @@ Split it: `parseApiKey()` (pure) → `ApiKeyVerifier.matches()` → `AppKeyAuthe
   `apps/web/src/features/noKpiCardRows.test.ts` holds the allow-list of views that still import `KpiCard`; it
   only shrinks (`DeltaPill` alone is fine anywhere). One object (a page, a feature, a request type) is a report sheet
   (`components/ReportSheet.tsx`): the sentence, a `FactSheet` strip, one wide chart, two columns, one wide row.
+- Table sort lives in the URL (`?sort=&dir=`, nuqs, an unknown value falls back to the default). A server-paged
+  list sends it to the API; a capped top-N list (Pages, Features) sorts its loaded rows with
+  `apps/web/src/lib/sortLoadedRows.ts` (nulls last) and its description says "Sorted by …, most first".
 - People's names and single requests are for dashboard admins only on the object pages: the API sends `null`
   (`forAdmins`, `apps/api/src/domain/viewer.ts`, ADR 0019) and the view shows `components/WhoUsesIt.tsx` /
   `components/AdminsOnlyNote.tsx`; never render an empty list for `null`.
