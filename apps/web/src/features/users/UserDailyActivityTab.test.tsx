@@ -677,10 +677,13 @@ describe('UserDailyActivityTab — usual activity hours', () => {
     return queries;
   }
 
-  it('ships switched off: no panel and no pattern request', async () => {
+  it('ships switched on since the production measurement', async () => {
     const shipped =
       await vi.importActual<typeof import('@/lib/featureFlags')>('@/lib/featureFlags');
-    expect(shipped.USUAL_ACTIVITY_HOURS_ENABLED).toBe(false);
+    expect(shipped.USUAL_ACTIVITY_HOURS_ENABLED).toBe(true);
+  });
+
+  it('while switched off: no panel and no pattern request', async () => {
     const queries = servePattern();
     await renderTab();
     await screen.findByText('End of list · 2 days');

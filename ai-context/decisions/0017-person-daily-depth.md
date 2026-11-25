@@ -166,7 +166,9 @@
        (`apps/web/src/lib/featureFlags.ts`) is true; it ships false, so no pattern request is sent. It is
        switched on in the commit that notes in `PROGRESS.md` the owner's production `EXPLAIN ANALYZE` of this
        read for one person with a lot of activity over 30 days. If that read is slow, the fallback is to
-       offer the 7-day range only. The API leaf is registered and tested either way.
+       offer the 7-day range only. The API leaf is registered and tested either way. **Switched on
+       2026-11-25:** the measurement took 57–111 ms warm and at most 635 ms cold, using the per-partition
+       indexes.
   10. **The People list sorts by time only (shipped in step 7).**
       - `USER_SORT_VALUES` is `lastSeen`, `firstSeen` (`packages/shared/src/schemas/analytics.ts`); the count
         keys (API calls, page views, visits, failed) are retired from the contract, the repository whitelist
@@ -191,5 +193,5 @@
     (`features/live/OnlineNowPanel.tsx`) and request samples (`components/requestSampleColumns.tsx`).
     Showing them as plain text for non-admins is follow-up work, pending the owner's go-ahead.
   - Opening a day writes a `person_day` row even when the day is empty (one per admin + person per 10 min).
-  - Usual activity hours are built but hidden; turning them on needs the production measurement above and a
-    one-line change of `USUAL_ACTIVITY_HOURS_ENABLED`, nothing else.
+  - Usual activity hours were hidden until the production measurement above. They were switched on on
+    2026-11-25 with a one-line change of `USUAL_ACTIVITY_HOURS_ENABLED`.

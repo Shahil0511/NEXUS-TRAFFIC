@@ -9,10 +9,11 @@
 
 /**
  * The "Usual activity hours" panel of the person page's Daily activity tab (ROUTES.users.pattern,
- * UsualActivityHoursPanel). WHY false: the grid's read scans up to 31 days of one person in both
- * tables; it waits for the owner's EXPLAIN ANALYZE of that read on production (one person with a
- * lot of activity, 30 days), to be noted in ai-context/PROGRESS.md. While false the panel is not
- * rendered and no pattern request is sent. The API leaf is registered and tested either way.
+ * UsualActivityHoursPanel). The grid's read scans up to 31 days of one person in both tables. WHY
+ * true: the EXPLAIN ANALYZE of that read on production (2026-11-25, 30 days, the busiest people,
+ * all apps) took 57-111 ms and at most 635 ms with a cold cache. Each partition was read through its
+ * (user_key, occurred_at) index or primary key; the numbers are in ai-context/PROGRESS.md. While
+ * false the panel is not rendered and no pattern request is sent.
  * @see ../../../../ai-context/decisions/0017-person-daily-depth.md
  */
-export const USUAL_ACTIVITY_HOURS_ENABLED: boolean = false;
+export const USUAL_ACTIVITY_HOURS_ENABLED: boolean = true;

@@ -18,6 +18,30 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Usual activity hours switched on after the production measurement (ADR 0017)
+
+The owner gave access, and I ran the `users.pattern` read on production (10.150.0.5 / nexus_traffic) myself.
+- **How:** a Node script from outside the repo. It ran in `BEGIN TRANSACTION READ ONLY` with
+  `statement_timeout` 60 s and ended with `ROLLBACK`, and it printed no credentials or keys. The statement is
+  the one `listUserActivityPattern` sends, with no app filter (the "All apps" default), environment `{prod}`,
+  and the window from 00:00 IST 30 days ago to 00:00 IST tomorrow (26 Oct–26 Nov).
+- **Busiest browser person** (about 21k web events, no API rows): 111 ms cold (planning 122 ms) and 57 ms
+  warm, 49 result rows.
+  - api_requests: index scans on `*_user_key_occurred_at_idx`.
+  - web_events: bitmap scans on the same index.
+  - Two monthly partitions each (2026m10, 2026m11); buffers about 2.4k.
+- **Busiest API person** (about 5.8k API rows): 635 ms cold and 69 ms warm, 51 result rows.
+  - api_requests_y2026m10 was read through its primary key; the others through the user_key index.
+- **Decision:** fast enough for 30 days, so the 7-day-only fallback is not needed.
+  - `USUAL_ACTIVITY_HOURS_ENABLED` is now `true`.
+  - The test that pinned the shipped value now expects `true`. The switched-off behaviour is still tested
+    through the mock.
+  - ADR 0017 and the GLOSSARY are updated.
+
+**Next:** after the deploy, check the panel live on a person's Daily activity tab, then the visit story (B4).
+
+---
+
 ## 2026-11-25 — Person 360 daily depth: fixes from the live check after the deploy of steps 1–7
 
 Web only; no contract, API or migration change. The owner pushed cc0ea41..5268f73. Production health was
