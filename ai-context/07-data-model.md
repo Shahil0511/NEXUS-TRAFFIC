@@ -313,7 +313,7 @@ key, never the email, so emails do not end up in gateway logs.
 
 | Data | Stored as | Protection |
 |---|---|---|
-| user email | `user_email` (verified only), `claimed_email` | dashboard behind SSO; URLs use `user_key`; logs mask emails (`s***@libas.in`) |
+| user email | `user_email` (verified only), `claimed_email` | dashboard behind SSO; URLs use `user_key`; logs mask emails (`s***@libas.in`); the person page is admin-only (ADR 0015) and the people lists of one page, feature or request type (and a request type's slowest calls) reach admins only, counts for everyone ([ADR 0019](decisions/0019-names-on-object-pages-for-admins.md)) |
 | IP address | `ip` per `IP_STORAGE_MODE`: `full` (default, requested by the business), `truncated` (/24 for IPv4, /48 for IPv6) or `hashed` (`ip` empty, only `ip_hash` = HMAC with `IP_HASH_SECRET`) | geo is always resolved from the full IP **before** storage; IPs are visible to dashboard admins only |
 | location | country/region/city, lat/lon rounded to 1 decimal | city-level only |
 | user agent | parsed browser/OS/device class only | raw string not stored |

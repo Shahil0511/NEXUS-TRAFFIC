@@ -26,13 +26,16 @@ import {
   type IntegrationHealthDto,
   type OverviewSummaryDto,
   type OverviewTimeseriesDto,
+  type PageDetailDto,
   type PageStatsDto,
   type PersonAccessEntryDto,
   type RouteDescriptor,
   type TimelineItemDto,
+  type ToolDetailDto,
   type UserSummaryDto,
   type WindowedListDto,
 } from '@nexus/shared';
+import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 import type { Express } from 'express';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -49,6 +52,7 @@ import {
   SALES_SLUG,
   seedAnalytics,
   SEEDED_IP,
+  seedJourneys,
   USER_A,
   USER_B,
   userKeyHex,
@@ -208,20 +212,26 @@ describe.skipIf(!RUN_DB_TESTS)('S2 e2e: dashboard analytics over HTTP (db)', () 
     expect(badSort.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
   });
 
-  it('endpoints.detail: admins see the IP of the slowest calls', async () => {
+  it('endpoints.detail: admins get the slowest calls (with the IP) and the callers', async () => {
     const path = buildPath(ROUTES.endpoints.detail, { endpointId: ENDPOINT_IDS.reportExport });
     const res = await get(ROUTES.endpoints.detail, ADMIN_EMAIL, {}, path);
     expect(res.status).toBe(200);
     const body = res.body as EndpointDetailDto;
     expect(body.endpoint.calls).toBe(EXPECTED.calls.reportExport);
-    expect(body.slowest[0]?.actor.ip).toBe(SEEDED_IP);
+    expect(Array.isArray(body.slowest)).toBe(true);
+    expect(Array.isArray(body.topUsers)).toBe(true);
+    expect(body.slowest?.[0]?.actor.ip).toBe(SEEDED_IP);
   });
 
-  it('endpoints.detail: a non-admin NEVER receives an IP', async () => {
+  it('endpoints.detail: a non-admin gets slowest and topUsers null, NEVER an IP (ADR 0019)', async () => {
     const path = buildPath(ROUTES.endpoints.detail, { endpointId: ENDPOINT_IDS.reportExport });
     const res = await get(ROUTES.endpoints.detail, VIEWER_EMAIL, {}, path);
     expect(res.status).toBe(200);
-    expect((res.body as EndpointDetailDto).slowest.every((s) => s.actor.ip === null)).toBe(true);
+    const body = res.body as EndpointDetailDto;
+    expect(body.slowest).toBeNull();
+    expect(body.topUsers).toBeNull();
+    expect(body.endpoint.calls).toBe(EXPECTED.calls.reportExport);
+    expect(body.uniqueUsers).toBeGreaterThanOrEqual(0);
     expect(res.text).not.toContain(SEEDED_IP);
   });
 
@@ -483,5 +493,80 @@ describe.skipIf(!RUN_DB_TESTS)('S2 e2e: dashboard analytics over HTTP (db)', () 
     ]);
     expect(sales?.level).toBeDefined();
     expect(JSON.stringify(res.body)).not.toContain(SEEDED_IP);
+  });
+});
+
+/**
+ * ADR 0019 over HTTP: pages.detail and tools.detail send the people (topUsers) to admins only. The
+ * journeys seed has a page (/home) and a feature (export-csv) of ebo-sales, both used by USER_A.
+ */
+describe.skipIf(!RUN_DB_TESTS)('B8-3 e2e: object pages send people to admins only (db)', () => {
+  let db: TestDatabase;
+  let container: Container;
+  let app: Express;
+  let now: Date;
+
+  /** A signed dashboard GET (cookie + X-Nexus-Dashboard: 1) over the last 24 hours. */
+  function get(email: string, path: string) {
+    return request(app)
+      .get(url(path))
+      .query({ range: '24h' })
+      .set('Cookie', cookieFor(email, now))
+      .set(INGEST_HEADERS.dashboard, '1');
+  }
+
+  beforeAll(async () => {
+    db = await createTestDatabase('e2e_object_people');
+    now = (await seedJourneys(db)).now;
+    container = createContainer(testConfig(db.appUrl), {
+      logger: silentLogger(),
+      clock: new FixedClock(now),
+    });
+    app = createApp(container);
+  });
+
+  afterAll(async () => {
+    if (container) {
+      await Promise.allSettled([container.pools.write.end(), container.pools.query.end()]);
+    }
+    await db?.drop();
+  });
+
+  const pagePath = () =>
+    buildPath(ROUTES.pages.detail, { app: SALES_SLUG, pageId: toPageId(SALES_SLUG, '/home') });
+  const toolPath = () =>
+    buildPath(ROUTES.tools.detail, {
+      app: SALES_SLUG,
+      toolId: toToolId(SALES_SLUG, 'export-csv'),
+    });
+
+  it('pages.detail: an admin gets the viewers, a viewer gets null and no email', async () => {
+    const admin = await get(ADMIN_EMAIL, pagePath());
+    expect(admin.status).toBe(200);
+    const adminBody = admin.body as PageDetailDto;
+    expect(Array.isArray(adminBody.topUsers)).toBe(true);
+    expect(adminBody.topUsers?.map((user) => user.email)).toContain(USER_A);
+
+    const viewer = await get(VIEWER_EMAIL, pagePath());
+    expect(viewer.status).toBe(200);
+    const viewerBody = viewer.body as PageDetailDto;
+    expect(viewerBody.topUsers).toBeNull();
+    expect(viewerBody.page).toEqual(adminBody.page);
+    expect(viewer.text).not.toContain(USER_A);
+  });
+
+  it('tools.detail: an admin gets the users, a viewer gets null and no email', async () => {
+    const admin = await get(ADMIN_EMAIL, toolPath());
+    expect(admin.status).toBe(200);
+    const adminBody = admin.body as ToolDetailDto;
+    expect(Array.isArray(adminBody.topUsers)).toBe(true);
+    expect(adminBody.topUsers?.map((user) => user.email)).toContain(USER_A);
+
+    const viewer = await get(VIEWER_EMAIL, toolPath());
+    expect(viewer.status).toBe(200);
+    const viewerBody = viewer.body as ToolDetailDto;
+    expect(viewerBody.topUsers).toBeNull();
+    expect(viewerBody.tool).toEqual(adminBody.tool);
+    expect(viewer.text).not.toContain(USER_A);
   });
 });

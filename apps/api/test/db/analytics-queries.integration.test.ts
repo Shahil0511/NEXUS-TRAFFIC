@@ -449,8 +449,8 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
   describe('EndpointService.detail', () => {
     it("counts the route's unique users and ranks its top callers by calls", async () => {
       const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, ADMIN);
-      expect(dto.uniqueUsers).toBe(dto.topUsers.length);
-      const calls = dto.topUsers.map((user) => user.count);
+      expect(dto.uniqueUsers).toBe(dto.topUsers?.length);
+      const calls = (dto.topUsers ?? []).map((user) => user.count);
       expect([...calls].sort((a, b) => b - a)).toEqual(calls);
       expect(calls.reduce((sum, n) => sum + n, 0)).toBeLessThanOrEqual(dto.endpoint.calls);
     });
@@ -468,14 +468,16 @@ describe.skipIf(!RUN_DB_TESTS)('analytics queries as nexus_app on the query pool
         { status: 404, count: 1 },
       ]);
       // Streams are not "slow calls"; slowest first.
-      expect(dto.slowest.map((s) => s.durationMs)).toEqual([4000, 3000, 2000, 1000]);
-      expect(dto.slowest[0]?.actor.ip).toBe(SEEDED_IP);
-      expect(dto.slowest[0]?.actor.userKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(dto.slowest?.map((s) => s.durationMs)).toEqual([4000, 3000, 2000, 1000]);
+      expect(dto.slowest?.[0]?.actor.ip).toBe(SEEDED_IP);
+      expect(dto.slowest?.[0]?.actor.userKey).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    it('masks IPs for non-admins', async () => {
+    it('sends no slowest calls and no callers to non-admins, only the count (ADR 0019)', async () => {
       const dto = await endpoints.detail(ENDPOINT_IDS.reportExport, { range: '24h' }, VIEWER);
-      expect(dto.slowest.every((s) => s.actor.ip === null)).toBe(true);
+      expect(dto.slowest).toBeNull();
+      expect(dto.topUsers).toBeNull();
+      expect(dto.uniqueUsers).toBeGreaterThan(0);
       expect(JSON.stringify(dto)).not.toContain(SEEDED_IP);
     });
 
@@ -1101,27 +1103,36 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
     it('PageService.detail agrees with the list and its trend adds up to the views', async () => {
       const list = await pages.list({ range: '24h', limit: 50 });
       const home = list.items.find((p) => p.pathTemplate === '/home')!;
-      const dto = await pages.detail(home.app, home.pageId, { range: '24h' });
+      const dto = await pages.detail(home.app, home.pageId, { range: '24h' }, ADMIN);
       expect(dto.page).toEqual(home);
       expect(dto.trend.reduce((sum, p) => sum + p.views, 0)).toBe(home.views);
-      expect(dto.topUsers.reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(home.views);
+      expect((dto.topUsers ?? []).reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(
+        home.views,
+      );
+      // A viewer gets the same page, without the viewers' emails (ADR 0019).
+      const asViewer = await pages.detail(home.app, home.pageId, { range: '24h' }, VIEWER);
+      expect(asViewer.topUsers).toBeNull();
+      expect(asViewer.page).toEqual(dto.page);
       for (const link of [...dto.cameFrom, ...dto.wentTo]) {
         expect(link.pageId).toBe(toPageId(home.app, link.pathTemplate));
         expect(link.pathTemplate).not.toBe('/home');
       }
       await expect(
-        pages.detail(home.app, toPageId(home.app, '/never-seen'), { range: '24h' }),
+        pages.detail(home.app, toPageId(home.app, '/never-seen'), { range: '24h' }, ADMIN),
       ).rejects.toMatchObject({ statusCode: 404 });
     });
 
     it('ToolService.detail: users, pages and actions add up to the uses', async () => {
-      const dto = await tools.detail(SALES_SLUG, toToolId(SALES_SLUG, 'export-csv'), {
-        range: '24h',
-      });
+      const toolId = toToolId(SALES_SLUG, 'export-csv');
+      const dto = await tools.detail(SALES_SLUG, toolId, { range: '24h' }, ADMIN);
       expect(dto.tool).toMatchObject({ tool: 'export-csv', uses: 2, distinctUsers: 1 });
       expect(dto.pages.reduce((sum, p) => sum + p.uses, 0)).toBe(2);
       expect(dto.actions.reduce((sum, a) => sum + a.uses, 0)).toBe(2);
-      expect(dto.topUsers.reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(2);
+      expect((dto.topUsers ?? []).reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(2);
+      // A viewer gets the same counts, without the users' emails (ADR 0019).
+      const asViewer = await tools.detail(SALES_SLUG, toolId, { range: '24h' }, VIEWER);
+      expect(asViewer.topUsers).toBeNull();
+      expect(asViewer.tool).toEqual(dto.tool);
     });
 
     it('UserService.list sorts by a whitelisted count key in both directions (ADR 0018)', async () => {

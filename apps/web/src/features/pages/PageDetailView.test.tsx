@@ -3,8 +3,10 @@ import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { WHO_ADMINS_ONLY } from '@/components/AdminsOnlyNote';
 import { ToolDetailView } from '@/features/tools/ToolDetailView';
-import { PAGE_ID, PAGE_STATS, TOOL_ID, TOOL_USAGE, USER_KEY, WINDOW } from '@/test/fixtures';
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
+import { ME, PAGE_ID, PAGE_STATS, TOOL_ID, TOOL_USAGE, USER_KEY, WINDOW } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -58,8 +60,18 @@ const TOOL_DETAIL: ToolDetailDto = {
   ],
 };
 
+/** The viewer is NOT an admin; the API then sends no people (topUsers null, ADR 0019). */
+function serveAsViewer() {
+  server.use(http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json({ ...ME, isAdmin: false })));
+}
+
+/** The h2 panel titles in page order (the report sheet's sections). */
+function panelTitles(): string[] {
+  return screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent ?? '');
+}
+
 describe('PageDetailView', () => {
-  it('shows who views the page, the tools and API calls on it and where people come from', async () => {
+  it('shows who views the page, the features and request types on it and where people come from', async () => {
     let requested: string | undefined;
     server.use(
       http.get(routeUrl(ROUTES.pages.detail), ({ request }) => {
@@ -80,6 +92,8 @@ describe('PageDetailView', () => {
     expect(
       (await within(viewers).findByRole('link', { name: 'buyer@libas.in' })).getAttribute('href'),
     ).toBe(`/users/${USER_KEY}?app=ebo-sales&range=7d`);
+    expect(screen.getByText('Most views first')).toBeInTheDocument();
+    expect(screen.queryByText(WHO_ADMINS_ONLY)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'export-csv' }).getAttribute('href')).toBe(
       `/tools/ebo-sales/${TOOL_ID}?app=ebo-sales&range=7d`,
     );
@@ -101,18 +115,118 @@ describe('PageDetailView', () => {
     ]);
     expect(within(trail).getByText('/orders/:id')).toHaveAttribute('aria-current', 'page');
   });
+
+  it('reads as a report sheet: sentence, facts strip, chart, around | who, used with; no card row', async () => {
+    server.use(http.get(routeUrl(ROUTES.pages.detail), () => HttpResponse.json(PAGE_DETAIL)));
+    renderWithProviders(<PageDetailView app="ebo-sales" pageId={PAGE_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/orders/:id' });
+
+    const sentence = screen.getByText(/^Viewed/).closest('p')!;
+    expect(sentence).toHaveTextContent(
+      'Viewed 420 times by 64 verified people in 200 visits in this range. People look at it for about 48 s (median 31 s). 25.0% of visits end here.',
+    );
+
+    const facts = screen.getByLabelText('Page facts');
+    expect(
+      within(facts)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Views', 'People', 'Visits', 'Average visible', 'Median visible', 'Exit rate']);
+    for (const label of ['Views', 'People', 'Visits', 'Average visible', 'Exit rate']) {
+      expect(within(facts).getByRole('button', { name: `What is ${label}?` })).toBeInTheDocument();
+    }
+    expect(within(facts).getByText('tab in foreground')).toBeInTheDocument();
+    expect(within(facts).getByText('50 visits ended here')).toBeInTheDocument();
+
+    expect(panelTitles()).toEqual([
+      'Views over time',
+      'What happens around it',
+      'Who uses it',
+      'Used with',
+    ]);
+    expect(
+      screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent),
+    ).toEqual([
+      'Came from',
+      'Went to',
+      'Features used on this page',
+      'Request types called from this page',
+    ]);
+    // No KPI card row any more.
+    expect(screen.queryByRole('region', { name: 'Page metrics' })).toBeNull();
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
+  it('says "1 visit" for one exit and one neighbour visit, and drops the note without a rate', async () => {
+    const onePage = { ...PAGE_DETAIL.page, exits: 1 };
+    server.use(
+      http.get(routeUrl(ROUTES.pages.detail), () =>
+        HttpResponse.json({
+          ...PAGE_DETAIL,
+          page: onePage,
+          cameFrom: [{ pageId: OTHER_PAGE_ID, pathTemplate: '/orders', sessions: 1 }],
+        }),
+      ),
+    );
+    renderWithProviders(<PageDetailView app="ebo-sales" pageId={PAGE_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/orders/:id' });
+
+    const facts = screen.getByLabelText('Page facts');
+    expect(within(facts).getByText('1 visit ended here')).toBeInTheDocument();
+    const cameFrom = screen.getByRole('list', { name: 'Came from' });
+    expect(within(cameFrom).getByText('1 visit')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/1 visits/);
+  });
+
+  it('reads only "not captured" for a missing visible time or exit rate, without its note', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.pages.detail), () =>
+        HttpResponse.json({
+          ...PAGE_DETAIL,
+          page: { ...PAGE_DETAIL.page, avgVisibleMs: null, uniqueSessions: 0, exits: 0 },
+        }),
+      ),
+    );
+    renderWithProviders(<PageDetailView app="ebo-sales" pageId={PAGE_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/orders/:id' });
+
+    const facts = screen.getByLabelText('Page facts');
+    expect(within(facts).queryByText('tab in foreground')).toBeNull();
+    expect(within(facts).queryByText(/ended here/)).toBeNull();
+  });
+
+  it('shows a viewer the count and the note, and no email anywhere (ADR 0019)', async () => {
+    serveAsViewer();
+    server.use(
+      http.get(routeUrl(ROUTES.pages.detail), () =>
+        HttpResponse.json({ ...PAGE_DETAIL, topUsers: null }),
+      ),
+    );
+    renderWithProviders(<PageDetailView app="ebo-sales" pageId={PAGE_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/orders/:id' });
+
+    const who = screen
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(within(who).getByText('64 verified people')).toBeInTheDocument();
+    expect(within(who).getByText(WHO_ADMINS_ONLY)).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Who views this page' })).toBeNull();
+    expect(document.body.textContent).not.toContain('@libas.in');
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
 });
 
 describe('ToolDetailView', () => {
-  it('shows who uses the tool, on which pages and with which actions', async () => {
+  it('shows who uses the feature, on which pages and with which actions', async () => {
     server.use(http.get(routeUrl(ROUTES.tools.detail), () => HttpResponse.json(TOOL_DETAIL)));
     renderWithProviders(<ToolDetailView app="ebo-sales" toolId={TOOL_ID} />);
 
     expect(
       await screen.findByRole('heading', { level: 1, name: 'export-csv' }),
     ).toBeInTheDocument();
-    const users = screen.getByRole('list', { name: 'Who uses this tool' });
+    const users = screen.getByRole('list', { name: 'Who uses this feature' });
     expect(within(users).getByText('12')).toBeInTheDocument();
+    expect(await within(users).findByRole('link', { name: 'buyer@libas.in' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '/orders/:id' }).getAttribute('href')).toBe(
       `/pages/ebo-sales/${PAGE_ID}?app=ebo-sales`,
     );
@@ -120,7 +234,7 @@ describe('ToolDetailView', () => {
     expect(within(actions).getByText('export')).toBeInTheDocument();
     expect(within(actions).getByText('not specified')).toBeInTheDocument();
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(within(trail).getByRole('link', { name: 'Tools' })).toHaveAttribute(
+    expect(within(trail).getByRole('link', { name: 'Features' })).toHaveAttribute(
       'href',
       '/tools?app=ebo-sales',
     );
@@ -129,5 +243,52 @@ describe('ToolDetailView', () => {
       '/applications/ebo-sales',
     );
     expect(within(trail).getByText('export-csv')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('reads as a report sheet: sentence, facts strip, chart, how | who, used with; no card row', async () => {
+    server.use(http.get(routeUrl(ROUTES.tools.detail), () => HttpResponse.json(TOOL_DETAIL)));
+    renderWithProviders(<ToolDetailView app="ebo-sales" toolId={TOOL_ID} />);
+    await screen.findByRole('heading', { level: 1, name: 'export-csv' });
+
+    const sentence = screen.getByText(/in this range\. Last used/).closest('p')!;
+    expect(sentence).toHaveTextContent(
+      /^Used 1,250 times by 34 verified people in 80 visits in this range\. Last used .+\.$/,
+    );
+    const facts = screen.getByLabelText('Feature facts');
+    expect(
+      within(facts)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(['Uses', 'People', 'Visits', 'Last used']);
+    expect(within(facts).getByText(/IST$/)).toBeInTheDocument();
+    for (const label of ['Uses', 'People', 'Visits']) {
+      expect(within(facts).getByRole('button', { name: `What is ${label}?` })).toBeInTheDocument();
+    }
+    expect(panelTitles()).toEqual(['Uses over time', 'How it is used', 'Who uses it', 'Used with']);
+    expect(screen.getByRole('heading', { level: 3, name: 'Used on pages' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Tool metrics' })).toBeNull();
+    // On screen it is a "feature", never a "tool" (the route and ids keep the name).
+    expect(collectRenderedText(document.body)).not.toMatch(/\btools?\b/i);
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
+  it('shows a viewer the count and the note, and no email anywhere (ADR 0019)', async () => {
+    serveAsViewer();
+    server.use(
+      http.get(routeUrl(ROUTES.tools.detail), () =>
+        HttpResponse.json({ ...TOOL_DETAIL, topUsers: null }),
+      ),
+    );
+    renderWithProviders(<ToolDetailView app="ebo-sales" toolId={TOOL_ID} />);
+    await screen.findByRole('heading', { level: 1, name: 'export-csv' });
+
+    const who = screen
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(within(who).getByText('34 verified people')).toBeInTheDocument();
+    expect(within(who).getByText(WHO_ADMINS_ONLY)).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Who uses this feature' })).toBeNull();
+    expect(document.body.textContent).not.toContain('@libas.in');
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
   });
 });

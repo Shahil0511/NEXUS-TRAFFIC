@@ -51,8 +51,11 @@ export interface PageDetailDto {
   page: PageStatsDto;
   /** Views per bucket (gap-filled, window grain). */
   trend: Array<{ bucket: string; views: number }>;
-  /** `count` = views by that user. */
-  topUsers: UserUsageDto[];
+  /**
+   * `count` = views by that user, most first. null when the viewer is not a dashboard admin
+   * (ADR 0019); the count (`page.distinctUsers`) is for everyone.
+   */
+  topUsers: UserUsageDto[] | null;
   tools: PageToolDto[];
   apiCalls: PageApiCallDto[];
   cameFrom: PageLinkDto[];

@@ -17,6 +17,7 @@ import { environmentsOf } from '../domain/filters';
 import { mapToolTrendPoint, mapToolUsage, mapUserUsage } from '../domain/mappers';
 import type { ToolTrendRow } from '../domain/rows';
 import { fillToolTrendGaps } from '../domain/timeseries-gaps';
+import { forAdmins, type Viewer } from '../domain/viewer';
 import { NotFoundError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { WebEventQueryRepository } from '../repositories/web-event-query.repository';
@@ -77,10 +78,17 @@ export class ToolService {
   /**
    * One tool of one app, addressed by its opaque toolId (the name never travels in the URL): usage
    * and gap-filled trend, top users, the pages it was used on and its actions. 404 when no tool of
-   * the app in the window has this id. Counts only → MAX_COUNT_RANGE_MS.
+   * the app in the window has this id. Counts only → MAX_COUNT_RANGE_MS. The users' emails
+   * (topUsers) go to admins ONLY (forAdmins, ADR 0019); the count (tool.distinctUsers) is for everyone.
+   * @see ../domain/viewer.ts forAdmins
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getToolDetail
    */
-  async detail(app: string, toolId: string, query: ToolDetailQuery): Promise<ToolDetailDto> {
+  async detail(
+    app: string,
+    toolId: string,
+    query: ToolDetailQuery,
+    viewer: Viewer,
+  ): Promise<ToolDetailDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_COUNT_RANGE_MS);
     const filter = currentFilter(
       window,
@@ -99,7 +107,7 @@ export class ToolService {
     return {
       window: toTimeWindowDto(window),
       tool: mapToolUsage(rows.stats, fillToolTrendGaps(rows.trend.map(mapToolTrendPoint), window)),
-      topUsers: rows.topUsers.map(mapUserUsage),
+      topUsers: forAdmins(viewer, () => rows.topUsers.map(mapUserUsage)),
       pages: rows.pages.map((row) => ({
         pageId: toPageId(app, row.path_template),
         pathTemplate: row.path_template,

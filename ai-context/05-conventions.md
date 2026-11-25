@@ -81,13 +81,18 @@ Split it: `parseApiKey()` (pure) → `ApiKeyVerifier.matches()` → `AppKeyAuthe
   readable as text on the dark card), status codes use `statusToneOf()` (`components/StatusCode.tsx`),
   methods the `--method-*` tokens. `apps/web/src/app/designTokens.test.ts` checks every token's contrast.
 - Every metric shown to people has a plain-language definition in ONE place, `apps/web/src/lib/metricCopy.ts`
-  (`metricInfo(key)`), surfaced through `KpiCard info`, `DataTable` column `hint` or `InfoTip`.
+  (`metricInfo(key)`), surfaced through `KpiCard info`, `FactSheet` `info` (`components/FactSheet.tsx`),
+  `DataTable` column `hint` or `InfoTip`.
 - Entities link through the shared helpers only: `UserLink` (`components/ActorCell.tsx`), `AppChip`,
   `PageLink` / `ToolLink` (`components/EntityLinks.tsx`), route links via `PAGES.endpointDetail`.
 - Numbers above a table go into one `HeadlineSentence` (`components/HeadlineSentence.tsx`, passed as the
   `PageHeader` `headline`; a pure builder returns its `SentencePart[]`), not a row of KPI cards.
   `apps/web/src/features/noKpiCardRows.test.ts` holds the allow-list of views that still import `KpiCard`; it
-  only shrinks (`DeltaPill` alone is fine anywhere).
+  only shrinks (`DeltaPill` alone is fine anywhere). One object (a page, a feature) is a report sheet
+  (`components/ReportSheet.tsx`): the sentence, a `FactSheet` strip, one wide chart, two columns, one wide row.
+- People's names and single requests are for dashboard admins only on the object pages: the API sends `null`
+  (`forAdmins`, `apps/api/src/domain/viewer.ts`, ADR 0019) and the view shows `components/WhoUsesIt.tsx` /
+  `components/AdminsOnlyNote.tsx`; never render an empty list for `null`.
 - Detail pages open with `Breadcrumbs` (`components/Breadcrumbs.tsx`, emails masked); "no data in this
   window" states offer `WidenRangeButton`; ids people quote get a `CopyButton` / `CopyableText`.
 

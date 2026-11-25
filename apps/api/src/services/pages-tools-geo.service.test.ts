@@ -6,7 +6,14 @@ import { ERROR_CODES } from '@nexus/shared';
 import { toPageId, toToolId } from '@nexus/shared/endpoint-id';
 import { describe, expect, it } from 'vitest';
 
-import { APP_ID, geoCityRow, pageStatsRow, toolUsageRow } from '../../test/fixtures/analytics-rows';
+import {
+  ADMIN_VIEWER,
+  APP_ID,
+  geoCityRow,
+  pageStatsRow,
+  PLAIN_VIEWER,
+  toolUsageRow,
+} from '../../test/fixtures/analytics-rows';
 import {
   FakeApiRequestQueries,
   FakeAppSlugs,
@@ -163,15 +170,18 @@ describe('PageService.detail', () => {
       },
     ];
 
-    const dto = await pages.detail(KNOWN_APP_SLUG, toPageId(KNOWN_APP_SLUG, '/stores/:id'), {
-      range: '24h',
-    });
+    const dto = await pages.detail(
+      KNOWN_APP_SLUG,
+      toPageId(KNOWN_APP_SLUG, '/stores/:id'),
+      { range: '24h' },
+      ADMIN_VIEWER,
+    );
 
     expect(webEvents.argsOf('getPageDetail')[0]?.[0]).toBe('/stores/:id');
     expect(requests.argsOf('listPageApiCalls')[0]?.[1]).toMatchObject({ appId: KNOWN_APP_ID });
     expect(dto.page.pathTemplate).toBe('/stores/:id');
     expect(dto.trend.find((p) => p.bucket === '2026-10-01T09:30:00.000Z')?.views).toBe(4);
-    expect(dto.topUsers[0]).toMatchObject({ email: 'a@libas.in', count: 6 });
+    expect(dto.topUsers?.[0]).toMatchObject({ email: 'a@libas.in', count: 6 });
     expect(dto.tools[0]).toEqual({
       toolId: toToolId(KNOWN_APP_SLUG, 'export-csv'),
       tool: 'export-csv',
@@ -185,11 +195,40 @@ describe('PageService.detail', () => {
     expect(dto.wentTo.map((link) => link.pathTemplate)).toEqual(['/reports']);
   });
 
+  it('sends the viewers (emails) to admins only; the counts are the same for everyone (ADR 0019)', async () => {
+    const { pages, webEvents } = build();
+    webEvents.pageTemplates = ['/stores/:id'];
+    webEvents.pageDetail = {
+      stats: pageStatsRow(),
+      trend: [],
+      topUsers: [
+        { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 6, last_seen_at: NOW },
+      ],
+      tools: [],
+      links: [],
+    };
+    const pageId = toPageId(KNOWN_APP_SLUG, '/stores/:id');
+
+    const admin = await pages.detail(KNOWN_APP_SLUG, pageId, { range: '24h' }, ADMIN_VIEWER);
+    const viewer = await pages.detail(KNOWN_APP_SLUG, pageId, { range: '24h' }, PLAIN_VIEWER);
+
+    expect(admin.topUsers).toHaveLength(1);
+    expect(viewer.topUsers).toBeNull();
+    expect(JSON.stringify(viewer)).not.toContain('a@libas.in');
+    expect(viewer.page.distinctUsers).toBe(5);
+    expect({ ...viewer, topUsers: undefined }).toEqual({ ...admin, topUsers: undefined });
+  });
+
   it('404 for an id that matches no template of the app in the window', async () => {
     const { pages, webEvents } = build();
     webEvents.pageTemplates = ['/home'];
     await expect(
-      pages.detail(KNOWN_APP_SLUG, toPageId(KNOWN_APP_SLUG, '/other'), { range: '24h' }),
+      pages.detail(
+        KNOWN_APP_SLUG,
+        toPageId(KNOWN_APP_SLUG, '/other'),
+        { range: '24h' },
+        ADMIN_VIEWER,
+      ),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 });
@@ -208,9 +247,12 @@ describe('ToolService.detail', () => {
         { action: null, uses: 1 },
       ],
     };
-    const dto = await tools.detail(KNOWN_APP_SLUG, toToolId(KNOWN_APP_SLUG, 'export-csv'), {
-      range: '24h',
-    });
+    const dto = await tools.detail(
+      KNOWN_APP_SLUG,
+      toToolId(KNOWN_APP_SLUG, 'export-csv'),
+      { range: '24h' },
+      ADMIN_VIEWER,
+    );
     expect(dto.tool.toolId).toBe(toToolId(KNOWN_APP_SLUG, 'export-csv'));
     expect(dto.tool.trend.length).toBeGreaterThan(0);
     expect(dto.pages).toEqual([
@@ -222,10 +264,39 @@ describe('ToolService.detail', () => {
     ]);
   });
 
+  it('sends the users (emails) to admins only; the counts are the same for everyone (ADR 0019)', async () => {
+    const { tools, webEvents } = build();
+    webEvents.toolNames = ['export-csv'];
+    webEvents.toolDetail = {
+      stats: toolUsageRow(),
+      trend: [],
+      topUsers: [
+        { user_key: Buffer.alloc(32, 0xab), user_email: 'a@libas.in', count: 4, last_seen_at: NOW },
+      ],
+      pages: [],
+      actions: [],
+    };
+    const toolId = toToolId(KNOWN_APP_SLUG, 'export-csv');
+
+    const admin = await tools.detail(KNOWN_APP_SLUG, toolId, { range: '24h' }, ADMIN_VIEWER);
+    const viewer = await tools.detail(KNOWN_APP_SLUG, toolId, { range: '24h' }, PLAIN_VIEWER);
+
+    expect(admin.topUsers?.[0]).toMatchObject({ email: 'a@libas.in', count: 4 });
+    expect(viewer.topUsers).toBeNull();
+    expect(JSON.stringify(viewer)).not.toContain('a@libas.in');
+    expect(viewer.tool.distinctUsers).toBe(2);
+    expect({ ...viewer, topUsers: undefined }).toEqual({ ...admin, topUsers: undefined });
+  });
+
   it('404 for an unknown tool id', async () => {
     const { tools } = build();
     await expect(
-      tools.detail(KNOWN_APP_SLUG, toToolId(KNOWN_APP_SLUG, 'nope'), { range: '24h' }),
+      tools.detail(
+        KNOWN_APP_SLUG,
+        toToolId(KNOWN_APP_SLUG, 'nope'),
+        { range: '24h' },
+        ADMIN_VIEWER,
+      ),
     ).rejects.toMatchObject({ statusCode: 404 });
   });
 });

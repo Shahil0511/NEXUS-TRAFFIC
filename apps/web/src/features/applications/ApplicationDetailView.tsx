@@ -1,11 +1,6 @@
 'use client';
 
-import type {
-  AppTrafficDto,
-  TimeWindowDto,
-  TimeWindowQuery,
-  UserSort,
-} from '@nexus/shared';
+import type { AppTrafficDto, TimeWindowDto, TimeWindowQuery, UserSort } from '@nexus/shared';
 import {
   Activity,
   ArrowRight,
@@ -21,11 +16,13 @@ import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
 import { UserLink } from '@/components/ActorCell';
+import { AdminsOnlyNote, WHO_ADMINS_ONLY } from '@/components/AdminsOnlyNote';
 import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { TrafficChart } from '@/components/charts/TrafficChart';
 import { EmptyState } from '@/components/EmptyState';
 import { PageLink, ToolLink } from '@/components/EntityLinks';
 import { ErrorState } from '@/components/ErrorState';
+import { NOT_CAPTURED } from '@/components/FactSheet';
 import { GuideLinkButton } from '@/components/GuideLinkButton';
 import { KpiCard } from '@/components/KpiCard';
 import { MethodBadge } from '@/components/MethodBadge';
@@ -42,11 +39,13 @@ import { TopFailingEndpoints } from '@/features/errors/TopFailingEndpoints';
 import { useErrorSummary } from '@/features/errors/useErrorSummary';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { onlineCountOf, useOnlineNow } from '@/features/live/useOnlineNow';
+import { useMe } from '@/features/me/useMe';
 import { hasNoTraffic } from '@/features/overview/OverviewView';
 import { useOverviewTimeseries } from '@/features/overview/useOverviewTimeseries';
 import { usePageStats } from '@/features/pages/usePageStats';
 import { useToolUsage } from '@/features/tools/useToolUsage';
 import { useUserList } from '@/features/users/useUserList';
+import { verifiedPeople } from '@/lib/countPhrase';
 import {
   formatCompact,
   formatDuration,
@@ -124,7 +123,7 @@ export function ApplicationDetailView({ app }: { app: string }) {
         <FailingRoutesPanel filters={filters} linkQuery={linkQuery} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <UsersPanel filters={filters} linkQuery={linkQuery} />
+        <UsersPanel filters={filters} linkQuery={linkQuery} count={row?.users.value} />
         <RoutesPanel filters={filters} linkQuery={linkQuery} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -335,20 +334,99 @@ function FailingRoutesPanel({
 /** "Who uses it" order; the "All users" link opens the People list in the same order (ADR 0018). */
 const USERS_PANEL_SORT: UserSort = 'requests';
 
-function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuery: LinkQuery }) {
-  // Most API calls to this app first; the description says so (ADR 0018).
-  const users = useUserList({ ...filters, sort: USERS_PANEL_SORT, dir: 'desc', limit: TOP_N });
+/**
+ * "Who uses it": the people (emails) for dashboard admins only (ADR 0019). The users.list read is
+ * NOT sent until useMe says admin; while the viewer is unknown the panel shows a skeleton, a failed
+ * /me read shows the error with a retry (never the viewer state), and everyone else reads the app's
+ * verified-people count (from the traffic row) and the lock note. The "All users" link stays for
+ * every viewer: users.list itself is open (ADR 0019 point 4), like the Users metric's link.
+ */
+function UsersPanel({
+  filters,
+  linkQuery,
+  count,
+}: {
+  filters: TimeWindowQuery;
+  linkQuery: LinkQuery;
+  /** Distinct verified people of the app in the range; null = not captured, undefined = loading. */
+  count: number | null | undefined;
+}) {
+  const me = useMe();
+  if (me.isPending) {
+    return (
+      <Panel title="Who uses it">
+        <ListSkeleton />
+      </Panel>
+    );
+  }
+  if (me.isError) {
+    return (
+      <Panel title="Who uses it">
+        <ErrorState error={me.error} onRetry={() => void me.refetch()} />
+      </Panel>
+    );
+  }
+  if (me.data.isAdmin !== true) {
+    return (
+      <Panel title="Who uses it" aside={<AllUsersLink linkQuery={linkQuery} />}>
+        <UsersCount count={count} />
+      </Panel>
+    );
+  }
+  return <AdminUsersPanel filters={filters} linkQuery={linkQuery} />;
+}
+
+/** "All users of this app": the People list in the panel's order (ADR 0018). */
+function AllUsersLink({ linkQuery }: { linkQuery: LinkQuery }) {
+  return (
+    <ViewAll
+      href={withQuery(PAGES.users(), { ...linkQuery, sort: USERS_PANEL_SORT })}
+      label="All users of this app"
+    />
+  );
+}
+
+/** A viewer's "Who uses it": how many verified people, never who (ADR 0019). */
+function UsersCount({ count }: { count: number | null | undefined }) {
+  if (count === undefined) return <Skeleton className="h-5 w-64 max-w-full" />;
+  return (
+    <div className="space-y-3">
+      {count === null ? (
+        <p className="text-sm">
+          Verified people: <span className="text-muted-foreground">{NOT_CAPTURED}</span>
+        </p>
+      ) : (
+        <p className="text-sm">
+          <strong className="font-semibold tabular">{verifiedPeople(count)}</strong> used this app
+          in this range.
+        </p>
+      )}
+      <AdminsOnlyNote>{WHO_ADMINS_ONLY}</AdminsOnlyNote>
+    </div>
+  );
+}
+
+/** An admin's "Who uses it": the people with the most API calls first (ADR 0018). */
+function AdminUsersPanel({
+  filters,
+  linkQuery,
+}: {
+  filters: TimeWindowQuery;
+  linkQuery: LinkQuery;
+}) {
+  // Most API calls to this app first; the description says so (ADR 0018). Mounted for admins
+  // only, and `enabled` repeats the rule so the read can never go out for anyone else.
+  const isAdmin = useMe().data?.isAdmin;
+  const users = useUserList(
+    { ...filters, sort: USERS_PANEL_SORT, dir: 'desc', limit: TOP_N },
+    { enabled: isAdmin === true },
+  );
   const rows = users.data?.pages[0]?.items;
   return (
     <Panel
       title="Who uses it"
       description="Verified people, most API calls first"
-      aside={
-        <ViewAll
-          href={withQuery(PAGES.users(), { ...linkQuery, sort: USERS_PANEL_SORT })}
-          label="All users of this app"
-        />
-      }
+      aside={<AllUsersLink linkQuery={linkQuery} />}
     >
       <QueryState
         query={users}

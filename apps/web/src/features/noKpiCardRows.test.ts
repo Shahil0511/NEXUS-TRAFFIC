@@ -23,8 +23,6 @@ const KPI_CARD_ALLOW_LIST = [
   'features/journeys/SessionDetailView.tsx',
   'features/live/LiveView.tsx',
   'features/overview/OverviewView.tsx',
-  'features/pages/PageDetailView.tsx',
-  'features/tools/ToolDetailView.tsx',
   'features/users/UserDayDetail.tsx',
   'features/users/UserDaysOverview.tsx',
   'features/users/UserDetailView.tsx',

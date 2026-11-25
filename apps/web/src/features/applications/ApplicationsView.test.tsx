@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { WHO_ADMINS_ONLY } from '@/components/AdminsOnlyNote';
+import { NOT_CAPTURED } from '@/components/FactSheet';
 import { COVERAGE_WARN_PCT, METRIC_COPY } from '@/lib/metricCopy';
 import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
 import { appHealth, INTEGRATION_HEALTH } from '@/test/adminFixtures';
@@ -14,6 +16,7 @@ import {
   DEVICE_RETURN,
   ENDPOINT_PAGE,
   ERROR_SUMMARY,
+  ME,
   OVERVIEW_TIMESERIES,
   PAGE_STATS,
   TOOL_USAGE,
@@ -306,6 +309,99 @@ describe('ApplicationDetailView', () => {
     expect(screen.getByRole('link', { name: /Data health/ }).getAttribute('href')).toBe(
       '/integration?app=ebo-sales',
     );
+  });
+
+  it('shows a viewer the count of people and the note, and sends no users read (ADR 0019)', async () => {
+    const userReads: string[] = [];
+    serveDetailPanels();
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json({ ...ME, isAdmin: false })),
+      http.get(routeUrl(ROUTES.users.list), ({ request }) => {
+        userReads.push(request.url);
+        return HttpResponse.json({ items: [userSummary()], nextCursor: null });
+      }),
+      http.get(routeUrl(ROUTES.overview.breakdown), () => HttpResponse.json(BREAKDOWN)),
+      http.get(routeUrl(ROUTES.overview.devices), () => HttpResponse.json(DEVICE_RETURN)),
+    );
+    renderWithProviders(<ApplicationDetailView app="ebo-sales" />, { searchParams: '?range=7d' });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'EBO Sales' })).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(
+      await within(panel).findByText(
+        (_, element) =>
+          element?.tagName === 'P' &&
+          element.textContent === '38 verified people used this app in this range.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).getByText(WHO_ADMINS_ONLY)).toBeInTheDocument();
+    expect(within(panel).queryByRole('list')).toBeNull();
+    // The People list stays open to every viewer (ADR 0019 point 4), so its entry point stays too.
+    const allUsers = within(panel).getByRole('link', { name: /All users of this app/ });
+    expect(new URL(allUsers.getAttribute('href')!, 'http://x').searchParams.get('sort')).toBe(
+      'requests',
+    );
+    await screen.findByRole('list', { name: 'Most used tools' });
+    expect(userReads).toEqual([]);
+    expect(document.body.textContent).not.toContain('buyer@libas.in');
+    expect(findBannedWords(collectRenderedText(panel))).toEqual([]);
+  });
+
+  it('shows a failed /me read as an error with a retry, never as the viewer state', async () => {
+    const userReads: string[] = [];
+    serveDetailPanels();
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () =>
+        HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 }),
+      ),
+      http.get(routeUrl(ROUTES.users.list), ({ request }) => {
+        userReads.push(request.url);
+        return HttpResponse.json({ items: [userSummary()], nextCursor: null });
+      }),
+      http.get(routeUrl(ROUTES.overview.breakdown), () => HttpResponse.json(BREAKDOWN)),
+      http.get(routeUrl(ROUTES.overview.devices), () => HttpResponse.json(DEVICE_RETURN)),
+    );
+    renderWithProviders(<ApplicationDetailView app="ebo-sales" />, { searchParams: '?range=7d' });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'EBO Sales' })).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(await within(panel).findByRole('alert')).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: /Try again/ })).toBeInTheDocument();
+    expect(within(panel).queryByText(WHO_ADMINS_ONLY)).toBeNull();
+    await screen.findByRole('list', { name: 'Most used tools' });
+    expect(userReads).toEqual([]);
+  });
+
+  it('says "not captured" to a viewer when the app row has no people count', async () => {
+    serveDetailPanels();
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json({ ...ME, isAdmin: false })),
+      http.get(routeUrl(ROUTES.overview.apps), () =>
+        HttpResponse.json({
+          ...APP_TRAFFIC,
+          items: [
+            {
+              ...APP_TRAFFIC.items[0]!,
+              users: { ...APP_TRAFFIC.items[0]!.users, value: null },
+            },
+          ],
+        }),
+      ),
+      http.get(routeUrl(ROUTES.overview.breakdown), () => HttpResponse.json(BREAKDOWN)),
+      http.get(routeUrl(ROUTES.overview.devices), () => HttpResponse.json(DEVICE_RETURN)),
+    );
+    renderWithProviders(<ApplicationDetailView app="ebo-sales" />, { searchParams: '?range=7d' });
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'EBO Sales' })).toBeInTheDocument();
+    const panel = screen
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(await within(panel).findByText(NOT_CAPTURED)).toBeInTheDocument();
+    expect(panel.textContent).not.toContain('0 verified people');
   });
 
   it('shows the audience: new vs returning devices and breakdowns, values as plain text', async () => {

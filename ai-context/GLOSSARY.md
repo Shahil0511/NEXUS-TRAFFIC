@@ -9,7 +9,7 @@
 | **browser event** | One frontend event: `page_view`, `page_time`, `tool_use` or `custom`. Stored in `web_events`. | `browserEventSchema` |
 | **page view** | A `page_view` event; its `eventId` is the **page view id**. | |
 | **page time** | A `page_time` event: a *delta* of visible milliseconds for one page view. Summed = time on page. | |
-| **tool** | A named UI feature, e.g. `audits.export-csv`, reported by `tool_use`. | `TOOL_NAME_PATTERN` |
+| **tool** | A named UI feature, e.g. `audits.export-csv`, reported by `tool_use`. Called a **feature** on the pages that were reworded (B8); the route, ids, types and `METRIC_COPY` keys keep "tool". | `TOOL_NAME_PATTERN` |
 | **endpoint** | One (app, HTTP method, route template). Identified by an opaque **endpointId** (UUID v5). | `toEndpointId()` |
 | **route template** | The parameterised path, e.g. `/ebo-sales/api/stores/:id` (`:name` = one segment, trailing `:name*` = catch-all). Browser templates are kept only when they fit the path. | `isPlausibleRouteTemplate()` |
 | **session** | One browser tab's visit: all browser events with the same (app, sessionId). Idle > 30 min → new session. | |
@@ -40,6 +40,7 @@
 | **page end** | The footer under every page: "End of <page>", or "Still loading…" / "More rows above" when that is the truth. ADR 0014. | `apps/web/src/components/PageEnd.tsx` |
 | **dry run** | `?dryRun=1` on server ingest: validate everything, write nothing. | |
 | **environment** | Which deployment an event came from: `prod`, `staging` or `dev`. Sent per batch (lenient), loopback browser origins are always `dev`, absent = `prod`. Dashboards filter on it (`?env=`, default prod); Live is prod only. ADR 0008. | `ENVIRONMENT_VALUES`, `resolveEnvironment()` |
+| **report sheet** | The layout of one page, one feature (and later one request type): a headline sentence, a facts strip, one wide chart, "What happens around it" beside "Who uses it", and one wide "Used with" row. Its "Who uses it" shows the count to everyone and the names to admins only (ADR 0019). | `apps/web/src/components/ReportSheet.tsx`, `apps/web/src/components/FactSheet.tsx`, `apps/web/src/components/WhoUsesIt.tsx` |
 | **release** | The sender's build label (git sha, version) on server events and, since Phase A, on browser batches. Feeds release coverage. | `release` columns |
 | **remote config** | Per-app module switches the browser SDK fetches from `POST /v1/ingest/config`; it can only DISABLE modules. ADR 0009. | `SdkRemoteConfig`, `SDK_CAPTURE_MODULE_VALUES` |
 | **kill switch** | `apps.browser_ingest_enabled = false`: browser ingest answers `403 BROWSER_INGEST_DISABLED`, and the SDK stops on any kill code. | `SDK_KILL_ERROR_CODES` |

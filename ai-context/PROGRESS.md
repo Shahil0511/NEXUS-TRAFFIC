@@ -18,6 +18,89 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Page and feature report sheets; people lists for admins only (B8-3, ADR 0019)
+
+A page's detail and a feature's detail read like a report: a sentence, a facts line, one wide chart, "What
+happens around it" beside "Who uses it", and "Used with" at the bottom. No KPI cards. The three object reads stop
+sending people's emails and single requests to non-admins, and the App page's "Who uses it" stops reading
+`users.list` for them. Contract change only (nullable fields); no route, schema, enum, migration or env change.
+
+**Done**
+- **Contract:** `PageDetailDto.topUsers`, `ToolDetailDto.topUsers`, `EndpointDetailDto.topUsers` and
+  `EndpointDetailDto.slowest` are `… | null` (null when the viewer is not a dashboard admin; the counts are for
+  everyone).
+- **API:** `forAdmins(viewer, value)` in `apps/api/src/domain/viewer.ts` (pure; the value is only built for an
+  admin). `PageController.detail` / `ToolController.detail` pass `requireViewer(res)` to `PageService.detail` /
+  `ToolService.detail`; those and `EndpointService.detail` build the lists through `forAdmins`
+  (`mapRequestSample` still masks the IP). Responses stay `private, max-age=15`; repositories unchanged.
+- **Web components:** `components/FactSheet.tsx` (`Fact`, `strip` / `stack`, (i) beside the label, `href` →
+  text-link, missing → "not captured"), `components/ReportSheet.tsx` (layout only, plus `ReportSubsection`, an
+  h3 region inside a panel), `components/WhoUsesIt.tsx` ("{n} verified people in this range"; the list for
+  admins with "Most {unit} first"; "Only admins see who they are." with a lock when `users` is null; the list's
+  empty state for `[]`), `components/AdminsOnlyNote.tsx` (the two notes), `lib/countPhrase.ts` (singulars).
+- **Sentences:** `features/pages/pageHeadline.ts` (views, people, visits; visible time "about 48 s (median
+  31 s)" when known; exit share when visits ended there) and `features/tools/toolHeadline.ts` (uses, people,
+  visits, last used).
+- **Page detail:** PageHeader keeps breadcrumbs, title, AppChip + window caption, plus the sentence; facts strip
+  Views / People (verified) / Visits / Average visible (tab in foreground) / Median visible / Exit rate ("{n}
+  visits ended here"), each with its `metricInfo`; "Views over time"; "What happens around it" = Came from |
+  Went to (h3 each, side by side from sm, stacked at lg, side by side again from xl); "Who uses it"; "Used with"
+  = "Features used on this page" | "Request types called from this page" (side by side from md). Skeleton of
+  Skeleton blocks. Neighbour counts now read "visits" like the rest of the page.
+- **Feature detail:** breadcrumb "Features", fallback title "Feature"; facts Uses / People / Visits / Last used
+  (IST date time as the note); "Uses over time"; "How it is used" = Actions; "Who uses it"; "Used with" = "Used on
+  pages". No visible "tool" wording left on the page.
+- **Request type detail (minimal, reshaped in B8-4):** "Who calls it" = `WhoUsesIt` (title kept); "Slowest calls"
+  shows "Only admins see single requests." when `slowest` is null. Keeps its KPI cards (still allow-listed).
+- **App page:** "Who uses it" waits for `useMe` (skeleton), sends `users.list` only for an admin (`enabled`), and
+  shows everyone else "{n} verified people used this app in this range." + the lock note (count from the traffic
+  row; "not captured" when the row has none). The "All users of this app" link (`sort=requests`) stays for every
+  viewer, because `users.list` is still open (ADR 0019 point 4) and the Users metric links there too. A failed
+  `/me` read shows the error with a retry, never the viewer state. Admins see the panel exactly as before.
+- **KPI card guard:** `features/pages/PageDetailView.tsx` and `features/tools/ToolDetailView.tsx` left
+  `KPI_CARD_ALLOW_LIST` (10 views remain).
+- **ADR 0019** `decisions/0019-names-on-object-pages-for-admins.md`; status lines of ADR 0015 (point 1) and
+  ADR 0007 (drill-down top users) say "changed in part by ADR 0019".
+
+**Review fixes:** a fact's note is dropped when its value is "not captured" (no "not captured tab in
+foreground"); the exit note and the Came from / Went to counts use `countPhrase` ("1 visit"); `aboutDuration`
+rounds to whole seconds before choosing the format (59.6 s → "1m 0s", not "60 s"); App page: `/me` error state,
+null count → "not captured", "All users" link kept for viewers (see above); e2e cases for `pages.detail` and
+`tools.detail` over HTTP.
+
+**Nothing lost:** page KPIs with infos and hints → sentence + facts strip; Views over time → wide chart; Who views
+it → Who uses it (admins: same list; others: count + note); Came from / Went to → What happens around it; Tools
+used on this page / API calls from this page → Used with. Feature KPIs → sentence + facts; Uses over time →
+chart; Who uses it → Who uses it; Actions → How it is used; Used on pages → Used with. Request type: Who calls it
+and Slowest calls kept for admins, count / note for others. App page Who uses it: unchanged for admins, count +
+note for others.
+
+**Tests:** `domain/viewer.test.ts` (admin value, viewer null and never built, empty list kept);
+`pages-tools-geo.service.test.ts` (pages and tools: admin array, viewer null, everything else identical);
+`endpoint.service.test.ts` (viewer: slowest and topUsers null, count and stats kept; admin keeps the IP); DB
+suites written, not run: `test/e2e/dashboard.integration.test.ts` (viewer → slowest / topUsers null, admin →
+arrays) and `test/db/analytics-queries.integration.test.ts` (admin and viewer for the three services). Web:
+`FactSheet.test.tsx`, `ReportSheet.test.tsx` (order, headings, stacking grid, `ReportSubsection` regions),
+`WhoUsesIt.test.tsx` (admin list, viewer note, empty, singular), `countPhrase.test.ts`, `pageHeadline.test.ts`,
+`toolHeadline.test.ts`, `PageDetailView.test.tsx` (page and feature: admin list, sentence, facts with (i), h2 / h3
+order, no card row, viewer count + note and no email, banned-word scans), `EndpointDetailView.test.tsx` (viewer
+notes, admin list + table), `ApplicationsView.test.tsx` (viewer: no `/v1/users` request, count sentence, note,
+"All users" link, no email; `/me` error → error + retry, no users read; null count → "not captured"). The e2e file
+also has a journeys-seeded block: `pages.detail` / `tools.detail` as admin → arrays with the seeded email, as
+viewer → `topUsers` null, same counts, no email in the body (written, not run).
+
+**Docs:** ADR 0019; 02-architecture (ADR list); 03-code-navigation (`endpoints.detail` / `pages.detail` /
+`tools.detail` rows, the page / feature / request type view rows, the App page row, report sheet parts,
+`FactSheet` info); 05-conventions §5b; 07-data-model (who sees emails); GLOSSARY ("report sheet", "tool" →
+feature on screen).
+
+**Next:** B8-4 (request type report sheet; one tab row for the three lists).
+
+**Known issues:** the browser check (1280 / 360 px, both themes, scroll to the PageEnd) is for after the push;
+layout was checked by reading the classes (min-w-0 on every column, the two columns stack below lg, long paths
+truncate inside their rows). Admins' views of these multi-person lists are not access-logged (ADR 0019 point 3);
+the People list, Problems, Live and the failed-request list still send emails to viewers (ADR 0019 point 4).
+
 ## 2026-11-25 — Data health: checklist rows and the dashboard-access check (B8-2)
 
 Data health (`/integration`) becomes a checklist: one sentence instead of five tally cards, a Platform section with

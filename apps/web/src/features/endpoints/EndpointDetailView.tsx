@@ -5,6 +5,7 @@ import { Activity, Gauge, Hourglass, TriangleAlert, Users, Zap } from 'lucide-re
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
+import { AdminsOnlyNote, REQUESTS_ADMINS_ONLY } from '@/components/AdminsOnlyNote';
 import { AppChip } from '@/components/AppChip';
 import { applicationCrumbs, Breadcrumbs } from '@/components/Breadcrumbs';
 import { ChartLegend } from '@/components/charts/ChartLegend';
@@ -20,10 +21,10 @@ import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
-import { TopUsersList } from '@/components/TopUsersList';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { WhoUsesIt } from '@/components/WhoUsesIt';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import {
   formatDuration,
@@ -40,6 +41,7 @@ import { useEndpointDetail } from './useEndpointDetail';
 
 /**
  * One API route: its KPIs, request / error / latency charts, status codes and slowest calls.
+ * Who calls it and the slowest calls are for admins only (null from the API otherwise, ADR 0019).
  * Reached ONLY through PAGES.endpointDetail(endpointId) — the opaque id, never the template.
  */
 export function EndpointDetailView({ endpointId }: { endpointId: string }) {
@@ -202,15 +204,16 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
         >
           <TrafficChart points={detail.timeseries} grain={window.grain} />
         </Panel>
-        <Panel title="Who calls it" description="Verified people, by calls to this request type">
-          <TopUsersList
-            users={detail.topUsers}
-            unit="calls"
-            ariaLabel="Who calls it"
-            linkQuery={linkQuery}
-            emptyTitle="No verified caller"
-          />
-        </Panel>
+        {/* Names for admins only; everyone reads the count (ADR 0019). */}
+        <WhoUsesIt
+          title="Who calls it"
+          count={detail.uniqueUsers}
+          users={detail.topUsers}
+          unit="calls"
+          ariaLabel="Who calls it"
+          linkQuery={linkQuery}
+          emptyTitle="No verified caller"
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -240,15 +243,20 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
       <Panel
         title="Slowest calls"
         description="The longest requests in this window"
-        contentClassName="px-0 pb-0"
+        contentClassName={detail.slowest === null ? undefined : 'px-0 pb-0'}
       >
-        <DataTable
-          caption="Slowest calls"
-          columns={columns}
-          rows={detail.slowest}
-          rowKey={(row) => row.eventId}
-          empty={<EmptyState title="No calls recorded" />}
-        />
+        {/* Single requests carry a person: admins only, the API sends null to others (ADR 0019). */}
+        {detail.slowest === null ? (
+          <AdminsOnlyNote>{REQUESTS_ADMINS_ONLY}</AdminsOnlyNote>
+        ) : (
+          <DataTable
+            caption="Slowest calls"
+            columns={columns}
+            rows={detail.slowest}
+            rowKey={(row) => row.eventId}
+            empty={<EmptyState title="No calls recorded" />}
+          />
+        )}
       </Panel>
     </div>
   );

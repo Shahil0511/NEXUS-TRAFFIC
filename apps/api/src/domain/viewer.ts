@@ -9,6 +9,18 @@ export interface Viewer {
   isAdmin: boolean;
 }
 
+/**
+ * WHY: the object reads (one page, one feature, one request type) carry lists of people (emails)
+ * and single requests with a person; those go to dashboard admins ONLY, while the counts stay for
+ * everyone. One pure helper keeps the rule identical in every service: `value` is evaluated
+ * (and mapped) only for an admin, everyone else gets null — never an empty list, so the client
+ * can tell "hidden" from "none". Pure.
+ * @see ../../../../ai-context/decisions/0019-names-on-object-pages-for-admins.md
+ */
+export function forAdmins<T>(viewer: Viewer, value: () => T): T | null {
+  return viewer.isAdmin ? value() : null;
+}
+
 /** The authenticated ingest caller (set by server-key-auth / publishable-key-auth middleware). */
 export interface AuthenticatedKey {
   app: AppRow;

@@ -1,7 +1,9 @@
 # ADR 0007 — Opaque page / tool ids and the users × apps × features drill-downs
 
 - **Status:** accepted (2026-10-14); implemented 2026-10-14 (Wave 2 of the UX roadmap, see
-  [PROGRESS.md](../PROGRESS.md)).
+  [PROGRESS.md](../PROGRESS.md)). *Changed in part by
+  [ADR 0019](0019-names-on-object-pages-for-admins.md):* the drill-downs' top users (and a route's slowest
+  calls) are sent to dashboard admins only; everyone else gets the count.
 - **Context:** after Wave 1 ([ADR 0006](0006-navigation-search-and-applications.md)) a viewer could reach
   apps, users and routes, but pages and tools had no page of their own, a route could not say who calls
   it, a user could not show which routes and apps they use, and Errors could not say who was hurt.

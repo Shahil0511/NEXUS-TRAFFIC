@@ -4,7 +4,9 @@
   [ADR 0001](0001-contract-and-naming.md) for the role split (the allowlist / domain / admin env
   policy itself is unchanged). The person page itself is described in
   [ADR 0014](0014-object-first-navigation-and-person-page.md). The deeper per-day facts of the person
-  page keep these rules: [ADR 0017](0017-person-daily-depth.md).
+  page keep these rules: [ADR 0017](0017-person-daily-depth.md). *Changed in part by
+  [ADR 0019](0019-names-on-object-pages-for-admins.md)* (point 1): the object reads `pages.detail`,
+  `tools.detail` and `endpoints.detail` send their people lists and single requests to admins only.
 - **Context:** ADR 0001 gave viewers every analytics read and admins only app/key management and
   IP addresses. The person page (one verified user's summary, daily activity, devices and
   timeline) puts everything about ONE person on one screen, and the Visits and Problems lists can

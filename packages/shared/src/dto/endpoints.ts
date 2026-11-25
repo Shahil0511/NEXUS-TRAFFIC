@@ -26,9 +26,16 @@ export interface EndpointDetailDto {
   endpoint: EndpointStatsDto;
   timeseries: TimeseriesPointDto[];
   statusBreakdown: StatusCountDto[];
-  slowest: RequestSampleDto[];
-  /** Distinct verified users who called the route in the window. */
+  /**
+   * The slowest single requests (each with its caller). null when the viewer is not a dashboard
+   * admin (ADR 0019); the stats and charts are for everyone.
+   */
+  slowest: RequestSampleDto[] | null;
+  /** Distinct verified users who called the route in the window (for everyone). */
   uniqueUsers: number;
-  /** Who calls it most (`count` = calls). */
-  topUsers: UserUsageDto[];
+  /**
+   * Who calls it most (`count` = calls). null when the viewer is not a dashboard admin
+   * (ADR 0019); the count (`uniqueUsers`) is for everyone.
+   */
+  topUsers: UserUsageDto[] | null;
 }

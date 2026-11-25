@@ -22,9 +22,14 @@ export class PageController {
 
   /** @see ../../services/page.service.ts PageService.detail */
   detail: RequestHandler = async (_req, res) => {
-    requireViewer(res);
+    const viewer = requireViewer(res);
     const { app, pageId } = validParams(res, pageDetailParamsSchema);
-    const body = await this.pages.detail(app, pageId, validQuery(res, pageDetailQuerySchema));
+    const body = await this.pages.detail(
+      app,
+      pageId,
+      validQuery(res, pageDetailQuerySchema),
+      viewer,
+    );
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

@@ -151,4 +151,6 @@ admin-only person pages and the person access log
 [0015](decisions/0015-admin-only-person-pages-and-access-log.md); English-only screen copy, page icons and
 illustrations [0016](decisions/0016-english-only-ui-icons-and-illustrations.md); per-person daily facts with
 neutral labels, a one-day drill-down and stated limits [0017](decisions/0017-person-daily-depth.md); the
-People list sorts by its count columns again [0018](decisions/0018-people-list-count-sorts-restored.md).
+People list sorts by its count columns again [0018](decisions/0018-people-list-count-sorts-restored.md); names on
+the object pages (page, feature, request type) and the App page's people panel for admins only
+[0019](decisions/0019-names-on-object-pages-for-admins.md).

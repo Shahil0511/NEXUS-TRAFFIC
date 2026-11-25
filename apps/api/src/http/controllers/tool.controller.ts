@@ -22,9 +22,14 @@ export class ToolController {
 
   /** @see ../../services/tool.service.ts ToolService.detail */
   detail: RequestHandler = async (_req, res) => {
-    requireViewer(res);
+    const viewer = requireViewer(res);
     const { app, toolId } = validParams(res, toolDetailParamsSchema);
-    const body = await this.tools.detail(app, toolId, validQuery(res, toolDetailQuerySchema));
+    const body = await this.tools.detail(
+      app,
+      toolId,
+      validQuery(res, toolDetailQuerySchema),
+      viewer,
+    );
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

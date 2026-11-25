@@ -116,13 +116,23 @@ describe('EndpointService.detail', () => {
       { status: 200, count: 192 },
       { status: 500, count: 8 },
     ]);
-    expect(dto.slowest[0]?.actor.ip).toBe('8.8.8.8');
+    expect(dto.slowest?.[0]?.actor.ip).toBe('8.8.8.8');
+    expect(dto.topUsers?.[0]).toMatchObject({ email: 'a@libas.in', count: 7 });
   });
 
-  it('hides IPs of the slowest calls from non-admins', async () => {
+  it('a viewer gets slowest null and topUsers null; the stats and the count stay (ADR 0019)', async () => {
     const { service, requests } = build();
     requests.detail = detailRows();
-    const dto = await service.detail(ENDPOINT_ID, { range: '24h' }, PLAIN_VIEWER);
-    expect(dto.slowest[0]?.actor.ip).toBeNull();
+    const viewer = await service.detail(ENDPOINT_ID, { range: '24h' }, PLAIN_VIEWER);
+    const admin = await service.detail(ENDPOINT_ID, { range: '24h' }, ADMIN_VIEWER);
+    expect(viewer.slowest).toBeNull();
+    expect(viewer.topUsers).toBeNull();
+    expect(JSON.stringify(viewer)).not.toContain('a@libas.in');
+    expect(JSON.stringify(viewer)).not.toContain('8.8.8.8');
+    expect(viewer.uniqueUsers).toBe(3);
+    expect(viewer.endpoint).toEqual(admin.endpoint);
+    expect(viewer.statusBreakdown).toEqual(admin.statusBreakdown);
+    // An admin keeps the IP of the slowest calls (mapRequestSample masks it by role).
+    expect(admin.slowest?.[0]?.actor.ip).toBe('8.8.8.8');
   });
 });

@@ -26,8 +26,11 @@ export interface ToolUsageDto {
 export interface ToolDetailDto {
   window: TimeWindowDto;
   tool: ToolUsageDto;
-  /** `count` = uses by that user. */
-  topUsers: UserUsageDto[];
+  /**
+   * `count` = uses by that user, most first. null when the viewer is not a dashboard admin
+   * (ADR 0019); the count (`tool.distinctUsers`) is for everyone.
+   */
+  topUsers: UserUsageDto[] | null;
   /** The pages the tool was used on. */
   pages: Array<{ pageId: string; pathTemplate: string; uses: number }>;
   /** TOOL_ACTION values (click, export…) and how often each happened; null = not sent. */

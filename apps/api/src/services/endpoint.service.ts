@@ -21,7 +21,7 @@ import {
 } from '../domain/mappers';
 import { pageFetchSize, toCursorPage } from '../domain/pagination';
 import { fillTimeseriesGaps } from '../domain/timeseries-gaps';
-import type { Viewer } from '../domain/viewer';
+import { forAdmins, type Viewer } from '../domain/viewer';
 import { NotFoundError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
@@ -64,7 +64,10 @@ export class EndpointService {
 
   /**
    * Stats, gap-filled chart, status breakdown, slowest calls and top callers of one endpoint_id.
-   * 404 when the endpoint has no traffic in the window. Samples are role-masked (IP admin-only).
+   * 404 when the endpoint has no traffic in the window. The slowest calls (single requests with
+   * a person) and the top callers' emails go to admins ONLY (forAdmins, ADR 0019); everyone gets the
+   * stats, charts and the count (uniqueUsers). mapRequestSample still masks the IP by role.
+   * @see ../domain/viewer.ts forAdmins
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.getEndpointDetail
    */
   async detail(
@@ -90,9 +93,9 @@ export class EndpointService {
         window,
       ),
       statusBreakdown: rows.statusBreakdown.map(mapStatusCount),
-      slowest: rows.slowest.map((row) => mapRequestSample(row, viewer)),
+      slowest: forAdmins(viewer, () => rows.slowest.map((row) => mapRequestSample(row, viewer))),
       uniqueUsers: rows.uniqueUsers,
-      topUsers: rows.topUsers.map(mapUserUsage),
+      topUsers: forAdmins(viewer, () => rows.topUsers.map(mapUserUsage)),
     };
   }
 }

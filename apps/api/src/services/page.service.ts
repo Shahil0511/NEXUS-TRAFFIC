@@ -17,6 +17,7 @@ import { asHttpMethod, mapPageStats, mapUserUsage } from '../domain/mappers';
 import { roundOrNull } from '../domain/numbers';
 import type { PageLinkRow } from '../domain/rows';
 import { fillCountGaps } from '../domain/timeseries-gaps';
+import { forAdmins, type Viewer } from '../domain/viewer';
 import { NotFoundError } from '../errors/app-error';
 import type { Clock } from '../lib/clock';
 import type { ApiRequestQueryRepository } from '../repositories/api-request-query.repository';
@@ -76,11 +77,18 @@ export class PageService {
    * One page of one app, addressed by its opaque pageId (the template never travels in the URL):
    * stats, views per bucket, top viewers, tools used on it, the API routes it called and the pages
    * before / after it. 404 when no page of the app in the window has this id. p50/p95 → capped at
-   * MAX_PERCENTILE_RANGE_MS.
+   * MAX_PERCENTILE_RANGE_MS. The viewers' emails (topUsers) go to admins ONLY (forAdmins, ADR 0019);
+   * the count (page.distinctUsers) is for everyone.
+   * @see ../domain/viewer.ts forAdmins
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.getPageDetail
    * @see ../repositories/api-request-query.repository.ts ApiRequestQueryRepository.listPageApiCalls
    */
-  async detail(app: string, pageId: string, query: PageDetailQuery): Promise<PageDetailDto> {
+  async detail(
+    app: string,
+    pageId: string,
+    query: PageDetailQuery,
+    viewer: Viewer,
+  ): Promise<PageDetailDto> {
     const window = resolveQueryWindow(query, this.clock.now(), MAX_PERCENTILE_RANGE_MS);
     const filter = currentFilter(
       window,
@@ -107,7 +115,7 @@ export class PageService {
         bucket: point.bucket,
         views: point.count,
       })),
-      topUsers: rows.topUsers.map(mapUserUsage),
+      topUsers: forAdmins(viewer, () => rows.topUsers.map(mapUserUsage)),
       tools: rows.tools.map((row) => ({
         toolId: toToolId(app, row.tool),
         tool: row.tool,

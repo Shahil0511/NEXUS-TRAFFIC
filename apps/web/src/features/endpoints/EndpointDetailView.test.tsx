@@ -3,8 +3,10 @@ import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { REQUESTS_ADMINS_ONLY, WHO_ADMINS_ONLY } from '@/components/AdminsOnlyNote';
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
 import { PAGES } from '@/lib/pages';
-import { ENDPOINT_DETAIL, USER_KEY } from '@/test/fixtures';
+import { ENDPOINT_DETAIL, ME, USER_KEY } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -78,5 +80,44 @@ describe('EndpointDetailView', () => {
       'href',
       '/endpoints?app=other',
     );
+  });
+
+  it('shows a viewer the count and the notes: no callers, no single requests (ADR 0019)', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () => HttpResponse.json({ ...ME, isAdmin: false })),
+      http.get(routeUrl(ROUTES.endpoints.detail), () =>
+        HttpResponse.json({ ...ENDPOINT_DETAIL, topUsers: null, slowest: null }),
+      ),
+    );
+    renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: '/api/orders/:id' }),
+    ).toBeInTheDocument();
+    const callers = screen
+      .getByRole('heading', { level: 2, name: 'Who calls it' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(within(callers).getByText('3 verified people')).toBeInTheDocument();
+    expect(within(callers).getByText(WHO_ADMINS_ONLY)).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Who calls it' })).toBeNull();
+    const slowest = screen
+      .getByRole('heading', { level: 2, name: 'Slowest calls' })
+      .closest<HTMLElement>('[aria-labelledby]')!;
+    expect(within(slowest).getByText(REQUESTS_ADMINS_ONLY)).toBeInTheDocument();
+    expect(within(slowest).queryByRole('table')).toBeNull();
+    expect(document.body.textContent).not.toContain('@libas.in');
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
+  it('shows an admin the callers, most calls first, and the slowest calls table', async () => {
+    recordDetailCalls();
+    renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
+    const callers = await screen.findByRole('list', { name: 'Who calls it' });
+    expect(
+      await within(callers).findByRole('link', { name: 'buyer@libas.in' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Most calls first')).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Slowest calls' })).toBeInTheDocument();
+    expect(screen.queryByText(REQUESTS_ADMINS_ONLY)).toBeNull();
   });
 });
