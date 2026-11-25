@@ -167,8 +167,20 @@
        switched on in the commit that notes in `PROGRESS.md` the owner's production `EXPLAIN ANALYZE` of this
        read for one person with a lot of activity over 30 days. If that read is slow, the fallback is to
        offer the 7-day range only. The API leaf is registered and tested either way.
+  10. **The People list sorts by time only (shipped in step 7).**
+      - `USER_SORT_VALUES` is `lastSeen`, `firstSeen` (`packages/shared/src/schemas/analytics.ts`); the count
+        keys (API calls, page views, visits, failed) are retired from the contract, the repository whitelist
+        (`USER_ORDER_SQL`) and the table, because putting people in an order by an amount reads as grading
+        them. The counts stay on screen as plain columns without a sort control.
+      - Default: last activity, newest first (`DEFAULT_USER_SORT`). The People table headers read First
+        activity / Last activity; the "Who uses it" panel of one app lists the most recently active people.
+      - An old link or open tab that still sends a retired key does not fail: the API schema `.catch`es any
+        unknown `sort` to the default (list query and search body; `dir` stays strict), and the web URL parser
+        (`useUserListParams`, nuqs string literal) reads it as the default too.
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
+    The People list and the "Who uses it" panel of one app scan their own rendered copy in their view tests.
+  - A new sort key of the People list must be a time key; a count key would undo point 10.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
   - The one-day Visits link opens a list read that writes a `person_visits` access-log row, like "View visits".
   - A new read that sums `visible_ms` for a shown time must go through `creditedVisibleMs`; the

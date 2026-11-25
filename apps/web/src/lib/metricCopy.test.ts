@@ -42,6 +42,8 @@ const REQUIRED: readonly MetricKey[] = [
   'activeTime',
   'firstActivity',
   'lastActivity',
+  'firstActivityInRange',
+  'lastActivityInRange',
   'daysActive',
   'dayApps',
   'dayCounts',

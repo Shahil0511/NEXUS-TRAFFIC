@@ -1124,11 +1124,13 @@ describe.skipIf(!RUN_DB_TESTS)('S3 browser analytics as nexus_app on the query p
       expect(dto.topUsers.reduce((sum, u) => sum + u.count, 0)).toBeLessThanOrEqual(2);
     });
 
-    it('UserService.list sorts by a whitelisted key in both directions', async () => {
-      const desc = await users.list({ ...LIST, sort: 'pageViews', limit: 50 });
-      expect(desc.items.map((u) => u.email)).toEqual([USER_A, USER_B]);
-      const asc = await users.list({ ...LIST, sort: 'pageViews', dir: 'asc', limit: 50 });
-      expect(asc.items.map((u) => u.email)).toEqual([USER_B, USER_A]);
+    it('UserService.list sorts by first activity in both directions (time keys only)', async () => {
+      const asc = await users.list({ ...LIST, sort: 'firstSeen', dir: 'asc', limit: 50 });
+      const firstSeen = asc.items.map((u) => u.firstSeenAt);
+      expect(firstSeen).toHaveLength(2);
+      expect(firstSeen).toEqual([...firstSeen].sort());
+      const desc = await users.list({ ...LIST, sort: 'firstSeen', dir: 'desc', limit: 50 });
+      expect(desc.items.map((u) => u.firstSeenAt)).toEqual([...firstSeen].sort().reverse());
     });
 
     it('UserService.profile: per-app activity and top routes', async () => {

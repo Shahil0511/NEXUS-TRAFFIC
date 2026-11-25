@@ -169,6 +169,17 @@ export const METRIC_COPY = {
     short: 'The latest recorded API call or browser event of the day, India time.',
     long: 'It is the last thing the apps recorded, not a sign-out time.',
   },
+  // ─── One person, over the selected range (People list) ───────────────────────
+  firstActivityInRange: {
+    label: 'First activity',
+    short: 'The earliest recorded API call or browser event in the selected range.',
+    long: 'It is the first thing the apps recorded, not a sign-in time.',
+  },
+  lastActivityInRange: {
+    label: 'Last activity',
+    short: 'The latest recorded API call or browser event in the selected range.',
+    long: 'It is the last thing the apps recorded, not a sign-out time.',
+  },
   daySpan: {
     label: 'First – last activity',
     short:

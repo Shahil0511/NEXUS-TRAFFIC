@@ -236,4 +236,18 @@ describe('the access log is admin-only, the lists of people are not', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ran: 'users.search' });
   });
+
+  it('the lists of people still open with a retired count sort (it falls back to last activity)', async () => {
+    // WHY: people are sorted by time keys only (USER_SORT_VALUES); an old link or open tab may still
+    // send `sort=requests`, which must not turn the People page into an error.
+    const list = await send(ROUTES.users.list, 'viewer', `${ROUTES.users.list.path}?sort=requests`);
+    expect(list.status).toBe(200);
+    expect(list.body).toEqual({ ran: 'users.list' });
+    const search = await send(ROUTES.users.search, 'viewer').send({
+      search: 'some',
+      sort: 'failed',
+    });
+    expect(search.status).toBe(200);
+    expect(search.body).toEqual({ ran: 'users.search' });
+  });
 });

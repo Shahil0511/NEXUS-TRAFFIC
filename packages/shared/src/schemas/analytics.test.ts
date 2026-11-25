@@ -1,10 +1,19 @@
 /**
  * The one-day query (ROUTES.users.day) and the shape it is built from: extracting the time-window
- * fields into `timeWindowShape` must not change how the refined window query behaves.
+ * fields into `timeWindowShape` must not change how the refined window query behaves. Also the People
+ * list sort: time keys only, and a retired count key falls back to the default.
  */
 import { describe, expect, it } from 'vitest';
 
-import { USER_PATTERN_RANGE_VALUES, userDayQuerySchema, userPatternQuerySchema } from './analytics';
+import {
+  DEFAULT_USER_SORT,
+  USER_PATTERN_RANGE_VALUES,
+  USER_SORT_VALUES,
+  userDayQuerySchema,
+  userListQuerySchema,
+  userPatternQuerySchema,
+  userSearchBodySchema,
+} from './analytics';
 import { reportingDaySchema, timeWindowQuerySchema } from './common';
 
 describe('reportingDaySchema', () => {
@@ -94,5 +103,37 @@ describe('timeWindowQuerySchema after the shape extraction', () => {
       env: 'all',
       app: 'ebo-sales',
     });
+  });
+});
+
+describe('People list sort (userListQuerySchema, userSearchBodySchema)', () => {
+  const RETIRED_COUNT_KEYS = ['requests', 'pageViews', 'sessions', 'failed'] as const;
+
+  it('offers time keys only, most recently active first by default', () => {
+    expect(USER_SORT_VALUES).toEqual(['lastSeen', 'firstSeen']);
+    expect(DEFAULT_USER_SORT).toBe('lastSeen');
+    expect(userListQuerySchema.parse({})).toMatchObject({ sort: 'lastSeen', dir: 'desc' });
+    expect(userListQuerySchema.parse({ sort: 'firstSeen', dir: 'asc' })).toMatchObject({
+      sort: 'firstSeen',
+      dir: 'asc',
+    });
+  });
+
+  it.each(RETIRED_COUNT_KEYS)(
+    'a retired count key (%s) falls back to the default, not a 400',
+    (sort) => {
+      expect(userListQuerySchema.parse({ sort, dir: 'asc' })).toMatchObject({
+        sort: DEFAULT_USER_SORT,
+        dir: 'asc',
+      });
+      expect(userSearchBodySchema.parse({ search: 'buyer', sort })).toMatchObject({
+        sort: DEFAULT_USER_SORT,
+      });
+    },
+  );
+
+  it('an unknown key falls back too, while the direction stays strict', () => {
+    expect(userListQuerySchema.parse({ sort: 'nonsense' }).sort).toBe(DEFAULT_USER_SORT);
+    expect(userListQuerySchema.safeParse({ dir: 'sideways' }).success).toBe(false);
   });
 });

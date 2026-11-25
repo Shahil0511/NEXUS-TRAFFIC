@@ -99,7 +99,7 @@ export interface FailureListOptions {
 export interface UserListOptions {
   /** Case-insensitive substring of the verified email. */
   search?: string;
-  /** Whitelisted sort key (USER_SORT_VALUES); default: most recently seen first. */
+  /** Whitelisted time sort key (USER_SORT_VALUES); default: most recently active first. */
   sort?: UserSort;
   dir?: SortDirection;
   limit: number;

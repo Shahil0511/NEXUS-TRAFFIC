@@ -92,6 +92,18 @@ describe('WebEventQueryRepository SQL (S3)', () => {
     expect(statement?.text).not.toContain('50%');
   });
 
+  it('people are ordered by a time key only: last activity by default, first activity on request', async () => {
+    const { exec, repo } = build();
+    await repo.listUsers(FILTER, { limit: 3, offset: 0 });
+    await repo.listUsers(FILTER, { sort: 'firstSeen', dir: 'asc', limit: 3, offset: 0 });
+    const [byLast, byFirst] = exec.statements.map(({ text }) => text);
+    expect(byLast).toContain('ORDER BY max(u.occurred_at) DESC NULLS LAST, u.user_key ASC');
+    expect(byFirst).toContain('ORDER BY min(u.occurred_at) ASC NULLS LAST, u.user_key ASC');
+    for (const text of [byLast, byFirst]) {
+      expect(text?.slice(text.lastIndexOf('ORDER BY'))).not.toMatch(/count\(/);
+    }
+  });
+
   it('the timeline pages both tables with the same keyset and folds page_time away', async () => {
     const { exec, repo } = build();
     await repo.listUserTimeline(USER_KEY, FILTER, {

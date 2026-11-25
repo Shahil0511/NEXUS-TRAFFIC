@@ -1,6 +1,6 @@
 'use client';
 
-import type { RangePreset } from '@nexus/shared';
+import { DEFAULT_USER_SORT, type RangePreset } from '@nexus/shared';
 import { Boxes, CalendarRange, CornerDownLeft, Route, Search, UserRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import {
@@ -304,7 +304,7 @@ function usePaletteItems(text: string): { items: PaletteItem[]; status: SearchSt
 
   const apps = useAppList();
   const users = useUserSearch(
-    { ...filters, search: settled, sort: 'lastSeen', dir: 'desc', limit: GROUP_LIMIT },
+    { ...filters, search: settled, sort: DEFAULT_USER_SORT, dir: 'desc', limit: GROUP_LIMIT },
     { enabled: searchUsers },
   );
   // Routes need percentiles: over a too-long range the search simply returns nothing.

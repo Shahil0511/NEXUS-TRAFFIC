@@ -305,7 +305,7 @@ apps/api/src/domain/mappers.ts                         mapSessionSummary (IP adm
 
 | ROUTES leaf | Controller / service method | Repository method | Notes |
 |---|---|---|---|
-| `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, offset cursor; `sessions` = browser sessions; `sort`/`dir` whitelist `USER_ORDER_SQL` |
+| `users.list` | `UserController.list` / `UserService.list` | `listUsers` | verified only (`user_key IS NOT NULL`), both tables, offset cursor; `sessions` = browser sessions; `sort`/`dir` whitelist `USER_ORDER_SQL` (time keys only: `lastSeen` default, `firstSeen`; an unknown `sort` falls back to the default, ADR 0017) |
 | `users.activity` | `.activity` | `listDailyUsers`, `countIdentifiedUsers` | DAU per IST day (gap-filled, `fillCountGaps`) + WAU/MAU ending at the window end; registered before `/:userKey` |
 | `users.search` | `UserController.search` / `UserService.search` | `listUsers` | **POST** body `userSearchBodySchema` — the email never travels in a URL (ADR 0006) |
 | `users.profile` | `.profile` | `getUserProfile` + `ApiRequestQueryRepository.listUserTopEndpoints` + `getUserLatestContext` | **admin-only** (`...admin`); by stored `user_key` (hex in the URL → `userKeyFromHex`); 404 when no rows; per-app activity (`listUserApps`); `latest` = the newest browser event's device / tz / lang / release (identity card) |
@@ -374,7 +374,7 @@ Web half (page → View → hook → `api.*`; every View reads the global filter
 | `applications/[app]/` | `applications/ApplicationDetailView.tsx` | `useAppTraffic`, `useOverviewTimeseries`, `useErrorSummary`, `useUserList`, `useEndpointStats`, `usePageStats`, `useToolUsage` | `appSlugSchema` → 404; the PATH app overrides the global filter; keyed by app in the page file; audience section `ApplicationAudienceSection.tsx` → `features/breakdowns/` (`BreakdownPanel` + `useBreakdown` → `overview.breakdown`, `DeviceReturnPanel` + `useDeviceReturn` → `overview.devices`) |
 
 Drill-down helpers: `components/TopUsersList.tsx` (any `UserUsageDto[]`), `components/charts/CountChart.tsx`
-(one count over time), `features/users/useUserListParams.ts` (`?sort=&dir=`), `?userKey=` and `?errorCode=`
+(one count over time), `features/users/useUserListParams.ts` (`?sort=&dir=`, last / first activity only), `?userKey=` and `?errorCode=`
 on Errors (`features/errors/useErrorListParams.ts`; the "Error codes" panel is `features/errors/ErrorCodesList.tsx`).
 
 Wave 3 UI helpers: `components/Breadcrumbs.tsx` (detail-page trails; `applicationCrumbs`; emails masked),

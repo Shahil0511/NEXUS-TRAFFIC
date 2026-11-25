@@ -1,6 +1,11 @@
 'use client';
 
-import type { AppTrafficDto, TimeWindowDto, TimeWindowQuery } from '@nexus/shared';
+import {
+  DEFAULT_USER_SORT,
+  type AppTrafficDto,
+  type TimeWindowDto,
+  type TimeWindowQuery,
+} from '@nexus/shared';
 import {
   Activity,
   ArrowRight,
@@ -328,13 +333,13 @@ function FailingRoutesPanel({
 }
 
 function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuery: LinkQuery }) {
-  // Sorted by API calls only (the description says so; it is not a measure of activity).
-  const users = useUserList({ ...filters, sort: 'requests', dir: 'desc', limit: TOP_N });
+  // Most recently active first: people are never put in an order by an amount (ADR 0017).
+  const users = useUserList({ ...filters, sort: DEFAULT_USER_SORT, dir: 'desc', limit: TOP_N });
   const rows = users.data?.pages[0]?.items;
   return (
     <Panel
       title="Who uses it"
-      description="Verified people, by API calls"
+      description="Verified people, most recent activity first"
       aside={<ViewAll href={withQuery(PAGES.users(), linkQuery)} label="All users of this app" />}
     >
       <QueryState

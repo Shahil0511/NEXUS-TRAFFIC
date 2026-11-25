@@ -18,6 +18,40 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Person 360 daily depth, step 7: the People list sorts by time only (ADR 0017)
+
+Contract, API and web; no migration, no new route. Default of the open question (the owner can veto it).
+
+**Done**
+- **Shared (contract first):** `USER_SORT_VALUES` is `['lastSeen', 'firstSeen']` (the count keys `requests`,
+  `pageViews`, `sessions`, `failed` are retired); new `DEFAULT_USER_SORT` (`lastSeen`). The `sort` of
+  `userListQuerySchema` and `userSearchBodySchema` `.catch`es an unknown value to the default, so an old link
+  (`?sort=requests`) or a tab opened before the deploy gets the list, not a 400; `dir` stays strict.
+- **API:** `USER_ORDER_SQL` (`web-event-query.repository.ts`) keeps `max` / `min(u.occurred_at)` only and falls
+  back to `DEFAULT_USER_SORT`; `UserListOptions.sort` doc. The selected counts are unchanged.
+- **Web:** `UsersView` sorts by First activity / Last activity only (headers renamed from First / Last seen,
+  each with a hint "in the selected range … not a sign-in / sign-out time"); API calls, Failed, Page views and
+  Visits are plain columns. The two headers and hints come from `METRIC_COPY.firstActivityInRange` /
+  `lastActivityInRange` (`lib/metricCopy.ts`, range-scoped twins of the per-day entries). `useUserListParams`
+  and the command palette's person search (`CommandPalette.tsx`) import `DEFAULT_USER_SORT`; a retired
+  `?sort=` parses to it.
+  The "Who uses it" panel of one app (`ApplicationDetailView`) lists the most recently active people
+  ("Verified people, most recent activity first") instead of an order by API calls.
+- **Tests:** shared (`analytics.test.ts`: values, default, each retired key falls back in the list query and the
+  search body, `dir` strict); api repository (ORDER BY pinned to `max` / `min(u.occurred_at)`, no `count(` after
+  it), controller (`UserController.list`: a retired key reaches the service as `lastSeen`), person-access
+  routes (list and search with a retired sort → 200 for a viewer); DB suite: the `pageViews` sort case became
+  first activity in both directions (written, not run). Web: `UsersView.test.tsx` (default request, First
+  activity click → `sort=firstSeen` in the URL, only the two time columns have a sort control, each retired
+  `?sort=` falls back to `lastSeen`, the rendered list has no banned word), `ApplicationsView.test.tsx` (the
+  app panel asks for `lastSeen`; its rendered copy has no banned word), `metricCopy.test.ts` (the two new keys).
+- **Docs:** ADR 0017 point 10 and a consequence line, ADR 0007 note, 03-code-navigation.
+
+**Next:** `RUN_DB_TESTS=1 npm run test:db` (the changed sort case and the step 5 / 6 cases); the owner's
+EXPLAIN ANALYZE gate for usual activity hours (step 6).
+
+---
+
 ## 2026-11-25 — Person 360 daily depth, step 6: usual activity hours, built and switched off (ADR 0017)
 
 Contract, API and web; no migration (the `person_pattern` surface and its CHECK shipped with 0014 in step 4).

@@ -108,19 +108,22 @@ export const errorListQuerySchema = timeWindowQuerySchema.safeExtend({
 export type ErrorListQuery = z.infer<typeof errorListQuerySchema>;
 
 // ─── users ──────────────────────────────────────────────────────────────────
-/** Sort keys of the Users table (whitelisted ORDER BY in the repository). */
-export const USER_SORT_VALUES = [
-  'lastSeen',
-  'firstSeen',
-  'requests',
-  'pageViews',
-  'sessions',
-  'failed',
-] as const;
+/**
+ * Sort keys of the People list (whitelisted ORDER BY in the repository). Time keys only: a list of
+ * people is never put in an order by an amount (calls, page views, visits, failures). @see ADR 0017
+ */
+export const USER_SORT_VALUES = ['lastSeen', 'firstSeen'] as const;
 export type UserSort = (typeof USER_SORT_VALUES)[number];
+/** Most recently active first. */
+export const DEFAULT_USER_SORT: UserSort = 'lastSeen';
 
 const userListShape = {
-  sort: z.enum(USER_SORT_VALUES).default('lastSeen'),
+  /**
+   * WHY `.catch`: a bookmarked link or a tab opened before the count keys were retired may still send
+   * one (`sort=requests`); it falls back to the default instead of a 400. Any value that reaches the
+   * repository is still one of USER_SORT_VALUES.
+   */
+  sort: z.enum(USER_SORT_VALUES).default(DEFAULT_USER_SORT).catch(DEFAULT_USER_SORT),
   dir: z.enum(SORT_DIRECTION_VALUES).default('desc'),
   ...pageQueryShape,
 };

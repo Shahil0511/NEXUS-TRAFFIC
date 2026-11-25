@@ -4,11 +4,15 @@ import {
   ROUTES,
   userKeyParamsSchema,
   userDayQuerySchema,
+  userListQuerySchema,
   userPatternQuerySchema,
+  type CursorPage,
   type UserActivityPatternDto,
   type UserDayDetailDto,
   type UserDayQuery,
+  type UserListQuery,
   type UserPatternQuery,
+  type UserSummaryDto,
 } from '@nexus/shared';
 import express, { type Express } from 'express';
 import request from 'supertest';
@@ -25,8 +29,13 @@ import { UserController } from './user.controller';
 const ADMIN: Viewer = { email: 'boss@libas.in', isAdmin: true };
 const USER_KEY = 'ab'.repeat(32);
 
-class FakeUsers implements Pick<UserService, 'day' | 'pattern'> {
+class FakeUsers implements Pick<UserService, 'list' | 'day' | 'pattern'> {
   readonly calls: unknown[][] = [];
+
+  async list(query: UserListQuery): Promise<CursorPage<UserSummaryDto>> {
+    this.calls.push([query]);
+    return { items: [], nextCursor: null };
+  }
 
   async day(userKey: string, query: UserDayQuery, viewer: Viewer): Promise<UserDayDetailDto> {
     this.calls.push([userKey, query, viewer]);
@@ -74,6 +83,7 @@ function buildApp(service: FakeUsers): Express {
     res.locals.viewer = ADMIN;
     next();
   });
+  app.get(ROUTES.users.list.path, validateQuery(userListQuerySchema), ctl.list);
   app.get(
     ROUTES.users.day.path,
     validateParams(userKeyParamsSchema),
@@ -89,6 +99,22 @@ function buildApp(service: FakeUsers): Express {
   app.use(errorHandlerMiddleware(recordingLogger().logger));
   return app;
 }
+
+describe('UserController.list', () => {
+  it('→ 200 sorted by a time key; a retired count sort reaches the service as the default', async () => {
+    const service = new FakeUsers();
+    const app = buildApp(service);
+    const first = await request(app).get(`${ROUTES.users.list.path}?sort=firstSeen&dir=asc`);
+    expect(first.status).toBe(200);
+    expect(first.headers['cache-control']).toBe(DASHBOARD_ANALYTICS_CACHE);
+    const retired = await request(app).get(`${ROUTES.users.list.path}?sort=pageViews&dir=asc`);
+    expect(retired.status).toBe(200);
+    expect(service.calls).toEqual([
+      [expect.objectContaining({ sort: 'firstSeen', dir: 'asc' })],
+      [expect.objectContaining({ sort: 'lastSeen', dir: 'asc' })],
+    ]);
+  });
+});
 
 const dayPath = buildPath(ROUTES.users.day, { userKey: USER_KEY });
 

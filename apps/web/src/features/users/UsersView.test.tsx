@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
 import { USER_KEY, userSummary } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
@@ -54,6 +55,13 @@ describe('UsersView', () => {
     expect(headers.some((text) => /user|session/i.test(text))).toBe(false);
   });
 
+  it('uses neutral words only: headers, hints and every label a reader can meet (ADR 0017)', async () => {
+    useUserHandlers();
+    renderWithProviders(<UsersView />);
+    await screen.findByRole('table', { name: 'People' });
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
   it('"Load more" fetches the next page with the cursor and appends it', async () => {
     const calls = useUserHandlers();
     const user = userEvent.setup();
@@ -94,18 +102,46 @@ describe('UsersView', () => {
     expect(chip.getAttribute('href')).toBe('/applications/ebo-sales');
   });
 
-  it('sorts on the server by a clicked column, keeping the choice in the URL', async () => {
+  it('sorts on the server by last activity by default, or by first activity, keeping the choice in the URL', async () => {
     const calls = useUserHandlers();
     const urls: string[] = [];
     const user = userEvent.setup();
     renderWithProviders(<UsersView />, { onUrlUpdate: (event) => urls.push(event.queryString) });
     await screen.findByText('buyer@libas.in');
+    expect(calls[0]?.get('sort')).toBe('lastSeen');
+    expect(calls[0]?.get('dir')).toBe('desc');
 
-    await user.click(screen.getByRole('button', { name: 'API calls' }));
-    await waitFor(() => expect(calls.at(-1)?.get('sort')).toBe('requests'));
+    await user.click(screen.getByRole('button', { name: 'First activity' }));
+    await waitFor(() => expect(calls.at(-1)?.get('sort')).toBe('firstSeen'));
     expect(calls.at(-1)?.get('dir')).toBe('desc');
-    expect(urls.at(-1)).toContain('sort=requests');
+    expect(urls.at(-1)).toContain('sort=firstSeen');
   });
+
+  it('never puts people in an order by an amount: the count columns have no sort control', async () => {
+    useUserHandlers();
+    renderWithProviders(<UsersView />);
+    const table = await screen.findByRole('table', { name: 'People' });
+    // The (i) buttons of the column hints carry an aria-label ("What is …?"); sort buttons do not.
+    const sortButtons = within(table)
+      .getAllByRole('button')
+      .filter((button) => !button.hasAttribute('aria-label'))
+      .map((button) => button.textContent);
+    expect(sortButtons).toEqual(['First activity', 'Last activity']);
+    for (const name of ['API calls', 'Failed', 'Page views', 'Visits']) {
+      expect(within(table).queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it.each(['requests', 'pageViews', 'sessions', 'failed'])(
+    'an old link sorted by a retired count (?sort=%s) falls back to last activity first',
+    async (retired) => {
+      const calls = useUserHandlers();
+      renderWithProviders(<UsersView />, { searchParams: `?sort=${retired}&dir=asc` });
+      expect(await screen.findByText('buyer@libas.in')).toBeInTheDocument();
+      expect(calls[0]?.get('sort')).toBe('lastSeen');
+      expect(calls[0]?.get('dir')).toBe('asc');
+    },
+  );
 
   it("links failed requests to the user's failures on Errors (opaque key)", async () => {
     useUserHandlers();

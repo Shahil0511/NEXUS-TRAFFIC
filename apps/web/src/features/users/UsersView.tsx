@@ -18,7 +18,7 @@ import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
 import { useCanOpenPersonPages } from '@/features/me/useCanOpenPersonPages';
 import { formatInteger } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
+import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
@@ -31,9 +31,11 @@ const SEARCH_DEBOUNCE_MS = 300;
 const PAGE_SIZE = 50;
 
 /**
- * The table columns; `sortKey` values are the API whitelist (USER_SORT_VALUES). Each user opens
- * its profile through the OPAQUE userKey (PAGES); each app chip opens that app's page — so "who
- * uses which app" is one click either way. "Failed" opens the user's failures on Errors.
+ * The table columns. Only First / Last activity sort (`sortKey`, the API whitelist USER_SORT_VALUES):
+ * people are never put in an order by an amount, so the count columns are facts, not sort keys
+ * (ADR 0017). Each user opens its profile through the OPAQUE userKey (PAGES); each app chip opens
+ * that app's page — so "who uses which app" is one click either way. "Failed" opens the user's
+ * failures on Errors.
  * Both person links are admin-only (the API refuses everyone else), so with `canOpenPerson` false
  * the email and the failed count are plain text.
  */
@@ -75,7 +77,6 @@ export function userColumns(
       id: 'requests',
       header: 'API calls',
       hint: metricInfo('requests'),
-      sortKey: 'requests',
       align: 'right',
       cell: (row) => formatInteger(row.requests),
     },
@@ -83,7 +84,6 @@ export function userColumns(
       id: 'failed',
       header: 'Failed',
       hint: metricInfo('failedRequests'),
-      sortKey: 'failed',
       align: 'right',
       cell: (row) =>
         row.failedRequests > 0 && !canOpenPerson ? (
@@ -104,7 +104,6 @@ export function userColumns(
       id: 'pageViews',
       header: 'Page views',
       hint: metricInfo('pageViews'),
-      sortKey: 'pageViews',
       align: 'right',
       cell: (row) => formatInteger(row.pageViews),
     },
@@ -112,13 +111,13 @@ export function userColumns(
       id: 'sessions',
       header: 'Visits',
       hint: metricInfo('sessions'),
-      sortKey: 'sessions',
       align: 'right',
       cell: (row) => formatInteger(row.sessions),
     },
     {
       id: 'firstSeen',
-      header: 'First seen',
+      header: METRIC_COPY.firstActivityInRange.label,
+      hint: metricInfo('firstActivityInRange'),
       sortKey: 'firstSeen',
       align: 'right',
       className: 'whitespace-nowrap text-muted-foreground',
@@ -126,7 +125,8 @@ export function userColumns(
     },
     {
       id: 'lastSeen',
-      header: 'Last seen',
+      header: METRIC_COPY.lastActivityInRange.label,
+      hint: metricInfo('lastActivityInRange'),
       sortKey: 'lastSeen',
       align: 'right',
       className: 'whitespace-nowrap text-muted-foreground',
@@ -137,7 +137,7 @@ export function userColumns(
 
 /**
  * The People page: every VERIFIED identity (SSO cookie or app-attested) active in the window, sorted
- * server-side by any column (`?sort=&dir=`, default most recently seen), with the apps each uses. Browser-claimed emails are never users — they
+ * server-side by last or first activity (`?sort=&dir=`, default most recently active), with the apps each uses. Browser-claimed emails are never users — they
  * appear, flagged, on sessions. The email search is sent in a POST body and kept in React state
  * only: an email never lands in the URL, the browser history or an access log (ADR 0006).
  */

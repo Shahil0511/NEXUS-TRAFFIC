@@ -5,6 +5,7 @@ import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { COVERAGE_WARN_PCT, METRIC_COPY } from '@/lib/metricCopy';
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
 import {
   APP_TRAFFIC,
   BREAKDOWN,
@@ -127,6 +128,7 @@ describe('ApplicationsView metric explanations', () => {
 describe('ApplicationDetailView', () => {
   it('shows who uses the app and what they use, every panel scoped to the app', async () => {
     const apps = new Set<string | null>();
+    const userSorts: (string | null)[] = [];
     const scoped =
       (body: JsonBodyType) =>
       ({ request }: { request: Request }) => {
@@ -140,7 +142,10 @@ describe('ApplicationDetailView', () => {
       ),
       http.get(routeUrl(ROUTES.overview.timeseries), scoped(OVERVIEW_TIMESERIES)),
       http.get(routeUrl(ROUTES.errors.summary), scoped(ERROR_SUMMARY)),
-      http.get(routeUrl(ROUTES.users.list), scoped({ items: [userSummary()], nextCursor: null })),
+      http.get(routeUrl(ROUTES.users.list), (info) => {
+        userSorts.push(new URL(info.request.url).searchParams.get('sort'));
+        return scoped({ items: [userSummary()], nextCursor: null })(info);
+      }),
       http.get(routeUrl(ROUTES.endpoints.list), scoped(ENDPOINT_PAGE)),
       http.get(routeUrl(ROUTES.pages.list), scoped(PAGE_STATS)),
       http.get(routeUrl(ROUTES.tools.usage), scoped(TOOL_USAGE)),
@@ -153,6 +158,13 @@ describe('ApplicationDetailView', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'EBO Sales' })).toBeInTheDocument();
     const users = await screen.findByRole('list', { name: 'Users of this app' });
+    // "Who uses it" lists the most recently active people, never an order by an amount.
+    expect([...new Set(userSorts)]).toEqual(['lastSeen']);
+    expect(screen.getByText('Verified people, most recent activity first')).toBeInTheDocument();
+    // The panel's person-level copy uses neutral words only (ADR 0017).
+    const usersPanel = users.closest('[aria-labelledby]');
+    expect(usersPanel).toHaveTextContent('Who uses it');
+    expect(findBannedWords(collectRenderedText(usersPanel as Element))).toEqual([]);
     expect(within(users).getByRole('link', { name: 'buyer@libas.in' }).getAttribute('href')).toBe(
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
     );
