@@ -36,6 +36,7 @@ import { navLabel } from '@/lib/nav';
 import { PAGES } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
+import { DEFAULT_BLOCK_HEADING, type BlockHeading } from './blockHeading';
 import { CoverageStats } from './CoverageStats';
 import { EnvironmentMix } from './EnvironmentMix';
 import { IntegrationLevelBadge } from './IntegrationLevelBadge';
@@ -127,7 +128,7 @@ function WarningItem({ code }: { code: IntegrationWarning }) {
           href={guideHref(copy.chapter)}
           target="_blank"
           rel="noreferrer noopener"
-          className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-2 hover:underline"
+          className="inline-flex items-center gap-0.5 text-xs font-medium text-link underline-offset-2 hover:underline"
         >
           How to fix
           <ArrowUpRight className="size-3" aria-hidden="true" />
@@ -153,10 +154,12 @@ function SourceStats({
   counter,
   lastEventAt,
   nowMs,
+  headingAs: Heading,
 }: {
   counter: IngestCounterDto;
   lastEventAt: string | null;
   nowMs: number;
+  headingAs: BlockHeading;
 }) {
   const Icon = SOURCE_ICONS[counter.source];
   const ago = formatAgo(lastEventAt, nowMs);
@@ -166,10 +169,10 @@ function SourceStats({
       className="space-y-3 rounded-lg bg-muted/40 p-3 ring-1 ring-border/60 ring-inset"
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-xs font-semibold">
+        <Heading className="flex items-center gap-1.5 text-xs font-semibold">
           <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           {SOURCE_LABELS[counter.source]}
-        </h3>
+        </Heading>
         <p className="text-right text-2xs text-muted-foreground">
           {lastEventAt ? (
             <>
@@ -209,6 +212,11 @@ export interface AppHealthCardProps {
   nowMs: number;
 }
 
+export interface AppHealthDetailsProps extends AppHealthCardProps {
+  /** The block headings' level: one below the app's name (h3 under a card title, h4 in a row). */
+  headingAs?: BlockHeading;
+}
+
 /** The level's meaning and what the next level needs, with the (i) explaining levels. */
 function LevelLine({ health }: { health: AppIntegrationHealthDto }) {
   return (
@@ -223,21 +231,164 @@ function LevelLine({ health }: { health: AppIntegrationHealthDto }) {
 }
 
 /**
- * WHY: everything a team needs to know about ONE app's wiring on one card — status and
- * integration level, what to fix (with the guide chapter), per-source last event and counters,
- * coverage (identified per source, linked calls), environments, releases, SDKs with version and
- * clock skew, redacted personal data, rejection reasons, SSO cookie outcomes, the proxy-IP share
- * and exposed keys; the app slug is one click to copy.
- * Strings from the API render as text only, never as href/src.
+ * WHY: everything a team needs to know about ONE app's wiring, without a frame — integration
+ * level, what to fix (with the guide chapter), per-source last event and counters, coverage
+ * (identified per source, linked calls), environments, releases, SDKs with version and clock
+ * skew, redacted personal data, rejection reasons, SSO cookie outcomes, the proxy-IP share and
+ * exposed keys. Shared by the card (AppHealthCard) and the Data health checklist row
+ * (IntegrationView, "Show details"); `headingAs` keeps the block headings one level below the
+ * app's name in either place. The tables bleed 1rem left and right (`-mx-4`): the parent
+ * MUST pad 1rem (CardContent, the CheckRow body). Strings from the API render as text only,
+ * never as href/src.
  */
-export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
-  const status = STATUS_COPY[health.status];
-  const StatusIcon = STATUS_ICONS[health.status];
-  const headingId = `app-health-${health.app}`;
+export function AppHealthDetails({
+  health,
+  nowMs,
+  headingAs = DEFAULT_BLOCK_HEADING,
+}: AppHealthDetailsProps) {
   const lastBySource: Record<IngestSource, string | null> = {
     server: health.lastServerEventAt,
     browser: health.lastBrowserEventAt,
   };
+
+  return (
+    <div className="space-y-4">
+      <LevelLine health={health} />
+      {health.warnings.length > 0 ? (
+        <ul aria-label={`Warnings for ${health.displayName}`} className="space-y-2">
+          {health.warnings.map((code) => (
+            <WarningItem key={code} code={code} />
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {health.counters.map((counter) => (
+          <SourceStats
+            key={counter.source}
+            counter={counter}
+            lastEventAt={lastBySource[counter.source]}
+            nowMs={nowMs}
+            headingAs={headingAs}
+          />
+        ))}
+      </div>
+
+      <div className="grid gap-4 rounded-lg p-3 ring-1 ring-border/60 ring-inset sm:grid-cols-2">
+        <CoverageStats
+          identityCoverage={health.identityCoverage}
+          linkingCoverage={health.linkingCoverage}
+          headingAs={headingAs}
+        />
+        <div className="space-y-4">
+          <EnvironmentMix environments={health.environments} headingAs={headingAs} />
+          <ReleaseStatus releases={health.releases} headingAs={headingAs} />
+        </div>
+      </div>
+
+      {health.piiDetections.length > 0 ? (
+        <div className="-mx-4">
+          <PiiDetectionsTable detections={health.piiDetections} appName={health.displayName} />
+        </div>
+      ) : null}
+
+      {health.rejections.length > 0 ? (
+        <div className="-mx-4">
+          <RejectionsTable rejections={health.rejections} appName={health.displayName} />
+        </div>
+      ) : null}
+
+      {health.ssoCookieOutcomes.length > 0 ? (
+        <SsoOutcomes
+          outcomes={health.ssoCookieOutcomes}
+          appName={health.displayName}
+          headingAs={headingAs}
+        />
+      ) : null}
+
+      <div className="-mx-4">
+        <DataTable
+          caption={`SDKs of ${health.displayName}`}
+          columns={SDK_COLUMNS}
+          rows={health.sdks}
+          rowKey={(row) => `${row.source}|${row.sdk ?? ''}`}
+          skeletonRows={1}
+          empty={
+            <EmptyState
+              className="py-5"
+              title="No SDK seen in the last 24 hours"
+              description="SDK versions and clock skew appear once events arrive."
+            />
+          }
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        <span>
+          Private IPs:{' '}
+          <span className="font-medium text-foreground tabular">
+            {health.privateIpRatio === null
+              ? 'not enough data'
+              : `${formatPercent(health.privateIpRatio * 100, 0)} of server events`}
+          </span>
+          {health.warnings.includes('private_ips') ? (
+            <span className="text-foreground"> · Places stay empty</span>
+          ) : null}
+        </span>
+        {health.exposedKeys.length > 0 ? (
+          <Link
+            href={PAGES.apps()}
+            className="inline-flex items-center gap-1 rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+          >
+            <KeyRound className="size-3.5" aria-hidden="true" />
+            Rotate {health.exposedKeys.map((key) => key.keyPrefix).join(', ')} on the{' '}
+            {navLabel('apps')} page
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * WHY: one look for "is this app switched on, how deep is it wired, is it sending" wherever an
+ * app's health is headed (the card header, the Data health row title): disabled, level, status.
+ */
+export function AppHealthBadges({ health }: { health: AppIntegrationHealthDto }) {
+  const status = STATUS_COPY[health.status];
+  const StatusIcon = STATUS_ICONS[health.status];
+  return (
+    <>
+      {health.isActive ? null : <Badge variant="destructive">disabled</Badge>}
+      <IntegrationLevelBadge level={health.level} />
+      <Badge variant={status.tone}>
+        <StatusIcon aria-hidden="true" />
+        {status.label}
+      </Badge>
+    </>
+  );
+}
+
+/** WHY: from an app's health to its traffic (the App page) in one click, beside its name. */
+export function ViewTrafficLink({ app }: { app: string }) {
+  return (
+    <Link
+      href={PAGES.applicationDetail(app)}
+      className="inline-flex items-center gap-1 rounded-sm text-xs font-medium whitespace-nowrap text-link outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
+      View traffic
+      <ArrowRight className="size-3" aria-hidden="true" />
+    </Link>
+  );
+}
+
+/**
+ * WHY: ONE app's wiring on one card — the header (name, copyable slug, View traffic, disabled /
+ * level / status badges) over AppHealthDetails. Kept for the App page's Health tab; the Data
+ * health page shows the same details inside a checklist row instead.
+ */
+export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
+  const headingId = `app-health-${health.app}`;
 
   return (
     <Card aria-labelledby={headingId}>
@@ -251,109 +402,12 @@ export function AppHealthCard({ health, nowMs }: AppHealthCardProps) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
-          <Link
-            href={PAGES.applicationDetail(health.app)}
-            className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
-          >
-            View traffic
-            <ArrowRight className="size-3" aria-hidden="true" />
-          </Link>
-          {health.isActive ? null : <Badge variant="destructive">disabled</Badge>}
-          <IntegrationLevelBadge level={health.level} />
-          <Badge variant={status.tone}>
-            <StatusIcon aria-hidden="true" />
-            {status.label}
-          </Badge>
+          <ViewTrafficLink app={health.app} />
+          <AppHealthBadges health={health} />
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <LevelLine health={health} />
-        {health.warnings.length > 0 ? (
-          <ul aria-label={`Warnings for ${health.displayName}`} className="space-y-2">
-            {health.warnings.map((code) => (
-              <WarningItem key={code} code={code} />
-            ))}
-          </ul>
-        ) : null}
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          {health.counters.map((counter) => (
-            <SourceStats
-              key={counter.source}
-              counter={counter}
-              lastEventAt={lastBySource[counter.source]}
-              nowMs={nowMs}
-            />
-          ))}
-        </div>
-
-        <div className="grid gap-4 rounded-lg p-3 ring-1 ring-border/60 ring-inset sm:grid-cols-2">
-          <CoverageStats
-            identityCoverage={health.identityCoverage}
-            linkingCoverage={health.linkingCoverage}
-          />
-          <div className="space-y-4">
-            <EnvironmentMix environments={health.environments} />
-            <ReleaseStatus releases={health.releases} />
-          </div>
-        </div>
-
-        {health.piiDetections.length > 0 ? (
-          <div className="-mx-4">
-            <PiiDetectionsTable detections={health.piiDetections} appName={health.displayName} />
-          </div>
-        ) : null}
-
-        {health.rejections.length > 0 ? (
-          <div className="-mx-4">
-            <RejectionsTable rejections={health.rejections} appName={health.displayName} />
-          </div>
-        ) : null}
-
-        {health.ssoCookieOutcomes.length > 0 ? (
-          <SsoOutcomes outcomes={health.ssoCookieOutcomes} appName={health.displayName} />
-        ) : null}
-
-        <div className="-mx-4">
-          <DataTable
-            caption={`SDKs of ${health.displayName}`}
-            columns={SDK_COLUMNS}
-            rows={health.sdks}
-            rowKey={(row) => `${row.source}|${row.sdk ?? ''}`}
-            skeletonRows={1}
-            empty={
-              <EmptyState
-                className="py-5"
-                title="No SDK seen in the last 24 hours"
-                description="SDK versions and clock skew appear once events arrive."
-              />
-            }
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-          <span>
-            Private IPs:{' '}
-            <span className="font-medium text-foreground tabular">
-              {health.privateIpRatio === null
-                ? 'not enough data'
-                : `${formatPercent(health.privateIpRatio * 100, 0)} of server events`}
-            </span>
-            {health.warnings.includes('private_ips') ? (
-              <span className="text-foreground"> · Places stay empty</span>
-            ) : null}
-          </span>
-          {health.exposedKeys.length > 0 ? (
-            <Link
-              href={PAGES.apps()}
-              className="inline-flex items-center gap-1 rounded-sm font-medium text-destructive underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60"
-            >
-              <KeyRound className="size-3.5" aria-hidden="true" />
-              Rotate {health.exposedKeys.map((key) => key.keyPrefix).join(', ')} on the{' '}
-              {navLabel('apps')} page
-            </Link>
-          ) : null}
-        </div>
+      <CardContent>
+        <AppHealthDetails health={health} nowMs={nowMs} />
       </CardContent>
     </Card>
   );

@@ -24,3 +24,20 @@ export function healthMarkOf(health: AppIntegrationHealthDto): CheckState {
   if (health.status !== 'healthy' || health.warnings.length > 0) return 'warn';
   return 'pass';
 }
+
+/** Checklist order of the marks: what needs action first, then what needs a look, then OK. */
+const CHECK_STATE_ORDER: Record<CheckState, number> = { fail: 0, warn: 1, pass: 2 };
+
+/**
+ * WHY: the Data health checklist puts the apps that need action on top (fail, warn, pass), then
+ * by name, so the first rows are the ones to fix. Returns a new array; the input is untouched.
+ */
+export function orderByHealthMark(
+  apps: readonly AppIntegrationHealthDto[],
+): AppIntegrationHealthDto[] {
+  return [...apps].sort(
+    (a, b) =>
+      CHECK_STATE_ORDER[healthMarkOf(a)] - CHECK_STATE_ORDER[healthMarkOf(b)] ||
+      a.displayName.localeCompare(b.displayName),
+  );
+}

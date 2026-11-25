@@ -22,6 +22,11 @@ describe('HealthMark', () => {
     expect(container.querySelector('svg')).toHaveClass('text-destructive');
   });
 
+  it('styles the badge label only through labelClassName (icon alone on phones)', () => {
+    render(<HealthMark state="pass" label="Healthy" labelClassName="max-sm:sr-only" />);
+    expect(screen.getByText('Healthy')).toHaveClass('max-sm:sr-only');
+  });
+
   it('colours a warning amber', () => {
     const { container } = render(<HealthMark state="warn" label="Needs attention" />);
     expect(container.querySelector('svg')).toHaveClass('text-warning');

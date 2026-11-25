@@ -201,7 +201,12 @@ first, then module switches via `useUpdateSdkConfig`; form helpers and `SDK_MODU
 ### 4b. The Integration Health chain (S5, `GET /api/v1/integration/health`)
 
 ```
-apps/web/src/features/integration/IntegrationView.tsx   tallies (KpiCard) + AppHealthCard per app (global ?app= narrows client-side)
+apps/web/src/app/(dashboard)/integration/page.tsx       reads the web env (loadWebEnv) → dashboardAccessOf (dashboardAccessCheck.ts) → one enum prop
+apps/web/src/features/integration/IntegrationView.tsx   Checklist: counts in one HeadlineSentence (healthHeadline.ts); Platform = the
+                                                        dashboard-access CheckRow (DASHBOARD_ACCESS_COPY); Apps = one CheckRow per app
+                                                        (components/CheckRow.tsx; fail → warn → pass, orderByHealthMark in healthMark.ts;
+                                                        summary + How to fix from appCheckSummary.ts; Show details = AppHealthDetails)
+                                                        (global ?app= narrows client-side and opens the row)
 apps/web/src/features/integration/integrationCopy.ts    warning/status copy + guide chapter (lib/guide.ts guideHref → /traffic/api/docs/#…)
 apps/web/src/features/integration/useIntegrationHealth.ts  useQuery(qk.integration.health()) → api.integration.health
 packages/shared/src/routes.ts                           ROUTES.integration.health (...dashboard, any viewer)
@@ -222,10 +227,15 @@ apps/api/src/domain/mappers.ts                          mapIngestCounter / mapSd
                                                         '' → null) → shared dto/integration.ts
 ```
 
-Web: `AppHealthCard.tsx` composes `IntegrationLevelBadge.tsx`, `CoverageStats.tsx`, `EnvironmentMix.tsx`,
+Web: `AppHealthCard.tsx` exports `AppHealthDetails` (every block, no frame: used inside the Data health row) and
+`AppHealthCard` (Card + header with `ViewTrafficLink` / `AppHealthBadges` + the details; kept for the App page;
+block headings h3 under the card's h2, h4 under the row's h3 app name via `headingAs`, `blockHeading.ts`);
+the details compose `IntegrationLevelBadge.tsx`, `CoverageStats.tsx`, `EnvironmentMix.tsx`,
 `ReleaseStatus.tsx`, `PiiDetectionsTable.tsx`, `RejectionsTable.tsx`, `SsoOutcomes.tsx` (all in
 `apps/web/src/features/integration/`), with `components/CoverageValue.tsx`; copy in `integrationCopy.ts`
-(`LEVEL_COPY`, `pii_detected`). Not filtered by environment (ADR 0008).
+(`LEVEL_COPY`, `pii_detected`, `DASHBOARD_ACCESS_COPY`). Not filtered by environment (ADR 0008). The access check
+reads the WEB container's `DASHBOARD_ALLOWED_EMAILS` / `DASHBOARD_ALLOWED_DOMAINS`; the API gate reads its own copy
+of the same keys (`packages/auth/src/dashboard-access.ts`), so both must be set alike.
 
 Proven by `ingest-health.repository.test.ts` (SQL shape) and `apps/api/test/db/ingest-health.integration.test.ts`.
 

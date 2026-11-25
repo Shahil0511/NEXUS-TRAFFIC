@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { appHealth } from '@/test/adminFixtures';
 
-import { HEALTH_MARK_COPY, healthMarkOf } from './healthMark';
+import { HEALTH_MARK_COPY, healthMarkOf, orderByHealthMark } from './healthMark';
 
 describe('healthMarkOf', () => {
   it('passes a healthy app without warnings', () => {
@@ -36,5 +36,23 @@ describe('healthMarkOf', () => {
       warn: 'Needs attention',
       fail: 'Action needed',
     });
+  });
+});
+
+describe('orderByHealthMark', () => {
+  it('puts action needed first, then needs attention, then healthy, each by name', () => {
+    const apps = [
+      appHealth({ app: 'b', displayName: 'Bravo', warnings: [] }),
+      appHealth({ app: 'w', displayName: 'Whiskey', status: 'stale', warnings: ['stale'] }),
+      appHealth({ app: 'a', displayName: 'Alpha', warnings: [] }),
+      appHealth({ app: 'x', displayName: 'X-ray', warnings: ['exposed_key'] }),
+    ];
+    expect(orderByHealthMark(apps).map((app) => app.displayName)).toEqual([
+      'X-ray',
+      'Whiskey',
+      'Alpha',
+      'Bravo',
+    ]);
+    expect(apps[0]?.displayName).toBe('Bravo');
   });
 });

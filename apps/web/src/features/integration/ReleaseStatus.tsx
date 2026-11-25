@@ -5,6 +5,7 @@ import { InfoTip } from '@/components/InfoTip';
 import { EMPTY_VALUE, formatInteger } from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 
+import { DEFAULT_BLOCK_HEADING, type BlockHeading } from './blockHeading';
 import { SOURCE_LABELS } from './integrationCopy';
 
 const PERCENT = 100;
@@ -14,13 +15,19 @@ const PERCENT = 100;
  * carrying `release` (amber below RELEASE_COVERAGE_TARGET) and the newest release seen — ingested
  * text, shown as text only.
  */
-export function ReleaseStatus({ releases }: { releases: readonly ReleaseStatusDto[] }) {
+export function ReleaseStatus({
+  releases,
+  headingAs: Heading = DEFAULT_BLOCK_HEADING,
+}: {
+  releases: readonly ReleaseStatusDto[];
+  headingAs?: BlockHeading;
+}) {
   return (
     <section aria-label="Releases" className="space-y-2">
-      <h3 className="flex items-center gap-1 text-xs font-semibold">
+      <Heading className="flex items-center gap-1 text-xs font-semibold">
         Releases
         <InfoTip label="Release tagged" text={metricInfo('releaseCoverage')} />
-      </h3>
+      </Heading>
       <dl className="space-y-1.5">
         {releases.map((release) => (
           <div

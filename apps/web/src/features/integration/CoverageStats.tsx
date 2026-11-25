@@ -5,6 +5,7 @@ import { InfoTip } from '@/components/InfoTip';
 import { formatInteger } from '@/lib/format';
 import { metricInfo } from '@/lib/metricCopy';
 
+import { DEFAULT_BLOCK_HEADING, type BlockHeading } from './blockHeading';
 import { IDENTITY_SCOPE_NOTE } from './integrationCopy';
 
 const PERCENT = 100;
@@ -42,13 +43,15 @@ function CoverageRow({ label, info, pct, meaning, detail }: CoverageRowProps) {
 export function CoverageStats({
   identityCoverage,
   linkingCoverage,
+  headingAs: Heading = DEFAULT_BLOCK_HEADING,
 }: {
   identityCoverage: readonly CoverageDto[];
   linkingCoverage: LinkingCoverageDto;
+  headingAs?: BlockHeading;
 }) {
   return (
     <section aria-label="Coverage" className="space-y-2">
-      <h3 className="text-xs font-semibold">Coverage</h3>
+      <Heading className="text-xs font-semibold">Coverage</Heading>
       <dl className="space-y-1.5">
         {identityCoverage.map((coverage) => (
           <CoverageRow

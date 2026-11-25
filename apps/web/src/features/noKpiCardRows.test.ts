@@ -20,7 +20,6 @@ const KPI_CARD_ALLOW_LIST = [
   'features/applications/ApplicationDetailView.tsx',
   'features/endpoints/EndpointDetailView.tsx',
   'features/errors/ErrorsView.tsx',
-  'features/integration/IntegrationView.tsx',
   'features/journeys/SessionDetailView.tsx',
   'features/live/LiveView.tsx',
   'features/overview/OverviewView.tsx',

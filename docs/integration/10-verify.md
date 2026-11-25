@@ -73,7 +73,9 @@ Ask {{DOCS_CONTACT}} to check it for you.
 ### What the Integration page shows
 
 Everything covers the last 24 hours and **all environments** (the page is not filtered by
-environment, so staging wiring shows up too).
+environment, so staging wiring shows up too). Each app is one row: a green, amber or red mark, its
+status and integration level, and a one-line summary (the first warning, with **How to fix**).
+**Show details** opens the rest of the items in the table below.
 
 | Item | What it tells you |
 |---|---|

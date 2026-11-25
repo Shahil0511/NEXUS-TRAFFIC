@@ -3,6 +3,7 @@ import type { SsoCookieOutcomeDto } from '@nexus/shared';
 import { formatInteger } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
+import { DEFAULT_BLOCK_HEADING, type BlockHeading } from './blockHeading';
 import { BEACON_ORIGIN_LABELS, SSO_OUTCOME_COPY } from './integrationCopy';
 
 /** Busiest first (a copy; the DTO array is never mutated). */
@@ -19,13 +20,15 @@ export function sortOutcomes(outcomes: readonly SsoCookieOutcomeDto[]): SsoCooki
 export function SsoOutcomes({
   outcomes,
   appName,
+  headingAs: Heading = DEFAULT_BLOCK_HEADING,
 }: {
   outcomes: readonly SsoCookieOutcomeDto[];
   appName: string;
+  headingAs?: BlockHeading;
 }) {
   return (
     <section aria-label={`SSO cookie outcomes of ${appName}`} className="space-y-2">
-      <h3 className="text-xs font-semibold">SSO cookie (browser identity)</h3>
+      <Heading className="text-xs font-semibold">SSO cookie (browser identity)</Heading>
       <ul className="space-y-1.5">
         {sortOutcomes(outcomes).map((row) => (
           <li

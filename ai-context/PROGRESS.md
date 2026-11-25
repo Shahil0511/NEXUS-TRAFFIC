@@ -18,6 +18,76 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Data health: checklist rows and the dashboard-access check (B8-2)
+
+Data health (`/integration`) becomes a checklist: one sentence instead of five tally cards, a Platform section with
+a "Who can open this dashboard" row, then one row per app. Web and docs only: no contract, API, migration or env
+key change.
+
+**Done**
+- **Access check:** `features/integration/dashboardAccessCheck.ts` (server-safe, pure) folds the WEB server's
+  `DASHBOARD_ALLOWED_EMAILS` / `DASHBOARD_ALLOWED_DOMAINS` (`accessPolicyOf`) into `listed` / `wholeDomain` /
+  `adminsOnly` / `unknown` (env unreadable), mirroring `decideDashboardAccess`. The page file reads `loadWebEnv()` in a
+  try / catch and passes only the enum to the view (never an email or a domain); the root layout awaits `headers()`,
+  so the page renders per request with the runtime env. The API's real gate reads the same keys from its own env:
+  both containers must be set alike (said in the WHY comment). Copy in `integrationCopy.ts` `DASHBOARD_ACCESS_COPY`:
+  whole domain = red with "Set the named list on the server, then restart api and web"; named list or admins only =
+  green; unknown = amber.
+- **`components/CheckRow.tsx`** (new, `<li>`): `HealthMark` badge on the left (label screen-reader only below sm via
+  a new optional `labelClassName` on `HealthMark`), title + one-line summary in the middle (min-w-0, wraps), action
+  on the right from lg (below on smaller screens), a ghost "Show details" / "Hide details" toggle with
+  `aria-expanded` / `aria-controls` when there is a body (plain state; the body mounts only while open, in a named
+  region), and a 3 px left edge in the state colour. Optional `name` names the region and is added to the toggle's
+  accessible name ("Show details for EBO Sales").
+- **`AppHealthCard.tsx`** split: `AppHealthDetails` (every block that was inside CardContent, unchanged) and
+  `AppHealthCard` (Card + header + details, kept for the App page Health tab in B8-6); the header pieces are now
+  `ViewTrafficLink` and `AppHealthBadges` (disabled, level, status), reused by the row title. The two guide links
+  use `text-link` instead of `text-primary`.
+- **View:** the five tally cards → `healthHeadline.ts` (pure; every old hint in brackets, "needs" / "need",
+  "1 of 1 app", amber only for a non-zero attention count, the integration-level (i) on "fully integrated"; skeleton
+  line while loading, nothing on error). Sections "Platform" and "Apps" (Rajdhani h2). Apps: the filter note is kept;
+  rows ordered fail → warn → pass, then by name (`orderByHealthMark` in `healthMark.ts`); title = name + badges +
+  View traffic; summary = `appCheckSummary.ts` (first warning's title, else "Sending" or the status + best identified
+  share + add-on version); "How to fix" = the first warning's chapter (external; aria-label names the warning); the
+  body = copyable slug + `AppHealthDetails`. A row opens by itself when the app filter is set or only one app is shown.
+  Skeleton (now row-shaped), empty state (Open App keys) and error state kept; the Platform row shows in all three.
+  Visible "Tool label" / "Tool name" in the PII field labels → "Feature label" / "Feature name".
+- **KPI card guard:** `features/integration/IntegrationView.tsx` left `KPI_CARD_ALLOW_LIST` (12 views remain).
+
+- **Review fixes:** each row title is a heading (`<h3>` app name or "Who can open this dashboard" under the
+  "Platform" / "Apps" h2; badges and links stay outside it) and the opened blocks are h4 (`headingAs` on
+  `AppHealthDetails`, `CoverageStats`, `EnvironmentMix`, `ReleaseStatus`, `SsoOutcomes`, per-source stats; type in
+  `blockHeading.ts`; h3 by default under the card's h2), so moving by heading goes app by app. The row's right side
+  is capped at `lg:max-w-xs` so a long action no longer squeezes the summary. `firstFix` (was `firstFixChapter`)
+  returns the chapter and the warning title, and "How to fix" is named after the warning, not the summary.
+  `WINDOW_HOURS` is exported once from `healthHeadline.ts`. Guide sentence says status and level are on the row.
+
+**Nothing lost:** the five cards with their hints and the info → the headline sentence; Verify steps / Integration
+guide → header actions; "Last 24 hours · checked … IST" → description; app-filter note kept; every card block →
+the row's details; slug copy → top of the details; View traffic, disabled, level and status badges → the row title.
+
+**Tests:** `dashboardAccessCheck.test.ts` (four outcomes via `loadWebEnv` with explicit sources), `CheckRow.test.tsx`
+(labels, edge colour, no toggle without body, toggle + aria-expanded / aria-controls, defaultOpen, region name),
+`HealthMark.test.tsx` (labelClassName), `appCheckSummary.test.ts`, `healthHeadline.test.ts` (wording, singular,
+tones, info), `healthMark.test.ts` (`orderByHealthMark`), `IntegrationView.test.tsx` (every earlier assertion after
+"Show details"; the headline with hints and "fully integrated"; the four access states with text and mark; rows
+fail → warn → pass; a narrowed or only app opens by default; closing a row; h3 row names over h4 blocks;
+banned-word scan with rows open, in every access state, the ordered rows and the only-app render),
+`AppHealthCard.test.tsx` (region named by the h2 title, slug copy, View traffic href, badges, h3 blocks).
+
+**Docs:** 03-code-navigation §4b (page file, checklist, AppHealthDetails / AppHealthCard, access copy); GLOSSARY
+"checklist row (Data health)"; public guide `docs/integration/10-verify.md` ("What the Integration page shows": each
+app is one row with its mark, status, level and summary; Show details opens the rest of the table).
+
+**Next:** B8-3. Browser check after the push: /integration at 1280 and 360 px, both themes (rows stack as mark,
+title, summary, action, button without sideways scroll; tables in an opened row scroll inside their own box; the
+left edges read in both themes), scroll to "End of Data health".
+
+**Known issues:** the access check reads the web container's env only; if the API container's DASHBOARD_* differ,
+the row can disagree with the real gate (both must be set alike from the one server `.env`).
+
+---
+
 ## 2026-11-25 — Apps list: headline sentence and Data health marks (B8-1)
 
 The Apps page loses its row of four KPI cards; the four facts become one sentence in the page hero, and every

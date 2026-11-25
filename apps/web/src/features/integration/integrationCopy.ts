@@ -22,9 +22,12 @@ import {
   type SsoCookieOutcome,
 } from '@nexus/shared';
 
+import type { CheckState } from '@/components/HealthMark';
 import { EMPTY_VALUE } from '@/lib/format';
 import type { GuideChapter } from '@/lib/guide';
 import { navLabel } from '@/lib/nav';
+
+import type { DashboardAccess } from './dashboardAccessCheck';
 
 export type Tone = 'success' | 'warning' | 'destructive' | 'muted';
 
@@ -146,6 +149,42 @@ export const LEVEL_COPY: Record<IntegrationLevel, LevelCopy> = {
   },
 };
 
+// ─── Platform: who can open this dashboard ─────────────────────────────────
+
+export interface AccessCheckCopy {
+  state: CheckState;
+  stateLabel: string;
+  summary: string;
+  /** What to do, shown on the right of the row; only when something must change. */
+  action?: string;
+}
+
+/**
+ * The "Who can open this dashboard" row per outcome of dashboardAccessOf (the web server's
+ * DASHBOARD_* env): red when a whole company domain gets in, green for a named list or admins
+ * only, amber when the env could not be read.
+ */
+export const DASHBOARD_ACCESS_COPY: Record<DashboardAccess, AccessCheckCopy> = {
+  wholeDomain: {
+    state: 'fail',
+    stateLabel: 'Action needed',
+    summary:
+      'Anyone with a company email can open this dashboard: no named list of viewers is set (DASHBOARD_ALLOWED_EMAILS is empty).',
+    action: 'Set the named list on the server, then restart api and web',
+  },
+  listed: {
+    state: 'pass',
+    stateLabel: 'OK',
+    summary: 'Only the people on the named list and the admins can open it.',
+  },
+  adminsOnly: { state: 'pass', stateLabel: 'OK', summary: 'Only admins can open it.' },
+  unknown: {
+    state: 'warn',
+    stateLabel: 'Needs attention',
+    summary: "Could not read this server's access settings.",
+  },
+};
+
 // ─── SSO cookie diagnostics ─────────────────────────────────────────────────
 
 /** Why browser beacons are (not) identified — one line per verify outcome, with the fix. */
@@ -196,10 +235,10 @@ export const PII_FIELD_LABELS: Record<PiiField, string> = {
   path: 'Page or API path',
   route_template: 'Route template',
   referrer_path: 'Referrer path',
-  label: 'Tool label',
+  label: 'Feature label',
   prop_key: 'Prop name',
   prop_value: 'Prop value',
-  tool: 'Tool name',
+  tool: 'Feature name',
   name: 'Event name',
   error_code: 'Error code',
   request_id: 'Request id',

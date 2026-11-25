@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { ENVIRONMENT_LABELS } from '@/features/filters/environmentLabels';
 import { formatInteger } from '@/lib/format';
 
+import { DEFAULT_BLOCK_HEADING, type BlockHeading } from './blockHeading';
 import { SOURCE_LABELS } from './integrationCopy';
 
 /**
@@ -11,10 +12,16 @@ import { SOURCE_LABELS } from './integrationCopy';
  * each source sends from, so a staging deploy reporting as production (or the reverse) is visible
  * at a glance. Non-production environments are tinted; the label carries the meaning.
  */
-export function EnvironmentMix({ environments }: { environments: readonly EnvironmentMixDto[] }) {
+export function EnvironmentMix({
+  environments,
+  headingAs: Heading = DEFAULT_BLOCK_HEADING,
+}: {
+  environments: readonly EnvironmentMixDto[];
+  headingAs?: BlockHeading;
+}) {
   return (
     <section aria-label="Environments" className="space-y-2">
-      <h3 className="text-xs font-semibold">Environments</h3>
+      <Heading className="text-xs font-semibold">Environments</Heading>
       {environments.length === 0 ? (
         <p className="text-xs text-muted-foreground">No events in the window.</p>
       ) : (
