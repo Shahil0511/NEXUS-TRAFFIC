@@ -140,6 +140,33 @@
        "End of day" marker (with the day's whole block count, `blockCount`) and "About these numbers". The date
        input opens a typed day only on Enter, blur or "Show day"; a day outside [today − 183, today] in the URL
        sends no read and says which days open, and Previous / Next step back into that range. Its tables are fixed-layout and fit 1280 px.
+  9. **Usual activity hours (built in step 6, screen switched off).**
+     - `ROUTES.users.pattern` (`?range=7d|30d`, default `30d`, `userPatternQuerySchema` from the plain
+       `timeWindowShape`; the global range does not apply) is a person leaf: admin-only, `PERSON_ROUTE_LEAVES`,
+       recorded as `person_pattern`, also for an empty answer (`emailLookup` = the window plus the last
+       `MAX_COUNT_RANGE_MS`, as for one day).
+     - The range is widened to whole IST days (`wholeReportingDays`): 8 days for 7d, 31 for 30d, never more.
+       ONE statement over the same bounded, keyed UNION ALL of both tables as the daily read, grouped by the
+       IST weekday and hour of each event (`reportingLocal`: the wall-clock time in Asia/Kolkata, not UTC),
+       with `GROUPING SETS ((weekday, hour), ())` for the window's distinct active days in the same scan. A
+       cell carries the distinct IST days with any activity in that weekday-hour and its credited tab visible
+       time; empty cells are left out (at most 168 + 1 rows, no LIMIT). `weekdayDayCounts` gives the calendar
+       days of each weekday in the window, the denominator of a cell's share.
+     - Web: `UsualActivityHoursPanel` (own `Last 7 days | Last 30 days` control; app and env from the global
+       filter) under the daily list, with `HourGrid`: a 7 × 24 CSS grid in one colour whose opacity follows
+       the share (any activity is drawn at least `MIN_ACTIVE_CELL_OPACITY` (0.15), then in proportion to the
+       share, so a rare hour stays visible; the legend uses the same mapping), a sentence per cell as title
+       and label, a legend, and a visually hidden table with caption and headers carrying the same data
+       (hidden by a block wrapper, so its 25 columns cannot widen the page); the drawn grid is decorative
+       for screen readers. The read waits for the daily read to succeed and for `useMe` to say admin, and
+       its key is in `PERSON_USER_LEAVES`. A footnote says the cells are recorded calls and events, not
+       sign-in times, and that background calls can mark hours with no one at the screen. The summary line
+       names the whole-day span (today and the 7 / 30 days before it).
+     - **Switched off until measured.** The panel renders only while `USUAL_ACTIVITY_HOURS_ENABLED`
+       (`apps/web/src/lib/featureFlags.ts`) is true; it ships false, so no pattern request is sent. It is
+       switched on in the commit that notes in `PROGRESS.md` the owner's production `EXPLAIN ANALYZE` of this
+       read for one person with a lot of activity over 30 days. If that read is slow, the fallback is to
+       offer the 7-day range only. The API leaf is registered and tested either way.
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
@@ -152,4 +179,5 @@
     (`features/live/OnlineNowPanel.tsx`) and request samples (`components/requestSampleColumns.tsx`).
     Showing them as plain text for non-admins is follow-up work, pending the owner's go-ahead.
   - Opening a day writes a `person_day` row even when the day is empty (one per admin + person per 10 min).
-  - Still to come, recorded here when it ships: usual activity hours (`person_pattern`).
+  - Usual activity hours are built but hidden; turning them on needs the production measurement above and a
+    one-line change of `USUAL_ACTIVITY_HOURS_ENABLED`, nothing else.

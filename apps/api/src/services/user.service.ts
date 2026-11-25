@@ -1,7 +1,8 @@
 /**
- * ROUTES.users.* — the Users page: verified users, a user's profile, devices, days, one day and
- * their combined timeline. The person-level leaves (PERSON_ROUTE_LEAVES) are admin-only in the
- * route table, and each answer is recorded in the person access log (PersonAccessRecorder).
+ * ROUTES.users.* — the Users page: verified users, a user's profile, devices, days, one day, usual
+ * activity hours and their combined timeline. The person-level leaves (PERSON_ROUTE_LEAVES) are
+ * admin-only in the route table, and each answer is recorded in the person access log
+ * (PersonAccessRecorder).
  */
 import {
   type Environment,
@@ -25,6 +26,9 @@ import {
   type UserDailyQuery,
   type UserDayDetailDto,
   type UserDayQuery,
+  type UserActivityPatternDto,
+  type UserPatternQuery,
+  weekdayDayCounts,
   type UserDevicesDto,
   type UserDevicesQuery,
   type UserListQuery,
@@ -42,6 +46,7 @@ import {
   dropTruncatedOldestDay,
   foldUserDays,
   mapTimelineItem,
+  mapUserActivityPattern,
   mapUserDayDetail,
   mapUserDevice,
   mapUserProfile,
@@ -277,7 +282,7 @@ export class UserService {
    * (newest first). The global range does not apply; app and env do. 400 for a day in the future
    * or more than USER_DAY_LOOKBACK_DAYS back. A day without activity is an empty answer (200), and
    * it is STILL recorded: the email for the access-log row is looked up over a wider window
-   * (dayEmailLookupFilter), because "nothing that day" is a fact about the person too.
+   * (personEmailLookupFilter), because "nothing that day" is a fact about the person too.
    * At most 3 statements run at once: wave 1 (day rows, blocks, pages); wave 2 (tools, visits)
    * only when the day has activity.
    * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserDailyActivity
@@ -322,7 +327,43 @@ export class UserService {
       subjectUserKey: key,
       surface: 'person_day',
       filter,
-      emailLookup: dayEmailLookupFilter(window, now, appId, environments),
+      emailLookup: personEmailLookupFilter(window, now, appId, environments),
+    });
+    return body;
+  }
+
+  /**
+   * The weekday × hour grid (IST) of one person's recorded activity over the last 7 or 30 days
+   * (`query.range`, its own control; app and env apply, the global range does not). The window is
+   * widened to WHOLE IST days (wholeReportingDays, so at most 31 days) and echoed widened; a cell
+   * counts the calendar days with activity in that weekday-hour, read against `weekdayDays`
+   * (weekdayDayCounts: the days of each weekday in the window). ONE statement. An empty window is
+   * a 200 with no cells and is STILL recorded (`person_pattern`, email looked up over
+   * personEmailLookupFilter).
+   * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserActivityPattern
+   * @see ./person-access.recorder.ts PersonAccessRecorder.record
+   */
+  async pattern(
+    userKey: string,
+    query: UserPatternQuery,
+    viewer: Viewer,
+  ): Promise<UserActivityPatternDto> {
+    const now = this.clock.now();
+    const asked = resolveQueryWindow({ range: query.range }, now, MAX_COUNT_RANGE_MS);
+    const window = { ...asked, ...wholeReportingDays(asked) };
+    const appId = await this.appSlugs.resolve(query.app);
+    const environments = environmentsOf(query.env);
+    const filter = currentFilter(window, appId, environments);
+    const key = userKeyFromHex(userKey);
+
+    const rows = await this.webEvents.listUserActivityPattern(key, filter);
+    const body = mapUserActivityPattern(rows, toTimeWindowDto(window), weekdayDayCounts(window));
+    await this.personAccess.record({
+      viewer,
+      subjectUserKey: key,
+      surface: 'person_pattern',
+      filter,
+      emailLookup: personEmailLookupFilter(window, now, appId, environments),
     });
     return body;
   }
@@ -383,12 +424,13 @@ function dayRefused(message: string): ValidationError {
 }
 
 /**
- * Where the one-day view looks up the person's email for its access-log row: the day itself plus
- * the last MAX_COUNT_RANGE_MS before now, same app and environments. WHY: the day alone finds no
- * email when the day was empty (and then nothing would be recorded); the recent window alone
- * misses a day older than it. The lookup is one newest-first probe per table.
+ * Where a person read whose own window can be empty (the one-day view, usual activity hours) looks
+ * up the person's email for its access-log row: the read's window plus the last MAX_COUNT_RANGE_MS
+ * before now, same app and environments. WHY: the window alone finds no email when it was empty
+ * (and then nothing would be recorded); the recent window alone misses a day older than it. The
+ * lookup is one newest-first probe per table.
  */
-function dayEmailLookupFilter(
+function personEmailLookupFilter(
   window: ResolvedTimeWindow,
   now: Date,
   appId: string | undefined,

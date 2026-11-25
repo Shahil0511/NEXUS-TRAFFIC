@@ -172,6 +172,23 @@ export const userDayQuerySchema = z.object({
 });
 export type UserDayQuery = z.infer<typeof userDayQuerySchema>;
 
+/** The ranges of the usual-activity-hours grid (ROUTES.users.pattern): a week or a month. */
+export const USER_PATTERN_RANGE_VALUES = ['7d', '30d'] as const;
+export type UserPatternRange = (typeof USER_PATTERN_RANGE_VALUES)[number];
+
+/**
+ * ROUTES.users.pattern: app + env + its OWN range (last 7 or 30 days, default 30), never the global
+ * range: a weekday grid needs whole weeks, and a longer range would make the read heavy.
+ * Built from the plain shape like userDayQuerySchema (no `.pick()` on a refined schema); not
+ * strict, so a stray `from` / `to` is stripped. The API widens the range to whole IST days.
+ */
+export const userPatternQuerySchema = z.object({
+  app: timeWindowShape.app,
+  env: timeWindowShape.env,
+  range: z.enum(USER_PATTERN_RANGE_VALUES).default('30d'),
+});
+export type UserPatternQuery = z.infer<typeof userPatternQuerySchema>;
+
 // ─── journeys ───────────────────────────────────────────────────────────────
 export const sessionListQuerySchema = timeWindowQuerySchema.safeExtend({
   userKey: userKeySchema.optional(),

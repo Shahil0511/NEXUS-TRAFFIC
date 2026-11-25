@@ -80,6 +80,8 @@ import {
   type UserDailyActivityDto,
   type UserDayDetailDto,
   type UserDayQuery,
+  type UserActivityPatternDto,
+  type UserPatternQuery,
   type UserDailyQuery,
   type UserDevicesDto,
   type UserDevicesQuery,
@@ -277,6 +279,11 @@ export const api = {
       }),
     day: (userKey: string, q: UserDayQuery, o?: CallOptions) =>
       request<UserDayDetailDto, typeof ROUTES.users.day>(ROUTES.users.day, q, {
+        ...o,
+        params: { userKey },
+      }),
+    pattern: (userKey: string, q: UserPatternQuery, o?: CallOptions) =>
+      request<UserActivityPatternDto, typeof ROUTES.users.pattern>(ROUTES.users.pattern, q, {
         ...o,
         params: { userKey },
       }),

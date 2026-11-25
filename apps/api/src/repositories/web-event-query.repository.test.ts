@@ -76,7 +76,8 @@ describe('WebEventQueryRepository SQL (S3)', () => {
     await repo.listUserDayBlocks(USER_KEY, FILTER, 96);
     await repo.listUserDayPages(USER_KEY, FILTER, 30);
     await repo.listUserDayTools(USER_KEY, FILTER, 30);
-    expect(exec.statements).toHaveLength(15);
+    await repo.listUserActivityPattern(USER_KEY, FILTER);
+    expect(exec.statements).toHaveLength(16);
     for (const { text } of exec.statements) expectEveryTableBounded(text);
   });
 
@@ -310,6 +311,87 @@ describe('WebEventQueryRepository one person-day (blocks, pages, tools)', () => 
   );
 });
 
+describe('WebEventQueryRepository usual activity hours (pattern)', () => {
+  const LOCAL = "(h.occurred_at AT TIME ZONE 'Asia/Kolkata')";
+
+  it('groups both tables by IST weekday and hour, keyed by ONE bound user key', async () => {
+    const { exec, repo } = build();
+    await repo.listUserActivityPattern(USER_KEY, FILTER);
+    const [statement] = exec.statements;
+    const text = statement?.text ?? '';
+    expect(exec.statements).toHaveLength(1);
+    expect(text).toMatch(/r\.user_key = \$1(?!\d)/);
+    expect(text).toMatch(/w\.user_key = \$1(?!\d)/);
+    expect(statement?.values[0]).toBe(USER_KEY);
+    expect(text).toContain(`extract(isodow FROM ${LOCAL})::int AS weekday`);
+    expect(text).toContain(`extract(hour FROM ${LOCAL})::int AS hour`);
+    // The UTC weekday / hour would be off by 5:30: never read the raw column.
+    expect(text).not.toMatch(/extract\(\w+ FROM h\.occurred_at\)/);
+  });
+
+  it('counts distinct IST days per cell, credits tab visible time, and adds the total row', async () => {
+    const { exec, repo } = build();
+    await repo.listUserActivityPattern(USER_KEY, FILTER);
+    const text = exec.statements[0]?.text ?? '';
+    expect(text).toContain(
+      "count(DISTINCT date_trunc('day', h.occurred_at, 'Asia/Kolkata')) AS active_days",
+    );
+    expect(text).toContain(
+      `coalesce(sum(${CAPPED('h')}) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms`,
+    );
+    expect(text).toContain("'api'::text AS kind, NULL::int AS visible_ms");
+    expect(text).toContain('GROUP BY GROUPING SETS ((1, 2), ())');
+    // At most 7 × 24 + 1 rows: no LIMIT needed.
+    expect(text).not.toContain('LIMIT');
+  });
+
+  it('renders the exact statement the switch-on gate in PROGRESS.md asks the owner to EXPLAIN', async () => {
+    // @see ../../../../ai-context/PROGRESS.md (2026-11-25, step 6, "Gate to switch it on"): when this
+    // text changes, change the PREPARE statement there in the same commit.
+    const { exec, repo } = build();
+    await repo.listUserActivityPattern(USER_KEY, { ...FILTER, environments: ['prod'] });
+    const [statement] = exec.statements;
+    const oneLine = (statement?.text ?? '').replace(/\s+/g, ' ').trim();
+    const table = (name: string, a: string, first: number): string =>
+      `FROM traffic.${name} ${a} WHERE ${a}.occurred_at >= $${first}` +
+      ` AND ${a}.occurred_at < $${first + 1} AND ${a}.app_id = $${first + 2}` +
+      ` AND ${a}.environment = ANY($${first + 3}::text[]) AND ${a}.user_key = $1`;
+    expect(oneLine).toBe(
+      [
+        `SELECT extract(isodow FROM ${LOCAL})::int AS weekday,`,
+        `extract(hour FROM ${LOCAL})::int AS hour,`,
+        "count(DISTINCT date_trunc('day', h.occurred_at, 'Asia/Kolkata')) AS active_days,",
+        `coalesce(sum(${CAPPED('h')}) FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms`,
+        "FROM ( SELECT r.occurred_at, 'api'::text AS kind, NULL::int AS visible_ms",
+        table('api_requests', 'r', 2),
+        'UNION ALL SELECT w.occurred_at, w.event_type, w.visible_ms',
+        table('web_events', 'w', 6),
+        ') h GROUP BY GROUPING SETS ((1, 2), ()) ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST',
+      ].join(' '),
+    );
+    // Parameter order: user_key, then (from, to, app_id, environments) per table.
+    expect(statement?.values).toEqual([
+      USER_KEY,
+      FILTER.from,
+      FILTER.to,
+      FILTER.appId,
+      ['prod'],
+      FILTER.from,
+      FILTER.to,
+      FILTER.appId,
+      ['prod'],
+    ]);
+  });
+
+  it('selects no label, props, value, name, ip or email column', async () => {
+    const { exec, repo } = build();
+    await repo.listUserActivityPattern(USER_KEY, FILTER);
+    expect(exec.statements[0]?.text ?? '').not.toMatch(
+      /\b(?:label|props|value|ip|user_email|claimed_email|name|session_id)\b|host\(/,
+    );
+  });
+});
+
 // ─── Environment filter (ADR 0008) ──────────────────────────────────────────
 
 /** Each `FROM traffic.<table> <alias>` must carry `<alias>.environment = ANY($n::text[])`. */
@@ -351,6 +433,7 @@ const READS: Record<string, (repo: WebEventQueryRepository) => Promise<unknown>>
   listUserDayBlocks: (r) => r.listUserDayBlocks(USER_KEY, STAGING, 96),
   listUserDayPages: (r) => r.listUserDayPages(USER_KEY, STAGING, 30),
   listUserDayTools: (r) => r.listUserDayTools(USER_KEY, STAGING, 30),
+  listUserActivityPattern: (r) => r.listUserActivityPattern(USER_KEY, STAGING),
   listSessions: (r) => r.listSessions(STAGING, { userKey: USER_KEY, limit: 3, offset: 0 }),
   getSession: (r) => r.getSession('app-id', SESSION_ID, STAGING),
   findSessionUserKey: (r) => r.findSessionUserKey('app-id', SESSION_ID, STAGING),
@@ -527,8 +610,11 @@ describe('WebEventQueryRepository credited visible time (ADR 0017)', () => {
     expect(
       await statementsOf((r) => r.getPageDetail('/ebo-sales/stores/:id', FILTER, 'hour')),
     ).toContain(pageStat);
-    // listUserDailyActivity (`h`).
+    // listUserDailyActivity (`h`), and the usual activity hours over the same union.
     expect(await statementsOf((r) => r.listUserDailyActivity(USER_KEY, FILTER))).toContain(
+      `sum(${CAPPED('h')})`,
+    );
+    expect(await statementsOf((r) => r.listUserActivityPattern(USER_KEY, FILTER))).toContain(
       `sum(${CAPPED('h')})`,
     );
   });

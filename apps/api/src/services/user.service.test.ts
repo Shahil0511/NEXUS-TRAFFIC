@@ -22,6 +22,7 @@ import {
   USER_KEY,
   USER_KEY_HEX,
   userActivityBlockRow,
+  userActivityPatternRow,
   userDayAppActivityRow,
   userDayPageRow,
   userDayToolRow,
@@ -570,6 +571,84 @@ describe('UserService.day', () => {
   });
 });
 
+describe('UserService.pattern', () => {
+  /** NOW is 15:30 IST on Thu 1 Oct 2026: the last 30 days widened to whole IST days begin 1 Sep. */
+  const MONTH_FROM = new Date('2026-08-31T18:30:00.000Z');
+  const WEEK_FROM = new Date('2026-09-23T18:30:00.000Z');
+
+  it('reads the last 30 days widened to whole IST days (31 days) with app and env, and maps it', async () => {
+    const { service, webEvents } = build();
+    webEvents.patternRows = [
+      userActivityPatternRow({ weekday: null, hour: null, active_days: 3 }),
+      userActivityPatternRow(),
+    ];
+    const dto = await service.pattern(
+      USER_KEY_HEX,
+      { range: '30d', app: KNOWN_APP_SLUG, env: 'staging' },
+      ADMIN_VIEWER,
+    );
+    const [userKey, filter] = webEvents.argsOf('listUserActivityPattern')[0] ?? [];
+    expect(Buffer.isBuffer(userKey) && userKey.equals(USER_KEY)).toBe(true);
+    expect(filter).toEqual({
+      from: MONTH_FROM,
+      to: END_OF_TODAY,
+      appId: KNOWN_APP_ID,
+      environments: ['staging'],
+    });
+    expect(END_OF_TODAY.getTime() - MONTH_FROM.getTime()).toBe(31 * 86_400_000);
+    expect(dto.window).toMatchObject({
+      from: MONTH_FROM.toISOString(),
+      to: END_OF_TODAY.toISOString(),
+    });
+    expect(dto.activeDays).toBe(3);
+    expect(dto.cells).toEqual([{ weekday: 4, hour: 9, activeDays: 2, activeMs: 3_600_000 }]);
+    // Sep 2026 + 1 Oct: Tuesday 1 Sep … Thursday 1 Oct.
+    expect(dto.weekdayDays).toEqual([4, 5, 5, 5, 4, 4, 4]);
+    expect(dto.weekdayDays.reduce((a, b) => a + b, 0)).toBe(31);
+    expect(webEvents.calls).toHaveLength(1);
+  });
+
+  it('the last 7 days are 8 whole IST days; the window is never longer than 31 days', async () => {
+    const { service, webEvents } = build();
+    const week = await service.pattern(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
+    expect(webEvents.argsOf('listUserActivityPattern')[0]?.[1]).toMatchObject({
+      from: WEEK_FROM,
+      to: END_OF_TODAY,
+      environments: ['prod'],
+    });
+    expect(week.weekdayDays.reduce((a, b) => a + b, 0)).toBe(8);
+    const month = await service.pattern(USER_KEY_HEX, { range: '30d' }, ADMIN_VIEWER);
+    const span = Date.parse(month.window.to) - Date.parse(month.window.from);
+    expect(span).toBeLessThanOrEqual(31 * 86_400_000);
+  });
+
+  it('records person_pattern once, also for an empty window, with the 93-day email lookup', async () => {
+    const { service, access } = build();
+    const dto = await service.pattern(USER_KEY_HEX, { range: '30d' }, ADMIN_VIEWER);
+    expect(dto).toMatchObject({ activeDays: 0, cells: [] });
+    expect(access.accesses).toHaveLength(1);
+    const [recorded] = access.accesses;
+    expect(recorded).toMatchObject({ viewer: ADMIN_VIEWER, surface: 'person_pattern' });
+    expect(recorded?.subjectUserKey.equals(USER_KEY)).toBe(true);
+    expect(recorded?.filter).toMatchObject({ from: MONTH_FROM, to: END_OF_TODAY });
+    expect(recorded?.emailLookup).toEqual({
+      from: new Date(NOW.getTime() - MAX_COUNT_RANGE_MS),
+      to: END_OF_TODAY,
+      appId: undefined,
+      environments: ['prod'],
+    });
+  });
+
+  it('an unknown app is a 404 and records nothing', async () => {
+    const { service, webEvents, access } = build();
+    await expect(
+      service.pattern(USER_KEY_HEX, { range: '30d', app: 'nope' }, ADMIN_VIEWER),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(webEvents.calls).toEqual([]);
+    expect(access.accesses).toEqual([]);
+  });
+});
+
 describe('UserService person access log', () => {
   const profileRows = () => ({
     summary: userSummaryRow(),
@@ -587,6 +666,7 @@ describe('UserService person access log', () => {
     await service.devices(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
     await service.daily(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
     await service.day(USER_KEY_HEX, { day: TODAY }, ADMIN_VIEWER);
+    await service.pattern(USER_KEY_HEX, { range: '7d' }, ADMIN_VIEWER);
 
     expect(access.accesses.map((a) => a.surface)).toEqual([
       'person_profile',
@@ -594,8 +674,9 @@ describe('UserService person access log', () => {
       'person_devices',
       'person_daily',
       'person_day',
+      'person_pattern',
     ]);
-    const wholeDays: string[] = ['person_daily', 'person_day'];
+    const wholeDays: string[] = ['person_daily', 'person_day', 'person_pattern'];
     for (const recorded of access.accesses) {
       expect(recorded.viewer).toBe(ADMIN_VIEWER);
       expect(recorded.subjectUserKey.equals(USER_KEY)).toBe(true);

@@ -5,7 +5,7 @@
 import { VISIBLE_DELTA_CREDIT_CAP_MS } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { creditedVisibleMs } from './sql';
+import { creditedVisibleMs, reportingLocal } from './sql';
 
 describe('creditedVisibleMs (ADR 0017)', () => {
   it('credits at most the cap per row and keeps the stored delta below it', () => {
@@ -22,5 +22,11 @@ describe('creditedVisibleMs (ADR 0017)', () => {
     );
     expect(expression.toLowerCase()).not.toContain('least(');
     expect(expression.toLowerCase()).not.toContain('coalesce(');
+  });
+});
+
+describe('reportingLocal (usual activity hours)', () => {
+  it('reads a timestamptz as India wall-clock time, so weekday and hour are IST', () => {
+    expect(reportingLocal('h.occurred_at')).toBe("(h.occurred_at AT TIME ZONE 'Asia/Kolkata')");
   });
 });

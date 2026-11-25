@@ -1,14 +1,20 @@
 /**
  * ROUTES.users.day (S6, `seedUserDay`, its own database) against a real, migrated database on the
  * READ-ONLY query pool: UserService.day over WebEventQueryRepository.listUserDayBlocks /
- * listUserDayPages / listUserDayTools, listUserDailyActivity and listSessions.
+ * listUserDayPages / listUserDayTools, listUserDailyActivity and listSessions; and ROUTES.users.pattern
+ * (UserService.pattern over listUserActivityPattern) on the same dataset.
  *
  * WHY: the unit suites prove the SQL shape and the mapping with fakes; only PostgreSQL can prove the
  * interval maths — overlapping tabs counted once in time in app, the credit cap, NULL visible_ms of
  * API rows, the 5-minute join gap, the clamp of a tick to the day start, IST day boundaries, and
  * that the day totals survive the block LIMIT. The dataset is described in ./analytics-seed.ts (S6).
  */
-import { addReportingDays, reportingDayOf, VISIBLE_DELTA_CREDIT_CAP_MS } from '@nexus/shared';
+import {
+  addReportingDays,
+  reportingDayOf,
+  reportingDayWindow,
+  VISIBLE_DELTA_CREDIT_CAP_MS,
+} from '@nexus/shared';
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -202,5 +208,54 @@ describe.skipIf(!RUN_DB_TESTS)('users.day as nexus_app on the query pool (db)', 
       blockCount: 0,
       requestsOutsideBlocks: 0,
     });
+  });
+
+  // ─── users.pattern (usual activity hours) on the same day ────────────────
+
+  /** ISO weekday (1 = Monday) of an IST day `YYYY-MM-DD`. */
+  const isoWeekday = (day: string) => ((new Date(`${day}T00:00:00.000Z`).getUTCDay() + 6) % 7) + 1;
+
+  it('pattern: weekday and hour are IST (18:29:59Z is 23:59 of the day before, 18:30Z is 00:00)', async () => {
+    const dto = await users.pattern(userKeyHex(USER_F), { range: '30d' }, ADMIN);
+    const yesterday = addReportingDays(today, -1);
+    const D = isoWeekday(today);
+    const Y = isoWeekday(yesterday);
+    expect(dto.cells).toEqual([
+      ...(Y < D ? [{ weekday: Y, hour: 23, activeDays: 1, activeMs: 0 }] : []),
+      // 00:00:00 page view + the 00:00:03 tick of 5000 ms.
+      { weekday: D, hour: 0, activeDays: 1, activeMs: 5000 },
+      // Two tabs: 10 000 + 10 000 + 10 000 ms; the API call at 09:02 adds nothing.
+      { weekday: D, hour: 9, activeDays: 1, activeMs: 30_000 },
+      // The 10:00 API call and the 10:58 page view: activity, no tab visible time (NULL stays NULL).
+      { weekday: D, hour: 10, activeDays: 1, activeMs: 0 },
+      // The 3 h tick at 11:00 is credited 60 s.
+      { weekday: D, hour: 11, activeDays: 1, activeMs: VISIBLE_DELTA_CREDIT_CAP_MS },
+      ...(Y > D ? [{ weekday: Y, hour: 23, activeDays: 1, activeMs: 0 }] : []),
+    ]);
+    expect(dto.activeDays).toBe(2);
+  });
+
+  it('pattern: the window is the last 30 days widened to 31 whole IST days, every weekday counted', async () => {
+    const dto = await users.pattern(userKeyHex(USER_F), { range: '30d' }, ADMIN);
+    expect(dto.window.from).toBe(
+      reportingDayWindow(addReportingDays(today, -30)).from.toISOString(),
+    );
+    expect(dto.window.to).toBe(reportingDayWindow(today).to.toISOString());
+    expect(dto.weekdayDays).toHaveLength(7);
+    expect(dto.weekdayDays.reduce((a, b) => a + b, 0)).toBe(31);
+  });
+
+  it('pattern: narrows to one app (hr-portal: one tab at 09:00 only)', async () => {
+    const dto = await users.pattern(userKeyHex(USER_F), { range: '7d', app: HR_SLUG }, ADMIN);
+    expect(dto.cells).toEqual([
+      { weekday: isoWeekday(today), hour: 9, activeDays: 1, activeMs: 10_000 },
+    ]);
+    expect(dto.activeDays).toBe(1);
+    expect(dto.weekdayDays.reduce((a, b) => a + b, 0)).toBe(8);
+  });
+
+  it('pattern: an environment without events gives no cells and 0 active days', async () => {
+    const dto = await users.pattern(userKeyHex(USER_F), { range: '30d', env: 'staging' }, ADMIN);
+    expect(dto).toMatchObject({ activeDays: 0, cells: [] });
   });
 });

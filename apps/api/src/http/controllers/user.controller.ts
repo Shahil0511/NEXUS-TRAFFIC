@@ -1,7 +1,7 @@
 /**
- * ROUTES.users.* — the Users page (user list, profile, devices, days, one day, combined timeline).
- * profile / timeline / devices / daily / day are admin-only (requireAdmin in the route table) and
- * pass the viewer on, so the service can record the access.
+ * ROUTES.users.* — the Users page (user list, profile, devices, days, one day, usual activity
+ * hours, combined timeline). profile / timeline / devices / daily / day / pattern are admin-only
+ * (requireAdmin in the route table) and pass the viewer on, so the service can record the access.
  */
 import {
   userActivityQuerySchema,
@@ -10,6 +10,7 @@ import {
   userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
+  userPatternQuerySchema,
   userProfileQuerySchema,
   userSearchBodySchema,
   userTimelineQuerySchema,
@@ -89,6 +90,15 @@ export class UserController {
     const viewer = requireViewer(res);
     const { userKey } = validParams(res, userKeyParamsSchema);
     const body = await this.users.day(userKey, validQuery(res, userDayQuerySchema), viewer);
+    res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
+    res.json(body);
+  };
+
+  /** @see ../../services/user.service.ts UserService.pattern */
+  pattern: RequestHandler = async (_req, res) => {
+    const viewer = requireViewer(res);
+    const { userKey } = validParams(res, userKeyParamsSchema);
+    const body = await this.users.pattern(userKey, validQuery(res, userPatternQuerySchema), viewer);
     res.setHeader(CACHE_CONTROL_HEADER, DASHBOARD_ANALYTICS_CACHE);
     res.json(body);
   };

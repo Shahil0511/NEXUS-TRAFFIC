@@ -4,6 +4,7 @@ import {
   USER_DAY_LOOKBACK_DAYS,
   type MeDto,
   type TimeWindowQuery,
+  type UserActivityPatternDto,
   type UserDailyActivityDto,
   type UserDayActivityDto,
   type UserDayDetailDto,
@@ -16,9 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   EMPTY_USER_DAY,
+  EMPTY_USER_PATTERN,
   USER_DAILY,
   USER_DAY_DETAIL,
   USER_KEY,
+  USER_PATTERN,
   userDayApp,
   userDayFrom,
 } from '@/test/fixtures';
@@ -27,6 +30,18 @@ import { renderWithProviders } from '@/test/render';
 
 import { aboutTheseNumbersLines } from './AboutTheseNumbers';
 import { UserDailyActivityTab } from './UserDailyActivityTab';
+import { USUAL_ACTIVITY_HOURS_FOOTNOTE } from './UsualActivityHoursPanel';
+
+/**
+ * The switch of the usual-activity-hours panel, mocked so both states are tested; it starts (and is
+ * reset to) OFF, the shipped value, so every other test here sees the page as shipped.
+ */
+const flags = vi.hoisted(() => ({ usualActivityHours: false }));
+vi.mock('@/lib/featureFlags', () => ({
+  get USUAL_ACTIVITY_HOURS_ENABLED() {
+    return flags.usualActivityHours;
+  },
+}));
 
 const FILTERS: TimeWindowQuery = { range: '7d', app: 'ebo-sales', env: 'staging' };
 
@@ -640,6 +655,161 @@ describe('UserDailyActivityTab — one day', () => {
       }),
     );
     const { queries } = await renderDay();
+    await waitFor(() => expect(meCalls).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(queries).toEqual([]);
+  });
+});
+
+describe('UserDailyActivityTab — usual activity hours', () => {
+  afterEach(() => {
+    flags.usualActivityHours = false;
+  });
+
+  function servePattern(body: UserActivityPatternDto = USER_PATTERN): URLSearchParams[] {
+    const queries: URLSearchParams[] = [];
+    server.use(
+      http.get(routeUrl(ROUTES.users.pattern), ({ request }) => {
+        queries.push(new URL(request.url).searchParams);
+        return HttpResponse.json(body);
+      }),
+    );
+    return queries;
+  }
+
+  it('ships switched off: no panel and no pattern request', async () => {
+    const shipped =
+      await vi.importActual<typeof import('@/lib/featureFlags')>('@/lib/featureFlags');
+    expect(shipped.USUAL_ACTIVITY_HOURS_ENABLED).toBe(false);
+    const queries = servePattern();
+    await renderTab();
+    await screen.findByText('End of list · 2 days');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole('heading', { name: 'Usual activity hours' })).toBeNull();
+    expect(screen.queryByText(USUAL_ACTIVITY_HOURS_FOOTNOTE)).toBeNull();
+    expect(queries).toEqual([]);
+  });
+
+  it('switched on: asks for the last 30 days with app and env, only after the daily read succeeded', async () => {
+    flags.usualActivityHours = true;
+    const queries = servePattern();
+    let release: () => void = () => undefined;
+    const dailyHeld = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(routeUrl(ROUTES.users.daily), async () => {
+        await dailyHeld;
+        return HttpResponse.json({ ...USER_DAILY, items: days() });
+      }),
+    );
+    renderWithProviders(<UserDailyActivityTab userKey={USER_KEY} filters={FILTERS} />);
+    expect(
+      await screen.findByRole('heading', { name: 'Usual activity hours' }),
+    ).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(queries).toEqual([]);
+    release();
+    await screen.findByText('End of list · 2 days');
+    await waitFor(() => expect(queries).toHaveLength(1));
+    expect(Object.fromEntries(queries[0] ?? [])).toEqual({
+      range: '30d',
+      app: 'ebo-sales',
+      env: 'staging',
+    });
+  });
+
+  it('switched on: draws the 7 × 24 grid with a sentence per cell, a legend and the footnote', async () => {
+    flags.usualActivityHours = true;
+    servePattern();
+    await renderTab();
+    const panel = await screen.findByRole('region', { name: 'Usual activity hours' });
+    await within(panel).findByText(
+      '9 active days over today and the 30 days before it (whole days, India time).',
+    );
+    const cells = within(panel).getAllByTestId('hour-grid-cell');
+    expect(cells).toHaveLength(7 * 24);
+    const sentence =
+      'Tuesday 10:00–11:00: activity on 4 of 5 Tuesdays, 2 h 10 min tab visible time';
+    expect(cells[24 + 10]).toHaveAttribute('aria-label', sentence);
+    expect(cells[24 + 10]).toHaveAttribute('title', sentence);
+    expect(cells[0]).toHaveAttribute('aria-label', 'Monday 00:00–01:00: no activity on 4 Mondays');
+    // Decorative for screen readers: the hidden table carries the text.
+    expect(panel.querySelector('[data-slot="hour-grid"]')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(panel).getByText(/Share of those weekdays with activity/)).toBeInTheDocument();
+    expect(within(panel).getByText(USUAL_ACTIVITY_HOURS_FOOTNOTE)).toBeInTheDocument();
+  });
+
+  it('switched on: the hidden table has a caption, weekday row headers and hour column headers', async () => {
+    flags.usualActivityHours = true;
+    servePattern();
+    await renderTab();
+    const table = await screen.findByRole('table', { name: /^Usual activity hours, India time/ });
+    // Hidden by a block wrapper: a table box ignores width 1px and could widen the page.
+    expect(table).not.toHaveClass('sr-only');
+    expect(table.parentElement).toHaveClass('sr-only');
+    const columns = within(table).getAllByRole('columnheader');
+    expect(columns).toHaveLength(25);
+    expect(columns[0]).toHaveTextContent('Weekday');
+    expect(columns[11]).toHaveTextContent('10:00–11:00');
+    const rowHeaders = within(table).getAllByRole('rowheader');
+    expect(rowHeaders.map((header) => header.textContent)).toEqual([
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ]);
+    const tuesday = within(table).getAllByRole('row')[2] as HTMLElement;
+    expect(within(tuesday).getAllByRole('cell')[10]).toHaveTextContent('4 of 5, 2 h 10 min');
+  });
+
+  it('switched on: "Last 7 days" asks for 7d; the global range never reaches the read', async () => {
+    flags.usualActivityHours = true;
+    const queries = servePattern();
+    await renderTab();
+    const panel = await screen.findByRole('region', { name: 'Usual activity hours' });
+    await waitFor(() => expect(queries).toHaveLength(1));
+    expect(within(panel).getByRole('radio', { name: 'Last 30 days' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await userEvent.click(within(panel).getByRole('radio', { name: 'Last 7 days' }));
+    await waitFor(() => expect(queries).toHaveLength(2));
+    expect(queries.map((query) => query.get('range'))).toEqual(['30d', '7d']);
+    // The 7-day window is 8 whole India-time days: the summary says so.
+    await within(panel).findByText(
+      '9 active days over today and the 7 days before it (whole days, India time).',
+    );
+    for (const query of queries) {
+      expect(query.has('from')).toBe(false);
+      expect(query.has('to')).toBe(false);
+    }
+  });
+
+  it('switched on: an empty range says so', async () => {
+    flags.usualActivityHours = true;
+    servePattern(EMPTY_USER_PATTERN);
+    await renderTab();
+    expect(await screen.findByText('No activity in the last 30 days')).toBeInTheDocument();
+    expect(screen.queryAllByTestId('hour-grid-cell')).toEqual([]);
+  });
+
+  it('switched on: sends no pattern read for a viewer who is not an admin', async () => {
+    flags.usualActivityHours = true;
+    const queries = servePattern();
+    let meCalls = 0;
+    server.use(
+      http.get(routeUrl(ROUTES.me.get), () => {
+        meCalls += 1;
+        const viewer: MeDto = { email: 'viewer@libas.in', isAdmin: false };
+        return HttpResponse.json(viewer);
+      }),
+    );
+    await renderTab();
+    await screen.findByText('End of list · 2 days');
     await waitFor(() => expect(meCalls).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(queries).toEqual([]);

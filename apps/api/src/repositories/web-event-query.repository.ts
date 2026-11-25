@@ -50,6 +50,7 @@ import {
   likeContains,
   orderByClause,
   ParamList,
+  reportingLocal,
 } from '../db/sql';
 import type {
   EventKeyset,
@@ -85,6 +86,7 @@ import type {
   ToolUsageRows,
   TopPathRow,
   UserActivityBlockRow,
+  UserActivityPatternRow,
   UserAppRow,
   UserDayAppActivityRow,
   UserDayPageRow,
@@ -1191,6 +1193,53 @@ export class WebEventQueryRepository {
         GROUP BY a.slug, w.tool
         ORDER BY first_use_at ASC, a.slug ASC, w.tool ASC
         LIMIT ${params.add(limit)}`,
+      params.values,
+    );
+    return rows;
+  }
+
+  // ─── Usual activity hours of one person (ROUTES.users.pattern) ────────────
+
+  /**
+   * One row per IST (weekday, hour) in which one person had any recorded activity over `filter`
+   * (whole IST days, at most 31), plus ONE total row (weekday and hour NULL). ONE statement over
+   * the same bounded, keyed UNION ALL as listUserDailyActivity (both tables, same window, app,
+   * environment and user_key):
+   * - weekday = ISO day of week and hour of the IST wall-clock time (reportingLocal), so a call at
+   *   05:00Z lands in the 10:00 IST hour;
+   * - `active_days` = distinct IST calendar days (the daily day bucket) with activity in that cell;
+   *   on the total row, the distinct active days of the window;
+   * - `active_ms` = Σ credited visible_ms (creditedVisibleMs: NULL-safe, capped per row) of the
+   *   page_time rows in that cell (tab visible time).
+   * GROUPING SETS ((1, 2), ()) adds the total row in the same scan; at most 169 rows, so no LIMIT.
+   * Selects no label, props, value, name, ip or email.
+   * @see ../db/sql.ts reportingLocal
+   * @see ../db/sql.ts creditedVisibleMs
+   */
+  async listUserActivityPattern(
+    userKey: Buffer,
+    filter: TrafficFilter,
+    exec: Executor = this.db,
+  ): Promise<UserActivityPatternRow[]> {
+    const params = new ParamList();
+    const key = params.add(userKey);
+    const api = [...windowConditions('r', filter, params), `r.user_key = ${key}`].join(' AND ');
+    const web = [...windowConditions('w', filter, params), `w.user_key = ${key}`].join(' AND ');
+    const local = reportingLocal('h.occurred_at');
+    const { rows } = await exec.query<UserActivityPatternRow>(
+      `SELECT extract(isodow FROM ${local})::int AS weekday,
+              extract(hour FROM ${local})::int AS hour,
+              count(DISTINCT ${bucketExpr('day', 'h.occurred_at')}) AS active_days,
+              coalesce(sum(${creditedVisibleMs('h')}) FILTER (WHERE h.kind = '${PAGE_TIME}'), 0)::int8 AS active_ms
+         FROM (
+           SELECT r.occurred_at, '${API_KIND}'::text AS kind, NULL::int AS visible_ms
+             FROM traffic.api_requests r WHERE ${api}
+           UNION ALL
+           SELECT w.occurred_at, w.event_type, w.visible_ms
+             FROM traffic.web_events w WHERE ${web}
+         ) h
+        GROUP BY GROUPING SETS ((1, 2), ())
+        ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST`,
       params.values,
     );
     return rows;

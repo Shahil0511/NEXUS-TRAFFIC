@@ -219,6 +219,12 @@ export const METRIC_COPY = {
     short: 'How many times a feature (tool) of an app was used, from the browser tracker.',
     long: 'A feature used twice counts twice.',
   },
+  usualActivityHours: {
+    label: 'Usual activity hours',
+    short:
+      'In which hours of each weekday (India time) any activity was recorded, over the last 7 or 30 days.',
+    long: 'A darker cell means activity on more of those weekdays in that hour. These are not sign-in or sign-out times.',
+  },
   // ─── Devices (browser) ──────────────────────────────────────────────────────
   devices: {
     label: 'Devices',

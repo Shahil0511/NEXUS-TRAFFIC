@@ -12,6 +12,7 @@ import { KpiCard } from '@/components/KpiCard';
 import { Panel } from '@/components/Panel';
 import { WidenRangeButton } from '@/components/WidenRangeButton';
 import { filterLinkQuery } from '@/features/filters/useGlobalFilters';
+import { USUAL_ACTIVITY_HOURS_ENABLED } from '@/lib/featureFlags';
 import { formatClockOffset, formatHoursMinutes, formatInteger, withUnit } from '@/lib/format';
 import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 
@@ -25,6 +26,7 @@ import {
 } from './dailyActivity';
 import { DAILY_TABLE_MIN_WIDTH_CLASS, dailyColumns } from './userDailyColumns';
 import { useUserDaily } from './useUserDaily';
+import { UsualActivityHoursPanel } from './UsualActivityHoursPanel';
 
 /**
  * WHY: every day (India time) with any activity in the global range, as plain facts of this one
@@ -33,7 +35,9 @@ import { useUserDaily } from './useUserDaily';
  * range and one bar per day of the tab visible time (idle days drawn as 0). Days without activity
  * are left out of the table. The list visibly ends ("End of list · N days") and the limits of the
  * numbers are stated under it (AboutTheseNumbers). Tab visible time is added up over days;
- * nothing here compares this person with anyone else (ADR 0017).
+ * nothing here compares this person with anyone else (ADR 0017). The usual-activity-hours grid
+ * (UsualActivityHoursPanel) sits between the list and the caveats, only while
+ * USUAL_ACTIVITY_HOURS_ENABLED is on; it loads after the daily read succeeded.
  */
 export function UserDaysOverview({
   userKey,
@@ -135,6 +139,10 @@ export function UserDaysOverview({
           </p>
         ) : null}
       </Panel>
+
+      {USUAL_ACTIVITY_HOURS_ENABLED ? (
+        <UsualActivityHoursPanel userKey={userKey} filters={filters} dailyReady={daily.isSuccess} />
+      ) : null}
 
       <AboutTheseNumbers variant="days" />
     </div>

@@ -156,6 +156,29 @@ export function reportingDayOf(instant: Date): string {
   return new Date(instant.getTime() + REPORTING_UTC_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/** Days of a week; index 0 = Monday, like ISO weekday − 1. */
+const WEEKDAYS = 7;
+
+/**
+ * How many IST calendar days of each weekday the window touches, Monday first (length 7): the
+ * denominator of the usual-activity-hours grid (ROUTES.users.pattern). Every IST day that has any
+ * part in [from, to) counts once, so for a whole-day window (wholeReportingDays) the counts add up
+ * to its number of days. Pure.
+ */
+export function weekdayDayCounts(window: { from: Date; to: Date }): number[] {
+  const counts: number[] = new Array<number>(WEEKDAYS).fill(0);
+  const end = window.to.getTime();
+  for (
+    let at = startOfReportingDay(window.from).getTime();
+    at < end;
+    at += RANGE_DURATIONS_MS.today
+  ) {
+    const weekday = (new Date(at + REPORTING_UTC_OFFSET_MS).getUTCDay() + WEEKDAYS - 1) % WEEKDAYS;
+    counts[weekday] = (counts[weekday] ?? 0) + 1;
+  }
+  return counts;
+}
+
 /** `day` moved by `n` calendar days (negative = back): 2026-11-30 + 1 → 2026-12-01. Pure. */
 export function addReportingDays(day: string, n: number): string {
   const [year, month, date] = reportingDayParts(day);

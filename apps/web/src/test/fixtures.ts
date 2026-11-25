@@ -32,6 +32,7 @@ import type {
   UserDayActivityDto,
   UserDayAppActivityDto,
   UserDayDetailDto,
+  UserActivityPatternDto,
   UserDevicesDto,
   UserProfileDto,
   UserSummaryDto,
@@ -733,4 +734,27 @@ export const GEO_CITIES: WindowedListDto<GeoCityDto> = {
       users: 30,
     },
   ],
+};
+
+/**
+ * The usual activity hours of the last 30 days (1 Sep - 1 Oct 2026, 31 whole IST days): Tuesday
+ * 10:00 on 4 of 5 Tuesdays with 2 h 10 min tab visible time, Thursday 09:00 on 2 of 5, and one
+ * Sunday 23:00 (of 4) with API calls only.
+ */
+export const USER_PATTERN: UserActivityPatternDto = {
+  window: { from: '2026-08-31T18:30:00.000Z', to: '2026-10-01T18:30:00.000Z', grain: 'day' },
+  activeDays: 9,
+  weekdayDays: [4, 5, 5, 5, 4, 4, 4],
+  cells: [
+    { weekday: 2, hour: 10, activeDays: 4, activeMs: 7_800_000 },
+    { weekday: 4, hour: 9, activeDays: 2, activeMs: 3_600_000 },
+    { weekday: 7, hour: 23, activeDays: 1, activeMs: 0 },
+  ],
+};
+
+/** The same range with no activity: a 200 with no cells. */
+export const EMPTY_USER_PATTERN: UserActivityPatternDto = {
+  ...USER_PATTERN,
+  activeDays: 0,
+  cells: [],
 };

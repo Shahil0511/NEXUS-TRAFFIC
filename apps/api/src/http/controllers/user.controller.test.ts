@@ -4,8 +4,11 @@ import {
   ROUTES,
   userKeyParamsSchema,
   userDayQuerySchema,
+  userPatternQuerySchema,
+  type UserActivityPatternDto,
   type UserDayDetailDto,
   type UserDayQuery,
+  type UserPatternQuery,
 } from '@nexus/shared';
 import express, { type Express } from 'express';
 import request from 'supertest';
@@ -22,7 +25,7 @@ import { UserController } from './user.controller';
 const ADMIN: Viewer = { email: 'boss@libas.in', isAdmin: true };
 const USER_KEY = 'ab'.repeat(32);
 
-class FakeUsers implements Pick<UserService, 'day'> {
+class FakeUsers implements Pick<UserService, 'day' | 'pattern'> {
   readonly calls: unknown[][] = [];
 
   async day(userKey: string, query: UserDayQuery, viewer: Viewer): Promise<UserDayDetailDto> {
@@ -47,6 +50,20 @@ class FakeUsers implements Pick<UserService, 'day'> {
       visits: [],
     };
   }
+
+  async pattern(
+    userKey: string,
+    query: UserPatternQuery,
+    viewer: Viewer,
+  ): Promise<UserActivityPatternDto> {
+    this.calls.push([userKey, query, viewer]);
+    return {
+      window: { from: '2026-08-31T18:30:00.000Z', to: '2026-10-01T18:30:00.000Z', grain: 'day' },
+      activeDays: 0,
+      weekdayDays: [4, 5, 5, 5, 4, 4, 4],
+      cells: [],
+    };
+  }
 }
 
 /** Wired like the real route table: viewer → validateParams → validateQuery → controller. */
@@ -62,6 +79,12 @@ function buildApp(service: FakeUsers): Express {
     validateParams(userKeyParamsSchema),
     validateQuery(userDayQuerySchema),
     ctl.day,
+  );
+  app.get(
+    ROUTES.users.pattern.path,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userPatternQuerySchema),
+    ctl.pattern,
   );
   app.use(errorHandlerMiddleware(recordingLogger().logger));
   return app;
@@ -90,6 +113,36 @@ describe('UserController.day', () => {
     const app = buildApp(service);
     for (const query of ['', '?day=2026-11-31', '?day=20-11-2026']) {
       const res = await request(app).get(`${dayPath}${query}`);
+      expect(res.status, query).toBe(400);
+      expect(res.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
+    }
+    expect(service.calls).toEqual([]);
+  });
+});
+
+const patternPath = buildPath(ROUTES.users.pattern, { userKey: USER_KEY });
+
+describe('UserController.pattern', () => {
+  it('→ 200 with the service DTO; the range defaults to 30d; private short cache', async () => {
+    const service = new FakeUsers();
+    const app = buildApp(service);
+    const res = await request(app).get(`${patternPath}?app=ebo-sales&env=staging`);
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe(DASHBOARD_ANALYTICS_CACHE);
+    expect(DASHBOARD_ANALYTICS_CACHE).toBe('private, max-age=15');
+    expect(res.body).toMatchObject({ activeDays: 0, cells: [] });
+    await request(app).get(`${patternPath}?range=7d`);
+    expect(service.calls).toEqual([
+      [USER_KEY, { app: 'ebo-sales', env: 'staging', range: '30d' }, ADMIN],
+      [USER_KEY, { range: '7d' }, ADMIN],
+    ]);
+  });
+
+  it('→ 400 for a range the grid does not offer; the service is not called', async () => {
+    const service = new FakeUsers();
+    const app = buildApp(service);
+    for (const query of ['?range=90d', '?range=24h', '?range=custom']) {
+      const res = await request(app).get(`${patternPath}${query}`);
       expect(res.status, query).toBe(400);
       expect(res.body.error.code).toBe(ERROR_CODES.VALIDATION_ERROR);
     }

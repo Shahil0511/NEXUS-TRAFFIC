@@ -18,7 +18,7 @@ import {
 } from '@nexus/shared';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionDetailView } from '@/features/journeys/SessionDetailView';
 import { PrivacyView } from '@/features/privacy/PrivacyView';
@@ -35,12 +35,22 @@ import {
   userDayFrom,
   USER_DEVICES,
   USER_KEY,
+  USER_PATTERN,
   USER_PROFILE,
 } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
+import { HourGrid } from './HourGrid';
 import { UserDetailView } from './UserDetailView';
+
+/** The usual-activity-hours switch, mocked so the panel can be scanned too; OFF as shipped. */
+const flags = vi.hoisted(() => ({ usualActivityHours: false }));
+vi.mock('@/lib/featureFlags', () => ({
+  get USUAL_ACTIVITY_HOURS_ENABLED() {
+    return flags.usualActivityHours;
+  },
+}));
 
 const NOBODY_ONLINE: OnlineNowDto = {
   asOf: '2026-10-01T08:00:00.000Z',
@@ -72,6 +82,7 @@ function servePersonReads(me: MeDto = ME): void {
       }),
     ),
     http.get(routeUrl(ROUTES.users.day), () => HttpResponse.json(USER_DAY_DETAIL)),
+    http.get(routeUrl(ROUTES.users.pattern), () => HttpResponse.json(USER_PATTERN)),
     http.get(routeUrl(ROUTES.users.timeline), () =>
       HttpResponse.json({
         items: [
@@ -108,6 +119,10 @@ function bannedOnScreen(): string[] {
 }
 
 describe('person pages use neutral words only (ADR 0017)', () => {
+  afterEach(() => {
+    flags.usualActivityHours = false;
+  });
+
   it('the Summary tab and the identity card', async () => {
     servePersonReads();
     renderWithProviders(<UserDetailView userKey={USER_KEY} />);
@@ -125,6 +140,23 @@ describe('person pages use neutral words only (ADR 0017)', () => {
     renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=daily' });
     await screen.findByText('End of list · 2 days');
     expect(screen.getByRole('heading', { name: 'About these numbers' })).toBeInTheDocument();
+    expect(bannedOnScreen()).toEqual([]);
+  });
+
+  it('the Daily activity tab with the usual activity hours switched on', async () => {
+    flags.usualActivityHours = true;
+    servePersonReads();
+    renderWithProviders(<UserDetailView userKey={USER_KEY} />, { searchParams: '?tab=daily' });
+    const panel = await screen.findByRole('region', { name: 'Usual activity hours' });
+    await within(panel).findByText(
+      '9 active days over today and the 30 days before it (whole days, India time).',
+    );
+    expect(bannedOnScreen()).toEqual([]);
+  });
+
+  it('the usual activity hours grid on its own: cells, legend and hidden table', () => {
+    renderWithProviders(<HourGrid pattern={USER_PATTERN} />);
+    expect(screen.getAllByTestId('hour-grid-cell')).toHaveLength(168);
     expect(bannedOnScreen()).toEqual([]);
   });
 

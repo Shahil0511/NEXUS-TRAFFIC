@@ -100,14 +100,26 @@ const personLeaves = PERSON_ROUTE_LEAVES.map((id) => {
 });
 
 describe('person-level leaves are admin-only', () => {
-  it('covers profile, timeline, devices, daily and one day', () => {
+  it('covers profile, timeline, devices, daily, one day and usual activity hours', () => {
     expect(personLeaves.map((leaf) => leaf.id)).toEqual([
       'users.profile',
       'users.timeline',
       'users.devices',
       'users.daily',
       'users.day',
+      'users.pattern',
     ]);
+  });
+
+  it('users.pattern: an admin with a range the grid does not offer gets 400 before the controller runs', async () => {
+    const route = ROUTES.users.pattern;
+    const base = buildPath(route, { userKey: USER_KEY });
+    for (const query of ['?range=90d', '?range=custom', '?range=24h']) {
+      const res = await send(route, 'admin', `${base}${query}`);
+      expect(res.status, query).toBe(400);
+      expect(res.body).toMatchObject({ error: { code: ERROR_CODES.VALIDATION_ERROR } });
+      expect(res.body).not.toHaveProperty('ran');
+    }
   });
 
   it('users.day: an admin with an invalid day gets 400 before the controller runs', async () => {

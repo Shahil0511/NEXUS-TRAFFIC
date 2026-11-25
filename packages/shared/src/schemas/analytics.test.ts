@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { userDayQuerySchema } from './analytics';
+import { USER_PATTERN_RANGE_VALUES, userDayQuerySchema, userPatternQuerySchema } from './analytics';
 import { reportingDaySchema, timeWindowQuerySchema } from './common';
 
 describe('reportingDaySchema', () => {
@@ -47,6 +47,33 @@ describe('userDayQuerySchema', () => {
     expect(userDayQuerySchema.safeParse({ day: '2026-11-24', app: 'Not A Slug' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('userPatternQuerySchema', () => {
+  it('defaults to the last 30 days and keeps app and env', () => {
+    expect(userPatternQuerySchema.parse({})).toEqual({ range: '30d' });
+    expect(userPatternQuerySchema.parse({ range: '7d', app: 'ebo-sales', env: 'staging' })).toEqual(
+      { range: '7d', app: 'ebo-sales', env: 'staging' },
+    );
+    expect(USER_PATTERN_RANGE_VALUES).toEqual(['7d', '30d']);
+  });
+
+  it('refuses any other range (90d, 24h, custom) and an unknown env', () => {
+    for (const range of ['90d', '24h', 'today', 'custom']) {
+      expect(userPatternQuerySchema.safeParse({ range }).success, range).toBe(false);
+    }
+    expect(userPatternQuerySchema.safeParse({ env: 'production' }).success).toBe(false);
+  });
+
+  it('strips a stray from / to (the global custom range does not apply)', () => {
+    expect(
+      userPatternQuerySchema.parse({
+        range: '7d',
+        from: '2026-11-18T18:30:00.000Z',
+        to: '2026-11-19T18:30:00.000Z',
+      }),
+    ).toEqual({ range: '7d' });
   });
 });
 

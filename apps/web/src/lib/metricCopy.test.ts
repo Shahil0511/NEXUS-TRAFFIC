@@ -50,6 +50,7 @@ const REQUIRED: readonly MetricKey[] = [
   'activityBlock',
   'requestsOutsideBlocks',
   'featureUses',
+  'usualActivityHours',
 ];
 
 describe('METRIC_COPY', () => {

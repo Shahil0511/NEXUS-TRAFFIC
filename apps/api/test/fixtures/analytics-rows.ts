@@ -19,6 +19,7 @@ import type {
   TrafficBucketRow,
   TrafficSummaryRow,
   UserActivityBlockRow,
+  UserActivityPatternRow,
   UserDayAppActivityRow,
   UserDayPageRow,
   UserDayToolRow,
@@ -188,6 +189,13 @@ export function userActivityBlockRow(
     block_count: 1,
     ...overrides,
   };
+}
+
+/** One weekday-hour of the usual activity hours: Thursday 09:00-10:00 IST on 2 days, 1 h tab visible. */
+export function userActivityPatternRow(
+  overrides: Partial<UserActivityPatternRow> = {},
+): UserActivityPatternRow {
+  return { weekday: 4, hour: 9, active_days: 2, active_ms: 3_600_000, ...overrides };
 }
 
 /** One page of the day (first viewed 09:10 IST). */

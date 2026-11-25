@@ -180,6 +180,15 @@ app and environment applied:
   `USER_DAY_TOOLS_LIMIT`) are in first-use order with a total over all of them; visits are `listSessions` narrowed
   to the key (newest first, `USER_DAY_VISITS_LIMIT`), mapped without IP or email.
 
+**Usual activity hours (read side, `users.pattern`, ADR 0017).** Over the last 7 or 30 days widened to whole IST
+days (8 or 31) of one `user_key`, app and environment applied, the same UNION ALL of `api_requests` and
+`web_events` as the daily read is grouped by the ISO weekday and hour of `occurred_at AT TIME ZONE 'Asia/Kolkata'`
+(`reportingLocal`). A cell = distinct IST calendar days with any event in that weekday-hour + Σ credited
+`visible_ms` of its `page_time` rows; `GROUPING SETS ((weekday, hour), ())` adds one total row (weekday and hour
+NULL) whose `active_days` = the window's distinct active days. Only non-empty cells come back (≤ 168). A cell's
+share on screen = its days / the calendar days of that weekday in the window (`weekdayDayCounts`). No index
+change: `(user_key, occurred_at DESC)` on both tables serves it.
+
 ## `ingest_counters` — ingest health
 
 One row per app, source (`server` / `browser`) and hour. `accepted`, `duplicates`, `rejected` and

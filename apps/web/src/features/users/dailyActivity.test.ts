@@ -1,7 +1,7 @@
 import type { UserDayActivityDto } from '@nexus/shared';
 import { describe, expect, it } from 'vitest';
 
-import { USER_DAILY, userDayApp } from '@/test/fixtures';
+import { EMPTY_USER_PATTERN, USER_DAILY, USER_PATTERN, userDayApp } from '@/test/fixtures';
 
 import { EMPTY_VALUE } from '@/lib/format';
 
@@ -22,7 +22,12 @@ import {
   MIN_STRIP_WIDTH_PCT,
   msIntoDay,
   fillReportingDays,
+  hourCellLabel,
+  hourCellOpacity,
+  hourGridCells,
+  hourRangeLabel,
   isOpenableDay,
+  MIN_ACTIVE_CELL_OPACITY,
   NO_BROWSER_TIME,
   NOT_ENDED_YET,
   summarizeDays,
@@ -30,6 +35,7 @@ import {
   trendPointNotes,
   visibleAppLines,
   visitStepsHref,
+  WEEKDAY_NAMES,
 } from './dailyActivity';
 
 /** IST midnight of 1 Oct 2026 (= 30 Sep 18:30 UTC). */
@@ -310,5 +316,72 @@ describe('one-day view helpers', () => {
       { key: at(-1), startPct: 0, widthPct: (1 / 24) * 100 },
       { key: at(23.99), startPct: 100 - MIN_STRIP_WIDTH_PCT, widthPct: MIN_STRIP_WIDTH_PCT },
     ]);
+  });
+});
+
+describe('usual activity hours grid', () => {
+  it('fills all 7 × 24 cells, Monday first, with the share of that weekday’s days', () => {
+    const rows = hourGridCells(USER_PATTERN);
+    expect(rows.map((row) => row.name)).toEqual([...WEEKDAY_NAMES]);
+    expect(rows.map((row) => row.weekdayDays)).toEqual([4, 5, 5, 5, 4, 4, 4]);
+    for (const row of rows)
+      expect(row.cells.map((cell) => cell.hour)).toEqual([...Array(24).keys()]);
+    const tuesday10 = rows[1]?.cells[10];
+    expect(tuesday10).toMatchObject({
+      activeDays: 4,
+      weekdayDays: 5,
+      share: 0.8,
+      activeMs: 7_800_000,
+    });
+    expect(rows[3]?.cells[9]?.share).toBeCloseTo(0.4);
+    expect(rows[6]?.cells[23]).toMatchObject({ activeDays: 1, share: 0.25, activeMs: 0 });
+    // Every other cell is empty.
+    const lit = rows.flatMap((row) => row.cells).filter((cell) => cell.activeDays > 0);
+    expect(lit).toHaveLength(3);
+  });
+
+  it('labels each cell as a sentence: weekday, hour (IST), days of that weekday, tab visible time', () => {
+    const rows = hourGridCells(USER_PATTERN);
+    expect(rows[1]?.cells[10]?.label).toBe(
+      'Tuesday 10:00–11:00: activity on 4 of 5 Tuesdays, 2 h 10 min tab visible time',
+    );
+    expect(rows[6]?.cells[23]?.label).toBe(
+      'Sunday 23:00–24:00: activity on 1 of 4 Sundays, 0 min tab visible time',
+    );
+    expect(rows[0]?.cells[3]?.label).toBe('Monday 03:00–04:00: no activity on 4 Mondays');
+    expect(hourCellLabel('Friday', 9, 1, 1, 60_000)).toBe(
+      'Friday 09:00–10:00: activity on 1 of 1 Friday, 1 min tab visible time',
+    );
+    expect(hourRangeLabel(0)).toBe('00:00–01:00');
+    expect(hourRangeLabel(23)).toBe('23:00–24:00');
+  });
+
+  it('never gives a share above 1, and 0 for a weekday the window does not have', () => {
+    const odd = hourGridCells({
+      ...USER_PATTERN,
+      weekdayDays: [0, 1, 1, 1, 1, 1, 1],
+      cells: [
+        { weekday: 1, hour: 8, activeDays: 1, activeMs: 0 },
+        { weekday: 2, hour: 8, activeDays: 3, activeMs: 0 },
+      ],
+    });
+    expect(odd[0]?.cells[8]?.share).toBe(0);
+    expect(odd[1]?.cells[8]?.share).toBe(1);
+  });
+
+  it('an empty range gives an all-empty grid', () => {
+    const cells = hourGridCells(EMPTY_USER_PATTERN).flatMap((row) => row.cells);
+    expect(cells).toHaveLength(168);
+    expect(cells.every((cell) => cell.share === 0 && cell.activeDays === 0)).toBe(true);
+  });
+
+  it('shades with one colour: empty is transparent, any activity at least the minimum, all days full', () => {
+    expect(hourCellOpacity(0)).toBe(0);
+    expect(hourCellOpacity(0.01)).toBeGreaterThanOrEqual(MIN_ACTIVE_CELL_OPACITY);
+    expect(hourCellOpacity(0.5)).toBeCloseTo(
+      MIN_ACTIVE_CELL_OPACITY + (1 - MIN_ACTIVE_CELL_OPACITY) / 2,
+    );
+    expect(hourCellOpacity(1)).toBe(1);
+    expect(hourCellOpacity(2)).toBe(1);
   });
 });

@@ -38,6 +38,7 @@ import type {
   TimeWindowDto,
   TopPathDto,
   UserActivityBlockDto,
+  UserActivityPatternDto,
   UserAppUsageDto,
   UserDayActivityDto,
   UserDayAppActivityDto,
@@ -91,6 +92,7 @@ import type {
   TopPathRow,
   TrafficBucketRow,
   UserActivityBlockRow,
+  UserActivityPatternRow,
   UserAppRow,
   UserDayAppActivityRow,
   UserDayPageRow,
@@ -635,6 +637,35 @@ export function mapUserDayDetail(
     toolsTotal: rows.tools[0]?.total ?? 0,
     visits: rows.visits.map(mapUserDayVisit),
   };
+}
+
+// ─── Usual activity hours (ROUTES.users.pattern) ────────────────────────────
+
+/**
+ * WHY: the weekday × hour grid from its rows. The GROUPING SETS total row (weekday and hour NULL)
+ * gives the window's distinct active days and is split off; every other row is one non-empty cell,
+ * kept in the SQL order (weekday, then hour). `weekdayDays` (weekdayDayCounts of the window) is the
+ * denominator a cell's share is read against. No rows at all → 0 active days and no cells.
+ */
+export function mapUserActivityPattern(
+  rows: readonly UserActivityPatternRow[],
+  window: TimeWindowDto,
+  weekdayDays: number[],
+): UserActivityPatternDto {
+  const total = rows.find((row) => row.weekday === null || row.hour === null);
+  const cells = rows.flatMap((row) =>
+    row.weekday === null || row.hour === null
+      ? []
+      : [
+          {
+            weekday: row.weekday,
+            hour: row.hour,
+            activeDays: row.active_days,
+            activeMs: row.active_ms,
+          },
+        ],
+  );
+  return { window, activeDays: total?.active_days ?? 0, weekdayDays, cells };
 }
 
 /**

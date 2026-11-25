@@ -489,6 +489,21 @@ export interface UserDayToolRow {
   total: number;
 }
 
+/**
+ * One weekday-hour (IST) of one person's usual activity hours, or — with `weekday` and `hour`
+ * NULL — the total row of the window (GROUPING SETS: `active_days` = the distinct active days).
+ * @see ../repositories/web-event-query.repository.ts WebEventQueryRepository.listUserActivityPattern
+ */
+export interface UserActivityPatternRow {
+  /** ISO weekday in IST (1 = Monday); NULL on the total row. */
+  weekday: number | null;
+  /** IST hour 0-23; NULL on the total row. */
+  hour: number | null;
+  active_days: number;
+  /** Σ credited page_time deltas (tab visible time). */
+  active_ms: number;
+}
+
 /** Everything the one-day view reads (UserService.day), before mapping. */
 export interface UserDayRows {
   /** The day's (day, app) rows (listUserDailyActivity over the one-day window). */

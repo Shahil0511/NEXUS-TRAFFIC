@@ -24,6 +24,7 @@ import {
   trafficBucketRow,
   USER_KEY_HEX,
   userActivityBlockRow,
+  userActivityPatternRow,
   userDayAppActivityRow,
   userDayPageRow,
   userDayToolRow,
@@ -60,6 +61,7 @@ import {
   mapToolUsage,
   mapTopPath,
   mapUserDayAppActivity,
+  mapUserActivityPattern,
   mapUserDayDetail,
   mapUserDevice,
   mapUserLatestContext,
@@ -574,6 +576,55 @@ describe('mapUserDayDetail (one person-day)', () => {
     const text = JSON.stringify(detail.visits);
     expect(text).not.toContain('someone@libas.in');
     expect(text).not.toContain('8.8.8.8');
+  });
+});
+
+describe('mapUserActivityPattern (usual activity hours)', () => {
+  const WINDOW = {
+    from: '2026-08-31T18:30:00.000Z',
+    to: '2026-10-01T18:30:00.000Z',
+    grain: 'day' as const,
+  };
+  const WEEKDAY_DAYS = [4, 5, 5, 5, 4, 4, 4];
+
+  it('splits off the total row (NULL weekday and hour) as the active days of the window', () => {
+    const dto = mapUserActivityPattern(
+      [
+        userActivityPatternRow({ weekday: null, hour: null, active_days: 6, active_ms: 9_000_000 }),
+        userActivityPatternRow({ weekday: 2, hour: 10, active_days: 4, active_ms: 7_800_000 }),
+        userActivityPatternRow({ weekday: 4, hour: 9 }),
+        userActivityPatternRow({ weekday: 7, hour: 23, active_days: 1, active_ms: 0 }),
+      ],
+      WINDOW,
+      WEEKDAY_DAYS,
+    );
+    expect(dto).toEqual({
+      window: WINDOW,
+      activeDays: 6,
+      weekdayDays: WEEKDAY_DAYS,
+      cells: [
+        { weekday: 2, hour: 10, activeDays: 4, activeMs: 7_800_000 },
+        { weekday: 4, hour: 9, activeDays: 2, activeMs: 3_600_000 },
+        { weekday: 7, hour: 23, activeDays: 1, activeMs: 0 },
+      ],
+    });
+  });
+
+  it('an empty window: the lone total row of 0, or no rows at all, give 0 days and no cells', () => {
+    const zero = userActivityPatternRow({
+      weekday: null,
+      hour: null,
+      active_days: 0,
+      active_ms: 0,
+    });
+    for (const rows of [[zero], []]) {
+      expect(mapUserActivityPattern(rows, WINDOW, WEEKDAY_DAYS)).toEqual({
+        window: WINDOW,
+        activeDays: 0,
+        weekdayDays: WEEKDAY_DAYS,
+        cells: [],
+      });
+    }
   });
 });
 

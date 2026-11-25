@@ -263,6 +263,38 @@ export interface UserDayDetailDto {
   visits: UserDayVisitDto[];
 }
 
+/**
+ * One hour of one weekday (IST) of the usual-activity-hours grid: on how many calendar days of the
+ * window that weekday-hour had any recorded activity (API call or browser event), and the tab
+ * visible time (Σ credited page_time deltas) inside it.
+ */
+export interface UserActivityPatternCellDto {
+  /** ISO weekday in IST: 1 = Monday … 7 = Sunday. */
+  weekday: number;
+  /** Hour of the day in IST, 0-23. */
+  hour: number;
+  /** Distinct IST calendar days of the window with activity in this weekday-hour. */
+  activeDays: number;
+  /** Σ credited page_time deltas in this weekday-hour over the window (tab visible time). */
+  activeMs: number;
+}
+
+/**
+ * GET ROUTES.users.pattern — the weekday × hour grid of one person's recorded activity (IST) over
+ * the last 7 or 30 days, widened to whole IST days (at most 31). A cell's share is
+ * `activeDays / weekdayDays[weekday − 1]`. Empty cells are left out; an empty window is a 200 with
+ * no cells, never a 404.
+ */
+export interface UserActivityPatternDto {
+  window: TimeWindowDto;
+  /** Distinct IST calendar days of the window with any activity. */
+  activeDays: number;
+  /** Calendar days of each weekday in the window, Monday first (length 7). */
+  weekdayDays: number[];
+  /** Only the weekday-hours with activity (at most 168), weekday then hour order. */
+  cells: UserActivityPatternCellDto[];
+}
+
 export const TIMELINE_ITEM_KIND_VALUES = [
   'api',
   'page_view',

@@ -64,6 +64,16 @@ export function creditedVisibleMs(alias: string): string {
   return `(CASE WHEN ${alias}.visible_ms > ${VISIBLE_DELTA_CREDIT_CAP_MS} THEN ${VISIBLE_DELTA_CREDIT_CAP_MS} ELSE ${alias}.visible_ms END)`;
 }
 
+/**
+ * `column` (a timestamptz) as the wall-clock time of the reporting timezone (Asia/Kolkata), a
+ * plain timestamp: `extract(isodow / hour FROM …)` of it gives the IST weekday and hour, not the
+ * UTC ones (05:00Z is 10:30 IST). `column` MUST be a trusted identifier.
+ * @see ../../../../ai-context/decisions/0017-person-daily-depth.md
+ */
+export function reportingLocal(column: string): string {
+  return `(${column} AT TIME ZONE '${REPORTING_TIME_ZONE}')`;
+}
+
 /** Opaque offset cursor for aggregate lists (keyset is not meaningful over GROUP BY results). */
 export function encodeOffsetCursor(offset: number): string {
   return Buffer.from(`o:${offset}`).toString('base64url');

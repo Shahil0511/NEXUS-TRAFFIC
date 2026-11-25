@@ -45,6 +45,7 @@ import {
   userDevicesQuerySchema,
   userKeyParamsSchema,
   userListQuerySchema,
+  userPatternQuerySchema,
   userProfileQuerySchema,
   userSearchBodySchema,
   userTimelineQuerySchema,
@@ -285,6 +286,13 @@ export function buildRouter(c: Container): Router {
     validateParams(userKeyParamsSchema),
     validateQuery(userDayQuerySchema),
     ctl.users.day,
+  );
+  r.get(
+    ROUTES.users.pattern.path,
+    ...admin,
+    validateParams(userKeyParamsSchema),
+    validateQuery(userPatternQuerySchema),
+    ctl.users.pattern,
   );
 
   // ─── Dashboard: journeys ──────────────────────────────────────────────────

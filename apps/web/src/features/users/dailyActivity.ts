@@ -3,7 +3,8 @@
  * 00:00-24:00 IST strip, the window totals (active days, average first / last activity, tab
  * visible time), the per-app lines of a day, the gap-filled points of the per-day chart and the
  * one-day link query of a row's Visits count; for the one-day view, its link, the previous / next
- * day, the visit-steps link of a visit and where each activity block sits on the day timeline.
+ * day, the visit-steps link of a visit and where each activity block sits on the day timeline; for
+ * the usual-activity-hours grid, its 7 × 24 cells with their share and text.
  *
  * WHY HERE: the arithmetic is the part that can be wrong silently (a strip drawn an hour off, an
  * average that mixes days), so it lives outside the components and is unit-tested.
@@ -15,6 +16,7 @@ import {
   reportingDayOf,
   USER_DAY_LOOKBACK_DAYS,
   type UserActivityBlockDto,
+  type UserActivityPatternDto,
   type UserDayActivityDto,
   type UserDayAppActivityDto,
 } from '@nexus/shared';
@@ -323,4 +325,109 @@ export function blockSegments(
     key: block.startAt,
     ...dayStripSpan(day, block.startAt, block.endAt),
   }));
+}
+
+// ─── Usual activity hours (weekday × hour grid) ─────────────────────────────
+
+/** ISO weekdays in grid order (Monday first), as in UserActivityPatternDto.weekdayDays. */
+export const WEEKDAY_NAMES = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+] as const;
+/** Hours of a day, 00-23 IST: the columns of the grid. */
+export const HOURS_PER_DAY = 24;
+
+/** One weekday-hour of the grid. */
+export interface HourGridCell {
+  hour: number;
+  /** Calendar days of this weekday in the window with activity in this hour. */
+  activeDays: number;
+  /** Calendar days of this weekday in the window (the denominator). */
+  weekdayDays: number;
+  /** activeDays / weekdayDays, 0..1 (0 when the window has none of this weekday). */
+  share: number;
+  /** Tab visible time in this weekday-hour over the window. */
+  activeMs: number;
+  /** "Tuesday 10:00–11:00: activity on 4 of 4 Tuesdays, 2 h 10 min tab visible time". */
+  label: string;
+}
+
+/** One weekday row of the grid (ISO 1 = Monday). */
+export interface HourGridRow {
+  weekday: number;
+  name: (typeof WEEKDAY_NAMES)[number];
+  weekdayDays: number;
+  cells: HourGridCell[];
+}
+
+/** "10:00–11:00", "23:00–24:00": one hour of the day, India time. Pure. */
+export function hourRangeLabel(hour: number): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(hour)}:00–${pad(hour + 1)}:00`;
+}
+
+/** "1 Tuesday", "4 Tuesdays". Pure. */
+function weekdayCount(count: number, name: string): string {
+  return `${formatInteger(count)} ${count === 1 ? name : `${name}s`}`;
+}
+
+/**
+ * The text of one cell, for its title, its aria-label and the hidden table: "Tuesday 10:00–11:00:
+ * activity on 4 of 4 Tuesdays, 2 h 10 min tab visible time"; "… no activity on 4 Tuesdays" for an
+ * empty hour. Pure.
+ */
+export function hourCellLabel(
+  name: string,
+  hour: number,
+  activeDays: number,
+  weekdayDays: number,
+  activeMs: number,
+): string {
+  const when = `${name} ${hourRangeLabel(hour)}`;
+  if (activeDays === 0) return `${when}: no activity on ${weekdayCount(weekdayDays, name)}`;
+  return `${when}: activity on ${formatInteger(activeDays)} of ${weekdayCount(weekdayDays, name)}, ${formatHoursMinutes(activeMs)} tab visible time`;
+}
+
+/**
+ * The full 7 × 24 grid (Monday first, hours 00-23 IST) from the API's non-empty cells: every
+ * weekday-hour, with its share = active days / calendar days of that weekday in the window (never
+ * above 1) and its text. Cells the API left out are empty (0 days). Pure.
+ */
+export function hourGridCells(pattern: UserActivityPatternDto): HourGridRow[] {
+  const byCell = new Map(pattern.cells.map((cell) => [`${cell.weekday}:${cell.hour}`, cell]));
+  return WEEKDAY_NAMES.map((name, index) => {
+    const weekday = index + 1;
+    const weekdayDays = pattern.weekdayDays[index] ?? 0;
+    const cells = Array.from({ length: HOURS_PER_DAY }, (_, hour): HourGridCell => {
+      const cell = byCell.get(`${weekday}:${hour}`);
+      const activeDays = cell?.activeDays ?? 0;
+      const activeMs = cell?.activeMs ?? 0;
+      return {
+        hour,
+        activeDays,
+        weekdayDays,
+        share: weekdayDays > 0 ? Math.min(1, activeDays / weekdayDays) : 0,
+        activeMs,
+        label: hourCellLabel(name, hour, activeDays, weekdayDays, activeMs),
+      };
+    });
+    return { weekday, name, weekdayDays, cells };
+  });
+}
+
+/** The lightest shade of a cell with any activity, so a rare hour is still visible. */
+export const MIN_ACTIVE_CELL_OPACITY = 0.15;
+
+/**
+ * The opacity of a cell's one colour: 0 for an empty hour, else MIN_ACTIVE_CELL_OPACITY up to 1 in
+ * proportion to its share. Pure.
+ */
+export function hourCellOpacity(share: number): number {
+  if (share <= 0) return 0;
+  return MIN_ACTIVE_CELL_OPACITY + (1 - MIN_ACTIVE_CELL_OPACITY) * Math.min(1, share);
 }

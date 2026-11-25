@@ -101,6 +101,11 @@ export const ROUTES = {
     daily: { method: 'GET', path: '/v1/users/:userKey/daily' },
     /** ONE IST calendar day of one person (`?day=YYYY-MM-DD`): blocks, per app, pages, features, visits. */
     day: { method: 'GET', path: '/v1/users/:userKey/day' },
+    /**
+     * Weekday × hour grid of one person's activity (usual activity hours, IST) over the last 7 or
+     * 30 days (`?range=7d|30d`), widened to whole IST days: at most 31 days.
+     */
+    pattern: { method: 'GET', path: '/v1/users/:userKey/pattern' },
   },
   journeys: {
     sessions: { method: 'GET', path: '/v1/journeys/sessions' },
@@ -212,6 +217,7 @@ export const PERSON_ROUTE_LEAVES = [
   'users.devices',
   'users.daily',
   'users.day',
+  'users.pattern',
 ] as const satisfies readonly RouteLeafId[];
 
 /**

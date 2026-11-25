@@ -18,6 +18,98 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Person 360 daily depth, step 6: usual activity hours, built and switched off (ADR 0017)
+
+Contract, API and web; no migration (the `person_pattern` surface and its CHECK shipped with 0014 in step 4).
+The screen is hidden: `USUAL_ACTIVITY_HOURS_ENABLED = false` (`apps/web/src/lib/featureFlags.ts`).
+
+**Done**
+- **Shared (contract first):** `ROUTES.users.pattern` (`/v1/users/:userKey/pattern`) joins `PERSON_ROUTE_LEAVES`
+  (every person surface now has its leaf, so the contracts test lost its "leaves to come" list).
+  `schemas/analytics.ts`: `USER_PATTERN_RANGE_VALUES` (`7d`, `30d`), `userPatternQuerySchema` (app + env + range,
+  default `30d`, built from `timeWindowShape`, not strict). `time-window.ts`: `weekdayDayCounts` (IST days per
+  weekday, Monday first). `dto/users.ts`: `UserActivityPatternCellDto`, `UserActivityPatternDto`.
+- **API:** `db/sql.ts` `reportingLocal` (IST wall-clock time of a timestamptz). Route `...admin` +
+  `validateParams` + `validateQuery(userPatternQuerySchema)` → `UserController.pattern` (`private, max-age=15`)
+  → `UserService.pattern`: range → `wholeReportingDays` (8 or 31 days) → ONE statement
+  `WebEventQueryRepository.listUserActivityPattern` (the daily UNION ALL, both tables bounded and keyed, grouped
+  by IST weekday × hour, `GROUPING SETS ((1, 2), ())` for the total active days, credited tab visible time) →
+  `mapUserActivityPattern` + `weekdayDayCounts`; `person_pattern` recorded with the same wide `emailLookup` as one
+  day (the helper is now `personEmailLookupFilter`). Row `UserActivityPatternRow`.
+- **Web:** `api.users.pattern`, `qk.users.pattern` (in `PERSON_USER_LEAVES`), `useUserPattern` (sent only for an
+  admin and after the daily read succeeded), `HourGrid.tsx` (7 × 24 grid in one colour by opacity, a sentence
+  per cell as title / aria-label, legend, visually hidden table with caption and headers),
+  `UsualActivityHoursPanel.tsx` (own `Last 7 days | Last 30 days` control, footnote), rendered by
+  `UserDaysOverview` only while the switch is on. Helpers `hourGridCells`, `hourCellLabel`, `hourRangeLabel`,
+  `hourCellOpacity` in `dailyActivity.ts`; `METRIC_COPY.usualActivityHours`.
+- **Tests:** shared (`weekdayDayCounts` over 30 / 31 days and IST weekdays, `userPatternQuerySchema` default,
+  refusals, stripped from / to, routes and surfaces); api sql (`reportingLocal`), repository (READS table,
+  bounded + env, IST extract, distinct days, credited sum, GROUPING SETS, no LIMIT, no free-text columns),
+  mappers, service (31 / 8 whole days, filter, one statement, `person_pattern` also when empty, 404), controller
+  (default 30d, 400 for other ranges, cache), person-access routes (6 leaves; bad range → 400), routes contract;
+  DB suite: pattern cases in `test/db/user-day.integration.test.ts` on seed S6 (IST hours across the day
+  boundary, credit cap, app filter, empty env; written, not run). Web: helpers, the panel in both switch states
+  in `UserDailyActivityTab.test.tsx` (off: no panel, no request; on: request only after daily, 30d + app + env,
+  7d switch, grid sentences, hidden table headers, empty state, no read for a viewer), `personCopy.test.tsx`
+  (panel on + HourGrid), `autoRefreshPolicy.test.ts`, `metricCopy.test.ts`.
+- **Docs:** ADR 0017 point 9, 03-code-navigation, 07-data-model, GLOSSARY.
+
+**Review fixes (same step):**
+- The hidden table sits in a `div.sr-only` wrapper (the `<table>` itself has no class): a table box sizes to
+  its 25 columns and ignores width 1px, a block box does not, so it cannot widen the page on a phone.
+- The summary line names the real span: "N active days over today and the 7 / 30 days before it (whole days,
+  India time)", because the API widens 7d to 8 whole IST days and 30d to 31 (a cell's "of 2 Wednesdays").
+- ADR 0017 point 9 records the opacity floor (`MIN_ACTIVE_CELL_OPACITY`, 0.15, then in proportion to the
+  share); `METRIC_COPY.usualActivityHours.long` grammar; the gate below carries the rendered statement, and
+  the repository test pins that exact text and parameter order.
+
+**Gate to switch it on (owner):** on production, run `EXPLAIN (ANALYZE, BUFFERS)` of the pattern read for one
+person with a lot of activity over 30 days (whole IST days, the prod environment) and note the timing here;
+then set `USUAL_ACTIVITY_HOURS_ENABLED = true` in the same commit. If it is slow, offer the 7-day range only.
+The statement is `WebEventQueryRepository.listUserActivityPattern` as the app sends it (pinned by its
+repository test; change both together). Parameters: `$1` user_key (bytea), then per table `from`, `to`
+(timestamptz), `app_id` (uuid), environments (text[]): `$2..$5` for `api_requests`, `$6..$9` for `web_events`.
+In psql, as the read-only user:
+
+```sql
+-- The most active key of the last 31 days and its app (prints nothing; \gset stores it in :k / :app).
+SELECT user_key AS k, app_id AS app FROM traffic.web_events
+ WHERE occurred_at >= now() - interval '31 days' AND user_key IS NOT NULL AND environment = 'prod'
+ GROUP BY user_key, app_id ORDER BY count(*) DESC LIMIT 1 \gset
+-- 30d widened to whole IST days: 00:00 IST 30 days ago .. 00:00 IST tomorrow.
+SELECT date_trunc('day', now(), 'Asia/Kolkata') - interval '30 days' AS f,
+       date_trunc('day', now(), 'Asia/Kolkata') + interval '1 day' AS t \gset
+PREPARE pattern(bytea, timestamptz, timestamptz, uuid, text[],
+                timestamptz, timestamptz, uuid, text[]) AS
+SELECT extract(isodow FROM (h.occurred_at AT TIME ZONE 'Asia/Kolkata'))::int AS weekday,
+       extract(hour FROM (h.occurred_at AT TIME ZONE 'Asia/Kolkata'))::int AS hour,
+       count(DISTINCT date_trunc('day', h.occurred_at, 'Asia/Kolkata')) AS active_days,
+       coalesce(sum((CASE WHEN h.visible_ms > 60000 THEN 60000 ELSE h.visible_ms END))
+         FILTER (WHERE h.kind = 'page_time'), 0)::int8 AS active_ms
+  FROM (
+    SELECT r.occurred_at, 'api'::text AS kind, NULL::int AS visible_ms
+      FROM traffic.api_requests r WHERE r.occurred_at >= $2 AND r.occurred_at < $3
+       AND r.app_id = $4 AND r.environment = ANY($5::text[]) AND r.user_key = $1
+    UNION ALL
+    SELECT w.occurred_at, w.event_type, w.visible_ms
+      FROM traffic.web_events w WHERE w.occurred_at >= $6 AND w.occurred_at < $7
+       AND w.app_id = $8 AND w.environment = ANY($9::text[]) AND w.user_key = $1
+  ) h
+ GROUP BY GROUPING SETS ((1, 2), ())
+ ORDER BY 1 ASC NULLS FIRST, 2 ASC NULLS FIRST;
+EXPLAIN (ANALYZE, BUFFERS) EXECUTE pattern(:'k', :'f', :'t', :'app', '{prod}',
+                                           :'f', :'t', :'app', '{prod}');
+DEALLOCATE pattern;
+```
+
+Note here only the execution time, the buffers and the partitions scanned: the plan's Index Cond lines
+print the key's bytes, so do not paste them. The 60000 is `VISIBLE_DELTA_CREDIT_CAP_MS`.
+
+**Next:** `RUN_DB_TESTS=1 npm run test:db` for the new pattern cases; the owner's EXPLAIN ANALYZE; then B10-7
+(people list sort, the owner may veto).
+
+---
+
 ## 2026-11-25 — Person 360 daily depth, step 5: the one-day view (ADR 0017)
 
 Contract, API and web; no migration (the `person_day` surface and its CHECK shipped with 0014 in step 4).

@@ -10,6 +10,8 @@ import {
   reportingDayWindow,
   startOfReportingDay,
   TimeWindowError,
+  weekdayDayCounts,
+  wholeReportingDays,
 } from './time-window';
 
 describe('reportingDayWindow', () => {
@@ -49,5 +51,50 @@ describe('addReportingDays', () => {
     expect(addReportingDays('2026-03-01', -1)).toBe('2026-02-28');
     expect(addReportingDays('2026-11-25', -183)).toBe('2026-05-26');
     expect(addReportingDays('2026-11-25', 0)).toBe('2026-11-25');
+  });
+});
+
+describe('weekdayDayCounts', () => {
+  const DAY = 86_400_000;
+  /** The whole IST days of the window ending at `now`, `days` long, like users.pattern widens it. */
+  const wholeDaysBack = (now: Date, days: number) =>
+    wholeReportingDays({ from: new Date(now.getTime() - days * DAY), to: now });
+
+  it('counts the IST days of each weekday, Monday first; 30 and 31 whole days add up', () => {
+    // 2026-11-23 is a Monday (IST); 30 whole days from it end on Tuesday 2026-12-22.
+    const from = reportingDayWindow('2026-11-23').from;
+    const thirty = weekdayDayCounts({ from, to: new Date(from.getTime() + 30 * DAY) });
+    expect(thirty).toEqual([5, 5, 4, 4, 4, 4, 4]);
+    expect(thirty.reduce((a, b) => a + b, 0)).toBe(30);
+    const thirtyOne = weekdayDayCounts({ from, to: new Date(from.getTime() + 31 * DAY) });
+    expect(thirtyOne).toEqual([5, 5, 5, 4, 4, 4, 4]);
+    expect(thirtyOne.reduce((a, b) => a + b, 0)).toBe(31);
+  });
+
+  it('names the weekday in India time, not UTC (18:30Z is already the next IST day)', () => {
+    // Monday 2026-11-23 00:00 IST is Sunday 18:30Z in UTC.
+    const monday = reportingDayWindow('2026-11-23');
+    expect(weekdayDayCounts(monday)).toEqual([1, 0, 0, 0, 0, 0, 0]);
+    expect(weekdayDayCounts(reportingDayWindow('2026-11-29'))).toEqual([0, 0, 0, 0, 0, 0, 1]);
+  });
+
+  it('the last 30 / 7 days widened to whole days are 31 / 8 days, every weekday present', () => {
+    const now = new Date('2026-11-25T09:30:00.000Z'); // 15:00 IST, Wednesday
+    const month = weekdayDayCounts(wholeDaysBack(now, 30));
+    expect(month.reduce((a, b) => a + b, 0)).toBe(31);
+    expect(month.every((count) => count >= 4)).toBe(true);
+    const week = weekdayDayCounts(wholeDaysBack(now, 7));
+    expect(week.reduce((a, b) => a + b, 0)).toBe(8);
+    // Wednesday is both the oldest and today's weekday.
+    expect(week).toEqual([1, 1, 2, 1, 1, 1, 1]);
+  });
+
+  it('a window cut inside a day still counts that day once', () => {
+    expect(
+      weekdayDayCounts({
+        from: new Date('2026-11-23T05:00:00.000Z'),
+        to: new Date('2026-11-23T06:00:00.000Z'),
+      }),
+    ).toEqual([1, 0, 0, 0, 0, 0, 0]);
   });
 });

@@ -216,7 +216,7 @@ export type AuditAction = (typeof AUDIT_ACTION_VALUES)[number];
  * narrowed to one person by `?userKey=` (PERSON_FILTERED_ROUTE_LEAVES): `person_visits` = the
  * sessions list, `person_failures` = the failed-request summary and list. ADR 0017 adds
  * `person_day` (one IST day of the Daily activity tab, ROUTES.users.day), `person_pattern` (usual
- * activity hours; users.pattern, a later step) and
+ * activity hours, ROUTES.users.pattern) and
  * `person_visit_steps` (the steps of ONE visit of a verified person, ROUTES.journeys.session,
  * admin-only once the visit has a user_key). Stored in
  * `traffic.person_access_log.surface` and mirrored by `person_access_log_surface_check` (0013,

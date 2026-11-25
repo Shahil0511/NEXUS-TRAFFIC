@@ -99,6 +99,7 @@ describe('ROUTES', () => {
     expect(ROUTES.users.daily).toEqual({ method: 'GET', path: '/v1/users/:userKey/daily' });
     expect(buildPath(ROUTES.users.daily, { userKey: 'ab' })).toBe('/v1/users/ab/daily');
     expect(ROUTES.users.day).toEqual({ method: 'GET', path: '/v1/users/:userKey/day' });
+    expect(ROUTES.users.pattern).toEqual({ method: 'GET', path: '/v1/users/:userKey/pattern' });
   });
 
   it('names the person-level leaves (admin-only, access-logged): one surface each', () => {
@@ -109,8 +110,8 @@ describe('ROUTES', () => {
       expect(ROUTES.users[leaf].path).toMatch(/^\/v1\/users\/:userKey(\/[a-z]+)?$/);
     }
     // One per person leaf, + person_visits and person_failures (the lists narrowed to one person by
-    // ?userKey=), + the ADR 0017 surfaces: one day (users.day), usual activity hours (its leaf comes
-    // in a later step) and the visit steps of a verified person (journeys.session, guarded by data).
+    // ?userKey=), + the ADR 0017 surfaces: one day (users.day), usual activity hours (users.pattern)
+    // and the visit steps of a verified person (journeys.session, guarded by data).
     expect(PERSON_ACCESS_SURFACE_VALUES).toEqual([
       'person_profile',
       'person_timeline',
@@ -123,17 +124,15 @@ describe('ROUTES', () => {
       'person_visit_steps',
     ]);
     // Each person leaf has its own surface (the Record makes a new leaf without one a type error).
-    // What is left is exactly: the two narrowed lists, the visit steps of a verified person, and the
-    // surface of the person leaf still to come (users.pattern in step 6; move it into
-    // SURFACE_OF_LEAF when its leaf lands).
+    // What is left is exactly: the two narrowed lists and the visit steps of a verified person.
     const SURFACE_OF_LEAF: Record<(typeof PERSON_ROUTE_LEAVES)[number], PersonAccessSurface> = {
       'users.profile': 'person_profile',
       'users.timeline': 'person_timeline',
       'users.devices': 'person_devices',
       'users.daily': 'person_daily',
       'users.day': 'person_day',
+      'users.pattern': 'person_pattern',
     };
-    const SURFACES_OF_LEAVES_TO_COME: PersonAccessSurface[] = ['person_pattern'];
     const leafSurfaces: PersonAccessSurface[] = PERSON_ROUTE_LEAVES.map(
       (id) => SURFACE_OF_LEAF[id],
     );
@@ -141,14 +140,7 @@ describe('ROUTES', () => {
     for (const surface of leafSurfaces) expect(PERSON_ACCESS_SURFACE_VALUES).toContain(surface);
     expect(
       PERSON_ACCESS_SURFACE_VALUES.filter((surface) => !leafSurfaces.includes(surface)).sort(),
-    ).toEqual(
-      [
-        'person_visits',
-        'person_failures',
-        'person_visit_steps',
-        ...SURFACES_OF_LEAVES_TO_COME,
-      ].sort(),
-    );
+    ).toEqual(['person_visits', 'person_failures', 'person_visit_steps'].sort());
     for (const id of PERSON_FILTERED_ROUTE_LEAVES) expect(known.has(id), id).toBe(true);
     const narrowable = [
       sessionListQuerySchema,

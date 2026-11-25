@@ -39,6 +39,7 @@ import type {
   TrafficBucketRow,
   TrafficSummaryRow,
   UserActivityBlockRow,
+  UserActivityPatternRow,
   UserDayAppActivityRow,
   UserDayPageRow,
   UserDayToolRow,
@@ -197,6 +198,7 @@ type WebQueryMethods =
   | 'listUserDayBlocks'
   | 'listUserDayPages'
   | 'listUserDayTools'
+  | 'listUserActivityPattern'
   | 'listSessions'
   | 'getSession'
   | 'findSessionUserKey'
@@ -232,6 +234,8 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   dayBlocks: UserActivityBlockRow[] = [];
   dayPages: UserDayPageRow[] = [];
   dayTools: UserDayToolRow[] = [];
+  /** The usual-activity-hours rows (ROUTES.users.pattern), total row included when set. */
+  patternRows: UserActivityPatternRow[] = [];
   /** Calls still running right now, and the most that ran at once (concurrency checks). */
   private running = 0;
   maxConcurrent = 0;
@@ -391,6 +395,14 @@ export class FakeWebEventQueries implements Pick<WebEventQueryRepository, WebQue
   ): Promise<UserDayToolRow[]> {
     this.calls.push({ method: 'listUserDayTools', args: [userKey, filter, limit] });
     return this.counted(this.dayTools);
+  }
+
+  async listUserActivityPattern(
+    userKey: Buffer,
+    filter: TrafficFilter,
+  ): Promise<UserActivityPatternRow[]> {
+    this.calls.push({ method: 'listUserActivityPattern', args: [userKey, filter] });
+    return this.counted(this.patternRows);
   }
 
   async listSessions(
