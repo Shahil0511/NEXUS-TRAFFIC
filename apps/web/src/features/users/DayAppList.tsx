@@ -17,6 +17,8 @@ const MORE_BUTTON_CLASS =
  * API's perApp order) — never sorted by time or counts. Each line is the app, its tab visible
  * time ("no browser time" for an app seen only through API calls) and its first and last recorded
  * event. At most DAY_APP_LINES_SHOWN lines until "+N more" is pressed: local state, no fetch.
+ * A line wraps (time and span under the chip) and a long app slug truncates, so a narrow Apps
+ * column never widens the table.
  */
 export function DayAppList({ day, linkQuery }: { day: UserDayActivityDto; linkQuery: LinkQuery }) {
   const [expanded, setExpanded] = useState(false);
@@ -27,10 +29,16 @@ export function DayAppList({ day, linkQuery }: { day: UserDayActivityDto; linkQu
     <div className="space-y-1">
       <ul id={listId} className="space-y-1">
         {lines.map((app) => (
-          <li key={app.app} className="flex items-center gap-1.5 text-xs whitespace-nowrap">
-            <AppChip app={app.app} linkQuery={linkQuery} />
-            <span className="tabular">{appTimeLabel(app)}</span>
-            <span className="text-2xs text-muted-foreground tabular">{appClockSpan(app)}</span>
+          <li
+            key={app.app}
+            data-slot="day-app-line"
+            className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs"
+          >
+            <AppChip app={app.app} linkQuery={linkQuery} className="min-w-0" />
+            <span className="whitespace-nowrap tabular">{appTimeLabel(app)}</span>
+            <span className="text-2xs whitespace-nowrap text-muted-foreground tabular">
+              {appClockSpan(app)}
+            </span>
           </li>
         ))}
       </ul>

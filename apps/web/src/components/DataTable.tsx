@@ -46,7 +46,20 @@ export interface DataTableProps<T, S extends string = never> {
   skeletonRows?: number;
   /** Rendered in place of the body when `rows` is empty. */
   empty?: ReactNode;
+  /**
+   * 'auto' (default): columns are as wide as their one-line content; a wide table scrolls inside
+   * its container. 'fit': the table is exactly as wide as its container (table-fixed): column
+   * widths come from `column.className` (leave one column without a width, it takes the rest)
+   * and headers and cells wrap instead of widening the table.
+   */
+  layout?: 'auto' | 'fit';
+  /** Extra classes on the <table>, e.g. a min width below which a 'fit' table scrolls in place. */
+  tableClassName?: string;
 }
+
+/** Classes a 'fit' table adds: the <table> keeps its container's width, text wraps in cells. */
+const FIT_TABLE_CLASS = 'table-fixed';
+const FIT_CELL_CLASS = 'whitespace-normal';
 
 const DEFAULT_SKELETON_ROWS = 6;
 
@@ -122,10 +135,13 @@ export function DataTable<T, S extends string = never>({
   loading = false,
   skeletonRows = DEFAULT_SKELETON_ROWS,
   empty,
+  layout = 'auto',
+  tableClassName,
 }: DataTableProps<T, S>) {
   const showEmpty = !loading && rows !== undefined && rows.length === 0;
+  const fitCell = layout === 'fit' ? FIT_CELL_CLASS : undefined;
   return (
-    <Table aria-busy={loading}>
+    <Table aria-busy={loading} className={cn(layout === 'fit' && FIT_TABLE_CLASS, tableClassName)}>
       <TableCaption>{caption}</TableCaption>
       <TableHeader>
         <TableRow className="hover:bg-transparent">
@@ -136,7 +152,7 @@ export function DataTable<T, S extends string = never>({
               <TableHead
                 key={column.id}
                 aria-sort={state}
-                className={cn(alignRight && 'text-right', column.className)}
+                className={cn(fitCell, alignRight && 'text-right', column.className)}
               >
                 <HeaderWithHint column={column} alignRight={alignRight}>
                   {column.sortKey && onSortChange ? (
@@ -167,7 +183,7 @@ export function DataTable<T, S extends string = never>({
               <TableRow key={`skeleton-${index}`} className="hover:bg-transparent">
                 {columns.map((column) => (
                   // column.className too: a column hidden below a breakpoint hides its skeleton.
-                  <TableCell key={column.id} className={column.className}>
+                  <TableCell key={column.id} className={cn(fitCell, column.className)}>
                     <Skeleton
                       className={cn('h-4', column.align === 'right' ? 'ml-auto w-12' : 'w-28')}
                     />
@@ -190,6 +206,7 @@ export function DataTable<T, S extends string = never>({
                   <TableCell
                     key={column.id}
                     className={cn(
+                      fitCell,
                       column.align === 'right' && 'text-right tabular',
                       column.className,
                     )}

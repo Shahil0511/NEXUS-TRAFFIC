@@ -4,10 +4,11 @@ import { useReducedMotion } from 'motion/react';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-import { formatBucket, formatDay } from '@/lib/format';
+import { formatBucket, formatDay, formatHoursMinutesShort } from '@/lib/format';
 
 import { ChartTooltip, type ChartTooltipSeries } from './ChartTooltip';
 import { AXIS_PROPS, CHART_COLORS, CHART_HEIGHT, CHART_MARGIN } from './chartTheme';
+import { durationTicks } from './durationTicks';
 
 export interface DailyBarPoint {
   /** The instant of the day's IST midnight (ISO). */
@@ -26,19 +27,16 @@ export interface DailyBarChartProps<P extends DailyBarPoint> {
   notes?: (point: P) => readonly string[];
 }
 
-const MS_PER_HOUR = 3_600_000;
 const END_RADIUS: [number, number, number, number] = [3, 3, 0, 0];
-
-/** Value-axis tick in hours: 0 → "0", 5_400_000 → "1.5 h". */
-function formatHoursTick(ms: number): string {
-  if (ms === 0) return '0';
-  return `${Math.round((ms / MS_PER_HOUR) * 10) / 10} h`;
-}
+/** Room for the widest tick label ("1h 30m" at 11 px) plus AXIS_PROPS.tickMargin. */
+const VALUE_AXIS_WIDTH = 52;
 
 /**
  * WHY: a length of time per IST day (one person's tab visible time) as plain vertical bars, one
  * per day, in ONE data colour. There is deliberately no average, target or reference line: the
- * chart shows what happened on each day, not how a day compares with a goal.
+ * chart shows what happened on each day, not how a day compares with a goal. The value axis has
+ * its own whole-minute ticks from the largest bar (durationTicks), so no two labels repeat, in the
+ * short form of the tooltip's hours and minutes (formatHoursMinutesShort).
  */
 export function DailyBarChart<P extends DailyBarPoint>({
   points,
@@ -51,6 +49,10 @@ export function DailyBarChart<P extends DailyBarPoint>({
     () => [{ key: 'activeMs', label, color: CHART_COLORS.requests, format }],
     [label, format],
   );
+  const ticks = useMemo(
+    () => durationTicks(Math.max(0, ...points.map((point) => point.activeMs))),
+    [points],
+  );
   return (
     <figure aria-label={`${label} per day`} className="m-0">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
@@ -62,7 +64,14 @@ export function DailyBarChart<P extends DailyBarPoint>({
             minTickGap={24}
             tickFormatter={(iso: string) => formatBucket(iso, 'day')}
           />
-          <YAxis {...AXIS_PROPS} width={44} tickFormatter={formatHoursTick} />
+          <YAxis
+            {...AXIS_PROPS}
+            width={VALUE_AXIS_WIDTH}
+            ticks={ticks}
+            domain={[0, ticks.at(-1) ?? 0]}
+            interval={0}
+            tickFormatter={formatHoursMinutesShort}
+          />
           <Tooltip
             cursor={{ fill: CHART_COLORS.cursor }}
             content={(props) => (

@@ -23,7 +23,7 @@ import {
   summarizeDays,
   trendPointNotes,
 } from './dailyActivity';
-import { dailyColumns } from './userDailyColumns';
+import { DAILY_TABLE_MIN_WIDTH_CLASS, dailyColumns } from './userDailyColumns';
 import { useUserDaily } from './useUserDaily';
 
 /**
@@ -117,6 +117,9 @@ export function UserDaysOverview({
       >
         <DataTable
           caption="Daily activity"
+          layout="fit"
+          // Only with rows: an empty table fits the panel, so its message and action stay in view.
+          tableClassName={days && days.length > 0 ? DAILY_TABLE_MIN_WIDTH_CLASS : undefined}
           columns={columns}
           rows={days}
           rowKey={(row) => row.day}

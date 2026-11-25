@@ -18,6 +18,45 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Person 360 daily activity: two production fixes (table width, chart ticks)
+
+Web only; no contract, migration or API change.
+
+**Done**
+- **Table fits its container.** The Daily activity table scrolled sideways at ~1500 px and cut off Visits: every
+  cell was `whitespace-nowrap` (app lines, counts, headers) in an auto-layout table, so the table was as wide as
+  its one-line content (~1100-1200 px), wider than the content area at 1280 px (sidebar open) and beside the
+  identity card from 2xl. `components/DataTable.tsx` gains `layout?: 'auto' | 'fit'` (default `auto`, every other
+  table unchanged) and `tableClassName`: `fit` makes the `<table>` `table-fixed` and adds `whitespace-normal` to
+  headers, cells and skeleton cells. `features/users/userDailyColumns.tsx` gives Date, First – last activity, Tab
+  visible time, Pages and calls and Visits fixed widths (`COLUMN_WIDTH`, the old `w-full min-w-40` is gone); Apps
+  takes the rest (budget: fixed columns 44rem, so Apps keeps at least 10rem at the minimum).
+  `DAILY_TABLE_MIN_WIDTH_CLASS` (`min-w-[54rem]`, 864 px) sits below the 1280 px / 2xl content widths; below it
+  (phones, tablets) the table scrolls inside its own `overflow-x-auto` container, never the page. The minimum
+  applies only when there are rows: an empty range fits the panel, so "No activity in this range" and its
+  Widen range button stay in view on a phone. `DayAppList.tsx` lines wrap (`flex-wrap min-w-0`, time and span under the chip) and the AppChip
+  truncates (`min-w-0`); the `+N more` cap is unchanged. Counts and " so far" may wrap.
+- **Chart ticks.** "Tab visible time per day" repeated "0.1h" on its value axis (even ticks rounded to 0.1 h).
+  New pure `components/charts/durationTicks.ts`: `durationTicks(maxMs)` picks the smallest nice step (1, 2, 5,
+  10, 15, 30 min, 1, 2, 3, 4, 6, 12, 24 h, then whole days) that reaches the largest bar in at most 4 steps;
+  labels come from the new `lib/format.ts` `formatHoursMinutesShort` (`0`, `5m`, `1h 30m`, `6h`), which shares
+  one hour/minute split with `formatHoursMinutes` (the tooltip's "1 h 30 min"), so axis and tooltip never round
+  differently. `DailyBarChart.tsx` passes those ticks, `domain` and `interval={0}` to its YAxis and widens it
+  from 44 to 52 px so "1h 30m" is not clipped. It has one caller (`UserDaysOverview.tsx`).
+- **Tests:** new `durationTicks.test.ts` (7 min, ~1 h, 1 h, 9 h, zero / NaN data, a sweep and > 4 days: starts at
+  0, reaches the max, at most 5 ticks, no duplicate label); `DataTable.test.tsx` (default stays nowrap; `fit` is
+  `table-fixed` with wrapping headers and cells inside an `overflow-x-auto` container);
+  `UserDailyActivityTab.test.tsx` (fixed-layout table with the min width, all six headers incl. Visits, no
+  `w-full` / `min-w-` column, five fixed widths and none on Apps, wrapping cells and app lines, `+N more` and the
+  Visits link still there; an empty range has no min width and still shows its message and button); new
+  `userDailyColumns.test.ts` (adds the fixed widths up: Apps keeps at least 10rem at 54rem); `format.test.ts`
+  (`formatHoursMinutesShort`).
+
+**Next:** look at the tab in the running app at 1280 px, 1536 px (identity card beside the tabs) and 360 px, both
+themes; then B10-5 (one-day view).
+
+---
+
 ## 2026-11-24 — Person 360 daily depth, step 4: migration 0014 and the visit-steps guard (ADR 0017)
 
 Contract + migration + one service guard. The migration file is written only; deploy applies it (migrate before

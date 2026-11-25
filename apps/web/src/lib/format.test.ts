@@ -13,6 +13,7 @@ import {
   formatDuration,
   formatElapsed,
   formatHoursMinutes,
+  formatHoursMinutesShort,
   formatInteger,
   formatOsName,
   formatPercent,
@@ -104,6 +105,16 @@ describe('person-page time formats', () => {
     expect(formatHoursMinutes(0)).toBe('0 min');
     expect(formatHoursMinutes(null)).toBe(EMPTY_VALUE);
     expect(formatHoursMinutes(-1)).toBe(EMPTY_VALUE);
+  });
+
+  it('prints the same hours and minutes in a short axis form', () => {
+    expect(formatHoursMinutesShort(0)).toBe('0');
+    expect(formatHoursMinutesShort(5 * 60_000)).toBe('5m');
+    expect(formatHoursMinutesShort(90 * 60_000)).toBe('1h 30m');
+    expect(formatHoursMinutesShort(6 * 3_600_000)).toBe('6h');
+    expect(formatHoursMinutesShort(59 * 60_000 + 40_000)).toBe('1h');
+    expect(formatHoursMinutesShort(null)).toBe(EMPTY_VALUE);
+    expect(formatHoursMinutesShort(-1)).toBe(EMPTY_VALUE);
   });
 
   it('prints IST clock times, offsets after midnight and calendar days', () => {

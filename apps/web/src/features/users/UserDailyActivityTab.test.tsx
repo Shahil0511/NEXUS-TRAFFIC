@@ -242,3 +242,57 @@ describe('AboutTheseNumbers', () => {
     expect(aboutTheseNumbersLines('day')).toContain(cap);
   });
 });
+
+describe('UserDailyActivityTab — the table fits its container', () => {
+  it('is a fixed-layout table with wrapping cells, fixed column widths and a Visits column', async () => {
+    await renderTab([dayWithApps(4)]);
+    const table = await screen.findByRole('table', { name: 'Daily activity' });
+    await within(table).findByRole('link', { name: 'a-app' });
+    // Its width is the container's, never its content's; below the min width it scrolls in place.
+    expect(table).toHaveClass('table-fixed', 'w-full', 'min-w-[54rem]');
+    expect(table.parentElement).toHaveClass('overflow-x-auto');
+
+    const headers = within(table).getAllByRole('columnheader');
+    expect(headers.map((header) => header.textContent)).toEqual([
+      'Date',
+      'First – last activity (IST)',
+      'Tab visible time',
+      'Apps',
+      'Pages and calls',
+      'Visits',
+    ]);
+    for (const header of headers) {
+      expect(header).toHaveClass('whitespace-normal');
+      // A full-width or min-width column made the auto table wider than the page.
+      expect(header.className).not.toMatch(/\bw-full\b|\bmin-w-/);
+    }
+    const [date, span, tabVisible, apps, counts, visits] = headers as HTMLElement[];
+    for (const fixed of [date, span, tabVisible, counts, visits]) {
+      expect(fixed?.className).toMatch(/\bw-\d+\b/);
+    }
+    // Apps has no width: it takes what is left, and its lines wrap instead of widening it.
+    expect(apps?.className).not.toMatch(/\bw-/);
+
+    const row = within(table).getAllByRole('row')[1] as HTMLElement;
+    for (const cell of within(row).getAllByRole('cell')) {
+      expect(cell).toHaveClass('whitespace-normal');
+    }
+    const lines = row.querySelectorAll('[data-slot="day-app-line"]');
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line).toHaveClass('flex-wrap', 'min-w-0');
+      expect(line).not.toHaveClass('whitespace-nowrap');
+    }
+    expect(within(row).getByRole('button', { name: '+1 more' })).toBeInTheDocument();
+    expect(within(row).getByRole('link', { name: /^1 visit on / })).toBeInTheDocument();
+  });
+
+  it('keeps an empty range at the panel width so its message and action stay in view', async () => {
+    await renderTab([]);
+    expect(await screen.findByText('No activity in this range')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'Daily activity' });
+    expect(table).toHaveClass('table-fixed', 'w-full');
+    expect(table).not.toHaveClass('min-w-[54rem]');
+    expect(within(table).getByRole('button', { name: /Show the last/ })).toBeInTheDocument();
+  });
+});

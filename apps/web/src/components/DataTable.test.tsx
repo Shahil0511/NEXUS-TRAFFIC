@@ -55,3 +55,40 @@ describe('DataTable column hints', () => {
     expect(screen.queryByRole('button', { name: 'What is Route?' })).not.toBeInTheDocument();
   });
 });
+
+describe('DataTable layout', () => {
+  it('keeps the default table sized by its one-line content', () => {
+    render(
+      <DataTable
+        caption="Routes"
+        columns={COLUMNS}
+        rows={[{ id: '/a', p95: 1 }]}
+        rowKey={(row) => row.id}
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Routes' });
+    expect(table).not.toHaveClass('table-fixed');
+    expect(screen.getByRole('cell', { name: '/a' })).toHaveClass('whitespace-nowrap');
+  });
+
+  it("'fit' fixes the table to its container and lets headers and cells wrap", () => {
+    render(
+      <DataTable
+        caption="Routes"
+        columns={COLUMNS}
+        rows={[{ id: '/a', p95: 1 }]}
+        rowKey={(row) => row.id}
+        layout="fit"
+        tableClassName="min-w-[40rem]"
+      />,
+    );
+    const table = screen.getByRole('table', { name: 'Routes' });
+    expect(table).toHaveClass('table-fixed', 'w-full', 'min-w-[40rem]');
+    // A wider-than-container table scrolls inside its own box, never the page.
+    expect(table.parentElement).toHaveClass('overflow-x-auto');
+    for (const cell of [...screen.getAllByRole('columnheader'), ...screen.getAllByRole('cell')]) {
+      expect(cell).toHaveClass('whitespace-normal');
+      expect(cell).not.toHaveClass('whitespace-nowrap');
+    }
+  });
+});

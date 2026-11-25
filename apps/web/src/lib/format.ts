@@ -228,12 +228,31 @@ const MINUTES_PER_HOUR = 60;
  */
 export function formatHoursMinutes(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return EMPTY_VALUE;
-  const totalMinutes = Math.round(ms / MS_PER_MINUTE);
-  if (totalMinutes === 0) return ms > 0 ? '< 1 min' : '0 min';
-  const hours = Math.floor(totalMinutes / MINUTES_PER_HOUR);
-  const minutes = totalMinutes % MINUTES_PER_HOUR;
+  const { hours, minutes } = splitHoursMinutes(ms);
+  if (hours === 0 && minutes === 0) return ms > 0 ? '< 1 min' : '0 min';
   if (hours === 0) return `${minutes} min`;
   return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
+
+/**
+ * The same length of time, short enough for a chart axis: 5_400_000 → "1h 30m", 300_000 → "5m",
+ * 21_600_000 → "6h", 0 → "0". Rounded to the nearest minute like formatHoursMinutes, so an axis
+ * tick and the tooltip of a bar at that height name the same hours and minutes.
+ */
+export function formatHoursMinutesShort(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return EMPTY_VALUE;
+  const { hours, minutes } = splitHoursMinutes(ms);
+  if (hours === 0) return minutes === 0 ? '0' : `${minutes}m`;
+  return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+}
+
+/** ms → whole hours and the minutes left over, rounded to the nearest minute (5_400_000 → 1, 30). */
+function splitHoursMinutes(ms: number): { hours: number; minutes: number } {
+  const totalMinutes = Math.round(ms / MS_PER_MINUTE);
+  return {
+    hours: Math.floor(totalMinutes / MINUTES_PER_HOUR),
+    minutes: totalMinutes % MINUTES_PER_HOUR,
+  };
 }
 
 const clockFormat = new Intl.DateTimeFormat(LOCALE, {
