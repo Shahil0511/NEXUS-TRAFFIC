@@ -1,7 +1,7 @@
 'use client';
 
 import type { EndpointDetailDto } from '@nexus/shared';
-import { Activity, Gauge, Hourglass, TriangleAlert, Users, Zap } from 'lucide-react';
+import { Activity, Gauge, Hourglass, TriangleAlert, Waypoints } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, type ReactNode } from 'react';
 
@@ -16,33 +16,33 @@ import { TrafficChart } from '@/components/charts/TrafficChart';
 import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { KpiCard } from '@/components/KpiCard';
+import { FactSheet, type Fact } from '@/components/FactSheet';
+import { HeadlineSentence } from '@/components/HeadlineSentence';
 import { MethodBadge } from '@/components/MethodBadge';
 import { PageHeader } from '@/components/PageHeader';
 import { ChartSkeleton, ListSkeleton, Panel } from '@/components/Panel';
+import { ReportSheet, ReportSubsection } from '@/components/ReportSheet';
 import { requestSampleColumns } from '@/components/requestSampleColumns';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WhoUsesIt } from '@/components/WhoUsesIt';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
-import {
-  formatDuration,
-  formatInteger,
-  formatPercent,
-  formatWindowCaption,
-  perGrain,
-} from '@/lib/format';
+import { formatDuration, formatInteger, formatWindowCaption, perGrain } from '@/lib/format';
 import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
 import { useDocumentTitle } from '@/lib/useDocumentTitle';
 
+import { endpointHeadline, failedCallsOf, formatFailedShare } from './endpointHeadline';
 import { useEndpointDetail } from './useEndpointDetail';
 
 /**
- * One API route: its KPIs, request / error / latency charts, status codes and slowest calls.
- * Who calls it and the slowest calls are for admins only (null from the API otherwise, ADR 0019).
- * Reached ONLY through PAGES.endpointDetail(endpointId) — the opaque id, never the template.
+ * One API route as a report sheet (components/ReportSheet): a sentence with its calls, failures
+ * and speed, a facts strip, API calls over time, its status codes beside who uses it, and a
+ * "Speed and failures" row (latency | errors), the row that sets it apart from the page and
+ * feature sheets. The slowest calls follow the sheet. Names and single requests are for admins
+ * only (the API sends topUsers / slowest null to everyone else, ADR 0019). Reached ONLY through
+ * PAGES.endpointDetail(endpointId) — the opaque id, never the template.
  */
 export function EndpointDetailView({ endpointId }: { endpointId: string }) {
   const { filters: globalFilters } = useGlobalFilters();
@@ -87,25 +87,20 @@ export function EndpointDetailView({ endpointId }: { endpointId: string }) {
   );
 }
 
+/** The sheet's shape while loading: header, sentence, facts line, chart and two columns. */
 function DetailSkeleton({ eyebrow }: { eyebrow: ReactNode }) {
   return (
     <div className="space-y-6" aria-busy="true">
       <div className="space-y-2">
         {eyebrow}
-        <Skeleton className="h-7 w-80" />
+        <Skeleton className="h-7 w-80 max-w-full" />
+        <Skeleton className="h-6 w-full max-w-2xl" />
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6">
-        {Array.from({ length: 6 }, (_, index) => (
-          <KpiCard key={index} label="" value="" loading />
-        ))}
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title={METRIC_COPY.requests.label} className="lg:col-span-2">
-          <ChartSkeleton />
-        </Panel>
-        <Panel title="Status codes">
-          <ListSkeleton />
-        </Panel>
+      <Skeleton className="h-11 w-full" />
+      <ChartSkeleton />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ListSkeleton />
+        <ListSkeleton />
       </div>
     </div>
   );
@@ -120,9 +115,48 @@ interface DetailContentProps {
   eyebrow: ReactNode;
 }
 
+/** The six numbers of the route with their definitions (the old KPI cards, as one strip). */
+function endpointFacts(detail: EndpointDetailDto): Fact[] {
+  const { endpoint } = detail;
+  return [
+    {
+      label: METRIC_COPY.requests.label,
+      value: formatInteger(endpoint.calls),
+      info: metricInfo('requests'),
+    },
+    {
+      label: METRIC_COPY.errorRate.label,
+      value: formatFailedShare(endpoint),
+      note: `${formatInteger(endpoint.errors4xx)} 4xx · ${formatInteger(endpoint.errors5xx)} 5xx`,
+      info: metricInfo('errorRate'),
+    },
+    {
+      label: 'People',
+      value: formatInteger(detail.uniqueUsers),
+      note: 'verified callers',
+      info: metricInfo('uniqueUsers'),
+    },
+    {
+      label: 'p50',
+      value: endpoint.p50Ms === null ? null : formatDuration(endpoint.p50Ms),
+      note: `avg ${formatDuration(endpoint.avgMs)}`,
+      info: metricInfo('p50'),
+    },
+    {
+      label: 'p95',
+      value: endpoint.p95Ms === null ? null : formatDuration(endpoint.p95Ms),
+      info: metricInfo('p95'),
+    },
+    {
+      label: 'p99',
+      value: endpoint.p99Ms === null ? null : formatDuration(endpoint.p99Ms),
+      info: metricInfo('p99'),
+    },
+  ];
+}
+
 function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
   const { endpoint, window } = detail;
-  const columns = useMemo(() => requestSampleColumns({ showRoute: false, linkQuery }), [linkQuery]);
   useDocumentTitle(`${endpoint.method} ${endpoint.routeTemplate}`);
   const failuresHref = withQuery(PAGES.errors(), {
     ...linkQuery,
@@ -140,8 +174,9 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
             <span>{formatWindowCaption(window)}</span>
           </span>
         }
+        headline={<HeadlineSentence parts={endpointHeadline(endpoint, detail.uniqueUsers)} />}
         actions={
-          endpoint.errors4xx + endpoint.errors5xx > 0 ? (
+          failedCallsOf(endpoint) > 0 ? (
             <Button asChild variant="outline">
               <Link href={failuresHref}>
                 <TriangleAlert aria-hidden="true" /> View failures
@@ -151,113 +186,103 @@ function DetailContent({ detail, linkQuery, eyebrow }: DetailContentProps) {
         }
       />
 
-      <section
-        aria-label="Request type metrics"
-        className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-6"
+      <ReportSheet
+        headlineFacts={<FactSheet ariaLabel="Request type facts" facts={endpointFacts(detail)} />}
+        chart={{
+          title: `${METRIC_COPY.requests.label} over time`,
+          icon: Activity,
+          description: `${METRIC_COPY.requests.label} ${perGrain(window.grain)}`,
+          content: <TrafficChart points={detail.timeseries} grain={window.grain} />,
+        }}
+        around={{
+          title: 'What happens around it',
+          icon: Waypoints,
+          description: 'How the route answered',
+          content: (
+            <ReportSubsection title="Status codes" description="Responses in this window">
+              {detail.statusBreakdown.length > 0 ? (
+                <StatusBreakdown items={detail.statusBreakdown} />
+              ) : (
+                <EmptyState className="py-6" title="No responses" />
+              )}
+            </ReportSubsection>
+          ),
+        }}
+        // Names for admins only; everyone reads the count (ADR 0019).
+        who={
+          <WhoUsesIt
+            count={detail.uniqueUsers}
+            users={detail.topUsers}
+            unit="calls"
+            ariaLabel="Who calls this request type"
+            linkQuery={linkQuery}
+            emptyTitle="No verified caller"
+          />
+        }
+        second={{
+          title: 'Speed and failures',
+          icon: Gauge,
+          description: 'How fast it answers and how often it fails',
+          content: <SpeedAndFailures detail={detail} />,
+        }}
+        after={<SlowestCalls detail={detail} linkQuery={linkQuery} />}
+      />
+    </div>
+  );
+}
+
+/** Latency | Errors, side by side from lg (each under its own h3). */
+function SpeedAndFailures({ detail }: { detail: EndpointDetailDto }) {
+  const { endpoint, window } = detail;
+  return (
+    <div className="grid min-w-0 gap-6 lg:grid-cols-2">
+      <ReportSubsection
+        title="Latency"
+        description={`${METRIC_COPY.p95.label} ${perGrain(window.grain)}`}
       >
-        <KpiCard
-          label={METRIC_COPY.requests.label}
-          icon={Activity}
-          value={formatInteger(endpoint.calls)}
-          info={metricInfo('requests')}
-        />
-        <KpiCard
-          label="Error rate"
-          icon={TriangleAlert}
-          value={formatPercent(endpoint.errorRate)}
-          hint={`${formatInteger(endpoint.errors4xx)} 4xx · ${formatInteger(endpoint.errors5xx)} 5xx`}
-          info={metricInfo('errorRate')}
-        />
-        <KpiCard
-          label="Users"
-          icon={Users}
-          value={formatInteger(detail.uniqueUsers)}
-          hint="verified callers"
-          info={metricInfo('uniqueUsers')}
-        />
-        <KpiCard
-          label="p50"
-          icon={Zap}
-          value={formatDuration(endpoint.p50Ms)}
-          hint={`avg ${formatDuration(endpoint.avgMs)}`}
-          info={metricInfo('p50')}
-        />
-        <KpiCard
-          label="p95"
-          icon={Gauge}
-          value={formatDuration(endpoint.p95Ms)}
-          info={metricInfo('p95')}
-        />
-        <KpiCard
-          label="p99"
-          icon={Hourglass}
-          value={formatDuration(endpoint.p99Ms)}
-          info={metricInfo('p99')}
-        />
-      </section>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel
-          title={METRIC_COPY.requests.label}
-          description={`${METRIC_COPY.requests.label} ${perGrain(window.grain)}`}
-          className="lg:col-span-2"
-        >
-          <TrafficChart points={detail.timeseries} grain={window.grain} />
-        </Panel>
-        {/* Names for admins only; everyone reads the count (ADR 0019). */}
-        <WhoUsesIt
-          title="Who calls it"
-          count={detail.uniqueUsers}
-          users={detail.topUsers}
-          unit="calls"
-          ariaLabel="Who calls it"
-          linkQuery={linkQuery}
-          emptyTitle="No verified caller"
-        />
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Panel title="Latency" description={`${METRIC_COPY.p95.label} ${perGrain(window.grain)}`}>
-          <LatencyChart points={detail.timeseries} grain={window.grain} />
-        </Panel>
-        <Panel
-          title="Errors"
-          description="Failed requests by class"
-          aside={<ChartLegend series={ERROR_SERIES} />}
-        >
-          {endpoint.errors4xx + endpoint.errors5xx > 0 ? (
+        <LatencyChart points={detail.timeseries} grain={window.grain} />
+      </ReportSubsection>
+      <ReportSubsection title="Errors" description="Failed requests by class">
+        {failedCallsOf(endpoint) > 0 ? (
+          <div className="min-w-0 space-y-3">
+            <ChartLegend series={ERROR_SERIES} />
             <ErrorsChart points={detail.timeseries} grain={window.grain} />
-          ) : (
-            <EmptyState title="No failures" description="Every call in this window succeeded." />
-          )}
-        </Panel>
-        <Panel title="Status codes" description="Responses in this window">
-          {detail.statusBreakdown.length > 0 ? (
-            <StatusBreakdown items={detail.statusBreakdown} />
-          ) : (
-            <EmptyState title="No responses" />
-          )}
-        </Panel>
-      </div>
-
-      <Panel
-        title="Slowest calls"
-        description="The longest requests in this window"
-        contentClassName={detail.slowest === null ? undefined : 'px-0 pb-0'}
-      >
-        {/* Single requests carry a person: admins only, the API sends null to others (ADR 0019). */}
-        {detail.slowest === null ? (
-          <AdminsOnlyNote>{REQUESTS_ADMINS_ONLY}</AdminsOnlyNote>
+          </div>
         ) : (
-          <DataTable
-            caption="Slowest calls"
-            columns={columns}
-            rows={detail.slowest}
-            rowKey={(row) => row.eventId}
-            empty={<EmptyState title="No calls recorded" />}
+          <EmptyState
+            className="py-6"
+            title="No failures"
+            description="Every call in this window succeeded."
           />
         )}
-      </Panel>
+      </ReportSubsection>
     </div>
+  );
+}
+
+/** The longest single requests: a table for admins, the lock note for everyone else. */
+function SlowestCalls({ detail, linkQuery }: { detail: EndpointDetailDto; linkQuery: LinkQuery }) {
+  const columns = useMemo(() => requestSampleColumns({ showRoute: false, linkQuery }), [linkQuery]);
+  return (
+    <Panel
+      title="Slowest calls"
+      icon={Hourglass}
+      description="The longest requests in this window"
+      className="min-w-0"
+      contentClassName={detail.slowest === null ? undefined : 'px-0 pb-0'}
+    >
+      {/* Single requests carry a person: admins only, the API sends null to others (ADR 0019). */}
+      {detail.slowest === null ? (
+        <AdminsOnlyNote>{REQUESTS_ADMINS_ONLY}</AdminsOnlyNote>
+      ) : (
+        <DataTable
+          caption="Slowest calls"
+          columns={columns}
+          rows={detail.slowest}
+          rowKey={(row) => row.eventId}
+          empty={<EmptyState title="No calls recorded" />}
+        />
+      )}
+    </Panel>
   );
 }

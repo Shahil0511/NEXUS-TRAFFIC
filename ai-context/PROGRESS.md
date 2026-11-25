@@ -18,6 +18,63 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Request type report sheet; one tab row for the three lists (B8-4)
+
+A request type's page is a report sheet like the page and feature pages, with its own "Speed and failures" row.
+Pages, Features and Request types share one tab row. Web and docs only: no contract, route, schema, migration or
+env change.
+
+**Done**
+- **Sentence:** `features/endpoints/endpointHeadline.ts` (pure): "Called {n} times by {n} verified people in this
+  range." + the failed share in red with "({4xx} refused, 4xx · {5xx} server errors, 5xx)", or "Nothing failed." +
+  "Half the calls answer within {p50}; 95 in 100 within {p95}." (left out without a p50; the p95 half left out
+  without a p95). Singulars ("1 time", "1 verified person", "1 server error"). `failedCallsOf` = 4xx + 5xx.
+- **Request type detail** (`features/endpoints/EndpointDetailView.tsx`) on `components/ReportSheet.tsx`: PageHeader
+  keeps breadcrumbs, the route template, MethodBadge + AppChip + window caption and "View failures" (only with
+  failures), plus the sentence. Facts strip: API calls / Error rate ("{4xx} 4xx · {5xx} 5xx") / People ("verified
+  callers") / p50 ("avg {avg}") / p95 / p99, each with its `metricInfo`; a missing percentile reads "not captured".
+  "API calls over time" (TrafficChart); "What happens around it" = Status codes (h3, StatusBreakdown or "No
+  responses") beside "Who uses it" (`WhoUsesIt`, unit calls, "No verified caller"); "Speed and failures" = Latency
+  (p95 per grain) | Errors (legend + ErrorsChart, or "No failures"), side by side from lg; then "Slowest calls"
+  (table for admins, "Only admins see single requests." otherwise). Skeleton of Skeleton blocks. Links stay
+  scoped to the route's own app. Left `KPI_CARD_ALLOW_LIST` (9 views remain).
+- **Tab row** (`features/pages/PagesToolsTabs.tsx`): Pages / Features / Request types (`PagesToolsTab` adds
+  `endpoints`; "Tools" now reads "Features"), nav "Pages, features and request types", icons FileText /
+  MousePointerClick / Waypoints. The row wraps (`flex min-h-8 max-w-full flex-wrap`, links `h-7 whitespace-nowrap`)
+  so it stays inside the hero at 360 px. `lib/nav.ts` unchanged (Request types keeps its own sidebar item).
+- **Request types list** (`features/endpoints/EndpointsView.tsx`): the tab row next to the search in the header
+  actions; the search is `w-full sm:w-72` (its own row on a phone). Sort, search and Load more unchanged; the
+  People column and the list sentence wait (the list DTO has no person count).
+- **Review fixes:** `formatFailedShare` (`endpointHeadline.ts`) shows "<0.1%" instead of "0.0%" when some call
+  failed but the share is under 0.05% (sentence and facts strip); the Error rate fact label comes from
+  `METRIC_COPY.errorRate.label`; `WhoUsesIt` lost its `title` prop (every object sheet reads "Who uses it", no
+  caller passed it any more).
+
+**Nothing lost:** request type KPIs (API calls, Error rate with 4xx / 5xx, Users, p50 with avg, p95, p99) →
+sentence + facts strip; API calls chart → wide chart; Who calls it → Who uses it (admins: same list; others:
+count + note); Latency, Errors → Speed and failures; Status codes → What happens around it; Slowest calls → after
+the sheet (admins), note for others; View failures → header action; the Pages / Tools switch → the three-tab row.
+
+**Tests:** `endpointHeadline.test.ts` (full sentence, bold parts, only the share red, "Nothing failed.", no speed
+without p50, p95 missing, singulars, "<0.1%" for a tiny share, `formatFailedShare`, `failedCallsOf`);
+`EndpointDetailView.test.tsx` (sheet order h2 / h3, sentence, facts with (i) and notes, missing percentiles read
+"not captured" with no avg note and no speed part, no card row, admin list vs viewer note for Who uses it and Slowest calls, no failures →
+no link, "No failures", "No responses", links scoped to the route's app, banned-word scans);
+`EndpointsView.test.tsx` (three tab links carrying the filters, `aria-current` on Request types, search kept,
+banned words); `PagesView.test.tsx` / `ToolsView.test.tsx` (new nav name, "Features" link, Request types link,
+banned words).
+
+**Docs:** 03-code-navigation (endpoints detail row, the Pages / Tools row with the tab row, the API Routes chain
+line); 05-conventions §5b (report sheet includes a request type); GLOSSARY ("report sheet" second row, "tool" →
+"Features" in the tab row).
+
+**Next:** B8-5 (Pages and Features lists reworked).
+
+**Known issues:** the browser check (1280 / 360 px, both themes, scroll to the PageEnd) is for after the push;
+layout was checked by reading the classes (the tab row wraps, the search takes its own row below sm, every sheet
+column has min-w-0, the slowest-calls table scrolls inside its card). The Request types list still has no People
+column or headline sentence (no user count in `EndpointStatsDto`).
+
 ## 2026-11-25 — Page and feature report sheets; people lists for admins only (B8-3, ADR 0019)
 
 A page's detail and a feature's detail read like a report: a sentence, a facts line, one wide chart, "What

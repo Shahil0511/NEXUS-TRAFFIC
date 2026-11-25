@@ -88,7 +88,7 @@ Split it: `parseApiKey()` (pure) → `ApiKeyVerifier.matches()` → `AppKeyAuthe
 - Numbers above a table go into one `HeadlineSentence` (`components/HeadlineSentence.tsx`, passed as the
   `PageHeader` `headline`; a pure builder returns its `SentencePart[]`), not a row of KPI cards.
   `apps/web/src/features/noKpiCardRows.test.ts` holds the allow-list of views that still import `KpiCard`; it
-  only shrinks (`DeltaPill` alone is fine anywhere). One object (a page, a feature) is a report sheet
+  only shrinks (`DeltaPill` alone is fine anywhere). One object (a page, a feature, a request type) is a report sheet
   (`components/ReportSheet.tsx`): the sentence, a `FactSheet` strip, one wide chart, two columns, one wide row.
 - People's names and single requests are for dashboard admins only on the object pages: the API sends `null`
   (`forAdmins`, `apps/api/src/domain/viewer.ts`, ADR 0019) and the view shows `components/WhoUsesIt.tsx` /

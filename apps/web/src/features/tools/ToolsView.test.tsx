@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
 import { TOOL_ID, TOOL_USAGE, WINDOW } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
@@ -25,11 +26,15 @@ describe('ToolsView', () => {
     expect(screen.getByRole('list', { name: 'Tools by distinct users' })).toHaveTextContent(
       'export-csv',
     );
-    const nav = screen.getByRole('navigation', { name: 'Pages and tools' });
-    expect(within(nav).getByRole('link', { name: 'Tools' })).toHaveAttribute(
+    const nav = screen.getByRole('navigation', { name: 'Pages, features and request types' });
+    expect(within(nav).getByRole('link', { name: 'Features' })).toHaveAttribute(
       'aria-current',
       'page',
     );
+    expect(within(nav).getByRole('link', { name: 'Request types' }).getAttribute('href')).toBe(
+      '/endpoints',
+    );
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
   });
 
   it('shows an empty state when no tool was used', async () => {

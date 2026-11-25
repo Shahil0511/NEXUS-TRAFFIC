@@ -4,8 +4,9 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { PAGE_STATS, WINDOW } from '@/test/fixtures';
 import { cappedListNote, FilterMatchCount, filterLoadedRows } from '@/components/LoadedRowsFilter';
+import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
+import { PAGE_STATS, WINDOW } from '@/test/fixtures';
 import { routeUrl, server } from '@/test/msw';
 import { renderWithProviders } from '@/test/render';
 
@@ -30,15 +31,19 @@ describe('PagesView', () => {
     expect(seen[0]?.get('app')).toBe('ebo-sales');
     expect(seen[0]?.get('range')).toBe('7d');
     expect(screen.getByRole('list', { name: 'Exit pages' })).toHaveTextContent('/orders/:id');
-    // The Pages / Tools switch keeps the filters.
-    const nav = screen.getByRole('navigation', { name: 'Pages and tools' });
+    // The Pages / Features / Request types tab row keeps the filters.
+    const nav = screen.getByRole('navigation', { name: 'Pages, features and request types' });
     expect(within(nav).getByRole('link', { name: 'Pages' })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    expect(within(nav).getByRole('link', { name: 'Tools' }).getAttribute('href')).toBe(
+    expect(within(nav).getByRole('link', { name: 'Features' }).getAttribute('href')).toBe(
       '/tools?app=ebo-sales&range=7d',
     );
+    expect(within(nav).getByRole('link', { name: 'Request types' }).getAttribute('href')).toBe(
+      '/endpoints?app=ebo-sales&range=7d',
+    );
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
   });
 
   it('shows empty states when the window has no page views', async () => {

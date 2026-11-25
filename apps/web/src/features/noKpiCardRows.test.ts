@@ -18,7 +18,6 @@ const FEATURES_DIR = path.resolve(__dirname);
  */
 const KPI_CARD_ALLOW_LIST = [
   'features/applications/ApplicationDetailView.tsx',
-  'features/endpoints/EndpointDetailView.tsx',
   'features/errors/ErrorsView.tsx',
   'features/journeys/SessionDetailView.tsx',
   'features/live/LiveView.tsx',

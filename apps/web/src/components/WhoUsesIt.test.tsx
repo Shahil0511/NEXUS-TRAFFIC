@@ -55,13 +55,12 @@ describe('WhoUsesIt', () => {
         count={0}
         users={[]}
         unit="calls"
-        ariaLabel="Who calls it"
+        ariaLabel="Who calls this request type"
         linkQuery={{}}
         emptyTitle="No verified caller"
-        title="Who calls it"
       />,
     );
-    expect(screen.getByRole('heading', { name: 'Who calls it' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Who uses it' })).toBeInTheDocument();
     expect(screen.getByText('0 verified people')).toBeInTheDocument();
     expect(screen.getByText('No verified caller')).toBeInTheDocument();
     expect(screen.queryByText(WHO_ADMINS_ONLY)).not.toBeInTheDocument();

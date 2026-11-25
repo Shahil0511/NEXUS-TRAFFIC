@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { PagesToolsTabs } from '@/features/pages/PagesToolsTabs';
 import { formatDateTime, formatDuration, formatInteger, formatPercent } from '@/lib/format';
 import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 import { PAGES, withQuery } from '@/lib/pages';
@@ -133,7 +134,7 @@ export function endpointColumns(
 /**
  * The API Routes page: every (app, method, route template) with calls, error rate and latency
  * percentiles. Sorting is server-side (header click → URL → new query), search is debounced,
- * pages load on demand.
+ * pages load on demand. The tab row in the header switches to the Pages and Features lists.
  */
 export function EndpointsView() {
   const { filters } = useGlobalFilters();
@@ -165,20 +166,10 @@ export function EndpointsView() {
         title="Request types"
         description="Each row is one API route: its API calls, errors and latency (streams excluded from percentiles)."
         actions={
-          <label className="relative block w-72">
-            <span className="sr-only">Search request types</span>
-            <Search
-              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <Input
-              type="search"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Search route templates…"
-              className="pl-8"
-            />
-          </label>
+          <>
+            <PagesToolsTabs active="endpoints" />
+            <SearchBox value={draft} onChange={setDraft} />
+          </>
         }
       />
       <Card className="overflow-hidden">
@@ -219,5 +210,28 @@ export function EndpointsView() {
         )}
       </Card>
     </div>
+  );
+}
+
+/**
+ * WHY: the header holds the tab row AND the search, so the search takes the full width (its own
+ * row under the tabs) on a phone and a fixed 18 rem from sm. The view debounces what is typed.
+ */
+function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="relative block w-full sm:w-72">
+      <span className="sr-only">Search request types</span>
+      <Search
+        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <Input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Search route templates…"
+        className="pl-8"
+      />
+    </label>
   );
 }

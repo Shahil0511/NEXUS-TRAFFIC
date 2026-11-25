@@ -17,8 +17,6 @@ export interface WhoUsesItProps {
   /** The current filters, carried by each person link. */
   linkQuery: Readonly<Record<string, string | undefined>>;
   emptyTitle?: string;
-  /** The panel title; "Who uses it" unless the object is called, not used ("Who calls it"). */
-  title?: string;
 }
 
 /**
@@ -34,11 +32,14 @@ export function WhoUsesIt({
   ariaLabel,
   linkQuery,
   emptyTitle,
-  title = 'Who uses it',
 }: WhoUsesItProps) {
   const hasList = users !== null && users.length > 0;
   return (
-    <Panel title={title} icon={Users} description={hasList ? `Most ${unit} first` : undefined}>
+    <Panel
+      title="Who uses it"
+      icon={Users}
+      description={hasList ? `Most ${unit} first` : undefined}
+    >
       <div className="space-y-4">
         <p className="text-sm">
           <strong className="font-heading text-lg font-semibold tabular">

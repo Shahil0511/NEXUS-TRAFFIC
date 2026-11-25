@@ -26,6 +26,11 @@ function recordDetailCalls(): URLSearchParams[] {
   return calls;
 }
 
+/** The h2 panel titles in page order (the report sheet's sections). */
+function panelTitles(): string[] {
+  return screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent ?? '');
+}
+
 describe('EndpointDetailView', () => {
   it("scopes every link to the route's own app, even under another app's filter", async () => {
     const calls = recordDetailCalls();
@@ -54,7 +59,7 @@ describe('EndpointDetailView', () => {
       'href',
       `${PAGES.errors()}?app=ebo-sales&range=7d&endpointId=${ENDPOINT_ID}`,
     );
-    const callers = screen.getByRole('list', { name: 'Who calls it' });
+    const callers = screen.getByRole('list', { name: 'Who calls this request type' });
     expect(await within(callers).findByRole('link', { name: 'buyer@libas.in' })).toHaveAttribute(
       'href',
       `/users/${USER_KEY}?app=ebo-sales&range=7d`,
@@ -95,11 +100,11 @@ describe('EndpointDetailView', () => {
       await screen.findByRole('heading', { level: 1, name: '/api/orders/:id' }),
     ).toBeInTheDocument();
     const callers = screen
-      .getByRole('heading', { level: 2, name: 'Who calls it' })
+      .getByRole('heading', { level: 2, name: 'Who uses it' })
       .closest<HTMLElement>('[aria-labelledby]')!;
     expect(within(callers).getByText('3 verified people')).toBeInTheDocument();
     expect(within(callers).getByText(WHO_ADMINS_ONLY)).toBeInTheDocument();
-    expect(screen.queryByRole('list', { name: 'Who calls it' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Who calls this request type' })).toBeNull();
     const slowest = screen
       .getByRole('heading', { level: 2, name: 'Slowest calls' })
       .closest<HTMLElement>('[aria-labelledby]')!;
@@ -112,12 +117,105 @@ describe('EndpointDetailView', () => {
   it('shows an admin the callers, most calls first, and the slowest calls table', async () => {
     recordDetailCalls();
     renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
-    const callers = await screen.findByRole('list', { name: 'Who calls it' });
+    const callers = await screen.findByRole('list', { name: 'Who calls this request type' });
     expect(
       await within(callers).findByRole('link', { name: 'buyer@libas.in' }),
     ).toBeInTheDocument();
     expect(screen.getByText('Most calls first')).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Slowest calls' })).toBeInTheDocument();
     expect(screen.queryByText(REQUESTS_ADMINS_ONLY)).toBeNull();
+    expect(screen.queryByText(WHO_ADMINS_ONLY)).toBeNull();
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
+  it('reads as a report sheet: sentence, facts, chart, around | who, speed and failures, then the slowest calls', async () => {
+    recordDetailCalls();
+    renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/api/orders/:id' });
+
+    const sentence = screen.getByText(/^Called/).closest('p')!;
+    expect(sentence).toHaveTextContent(
+      'Called 1,200 times by 3 verified people in this range. 1.3% failed (12 refused, 4xx · 3 server errors, 5xx). Half the calls answer within 80 ms; 95 in 100 within 420 ms.',
+    );
+
+    const facts = screen.getByLabelText('Request type facts');
+    const labels = ['API calls', 'Error rate', 'People', 'p50', 'p95', 'p99'];
+    expect(
+      within(facts)
+        .getAllByRole('term')
+        .map((term) => term.textContent),
+    ).toEqual(labels);
+    for (const label of labels) {
+      expect(within(facts).getByRole('button', { name: `What is ${label}?` })).toBeInTheDocument();
+    }
+    expect(within(facts).getByText('12 4xx · 3 5xx')).toBeInTheDocument();
+    expect(within(facts).getByText('verified callers')).toBeInTheDocument();
+    expect(within(facts).getByText('avg 120 ms')).toBeInTheDocument();
+    expect(within(facts).getByText('980 ms')).toBeInTheDocument();
+
+    expect(panelTitles()).toEqual([
+      'API calls over time',
+      'What happens around it',
+      'Who uses it',
+      'Speed and failures',
+      'Slowest calls',
+    ]);
+    expect(
+      screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent),
+    ).toEqual(['Status codes', 'Latency', 'Errors']);
+    expect(screen.getByRole('list', { name: 'Legend' })).toBeInTheDocument();
+    // No KPI card row any more.
+    expect(screen.queryByRole('region', { name: 'Request type metrics' })).toBeNull();
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+
+  it('reads "not captured" for missing percentiles, drops the avg note and the speed part', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.endpoints.detail), () =>
+        HttpResponse.json({
+          ...ENDPOINT_DETAIL,
+          endpoint: {
+            ...ENDPOINT_DETAIL.endpoint,
+            p50Ms: null,
+            p95Ms: null,
+            p99Ms: null,
+            avgMs: null,
+          },
+        }),
+      ),
+    );
+    renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/api/orders/:id' });
+
+    const facts = screen.getByLabelText('Request type facts');
+    expect(within(facts).getAllByText('not captured')).toHaveLength(3);
+    expect(within(facts).queryByText(/^avg/)).toBeNull();
+    const sentence = screen.getByText(/^Called/).closest('p')!;
+    expect(sentence).toHaveTextContent(
+      'Called 1,200 times by 3 verified people in this range. 1.3% failed (12 refused, 4xx · 3 server errors, 5xx).',
+    );
+    expect(sentence.textContent).not.toContain('Half the calls');
+  });
+
+  it('says nothing failed, shows no failures link and no errors chart when every call succeeded', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.endpoints.detail), () =>
+        HttpResponse.json({
+          ...ENDPOINT_DETAIL,
+          endpoint: { ...ENDPOINT_DETAIL.endpoint, errors4xx: 0, errors5xx: 0, errorRate: 0 },
+          statusBreakdown: [],
+        }),
+      ),
+    );
+    renderWithProviders(<EndpointDetailView endpointId={ENDPOINT_ID} />);
+    await screen.findByRole('heading', { level: 1, name: '/api/orders/:id' });
+
+    expect(screen.getByText(/^Called/).closest('p')).toHaveTextContent(
+      'Called 1,200 times by 3 verified people in this range. Nothing failed. Half the calls answer within 80 ms; 95 in 100 within 420 ms.',
+    );
+    expect(screen.queryByRole('link', { name: /view failures/i })).toBeNull();
+    expect(screen.getByText('No failures')).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Legend' })).toBeNull();
+    expect(screen.getByText('No responses')).toBeInTheDocument();
   });
 });
