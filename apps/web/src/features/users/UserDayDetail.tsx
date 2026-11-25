@@ -377,7 +377,7 @@ function DayBody({
       <Panel
         title="Visits on this day"
         icon={Waypoints}
-        description="Newest first. Visit steps opens the steps of one visit on this day."
+        description="Latest activity first. Visit steps opens the steps of one visit on this day."
         contentClassName="px-0 pb-0"
       >
         <UserDayVisitsTable visits={detail.visits} window={detail.window} linkQuery={linkQuery} />

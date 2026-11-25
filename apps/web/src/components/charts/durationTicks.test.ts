@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { formatHoursMinutesShort } from '@/lib/format';
 
+import { formatValueTick } from './DailyBarChart';
 import { durationTicks } from './durationTicks';
 
 const MINUTE = 60_000;
@@ -56,5 +57,18 @@ describe('durationTicks + formatHoursMinutesShort', () => {
     expect(ticks.at(-1)).toBeGreaterThanOrEqual(5 * 24 * HOUR);
     expect(ticks.length).toBeLessThanOrEqual(5);
     expectUnique(ticks.map(formatHoursMinutesShort));
+  });
+});
+
+describe('formatValueTick (DailyBarChart value axis)', () => {
+  it('keeps an hours-and-minutes label on one line with a no-break space', () => {
+    expect(formatValueTick(90 * 60_000)).toBe('1h\u00A030m');
+    expect(formatValueTick(90 * 60_000)).not.toContain(' ');
+  });
+
+  it('leaves single-unit labels as they are', () => {
+    expect(formatValueTick(0)).toBe('0');
+    expect(formatValueTick(5 * 60_000)).toBe('5m');
+    expect(formatValueTick(6 * 3_600_000)).toBe('6h');
   });
 });

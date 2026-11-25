@@ -8,16 +8,16 @@ import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
 
 type LinkQuery = Readonly<Record<string, string | undefined>>;
 
-/** Fixed widths of the 'fit' table; Page has none and takes the rest (21rem fixed). */
+/** Fixed widths of the 'fit' table; Page has none and takes the rest (23rem fixed). */
 const COLUMN_WIDTH = {
-  app: 'w-24',
+  app: 'w-32',
   clock: 'w-16',
   count: 'w-16',
   tabVisible: 'w-24',
 } as const;
 
 /** Half of the content width at 1280 px; below it the table scrolls in place. */
-export const DAY_HALF_TABLE_MIN_WIDTH_CLASS = 'min-w-[26rem]';
+export const DAY_HALF_TABLE_MIN_WIDTH_CLASS = 'min-w-[28rem]';
 
 function pageColumns(linkQuery: LinkQuery): readonly DataTableColumn<UserDayPageDto>[] {
   return [
@@ -36,7 +36,7 @@ function pageColumns(linkQuery: LinkQuery): readonly DataTableColumn<UserDayPage
           pageId={row.pageId}
           pathTemplate={row.pathTemplate}
           linkQuery={linkQuery}
-          className="break-all"
+          className="wrap-break-word"
         />
       ),
     },

@@ -10,9 +10,9 @@ import { DAY_HALF_TABLE_MIN_WIDTH_CLASS } from './UserDayPagesTable';
 
 type LinkQuery = Readonly<Record<string, string | undefined>>;
 
-/** Fixed widths of the 'fit' table; Feature has none and takes the rest (16rem fixed). */
+/** Fixed widths of the 'fit' table; Feature has none and takes the rest (18rem fixed). */
 const COLUMN_WIDTH = {
-  app: 'w-24',
+  app: 'w-32',
   clock: 'w-20',
   count: 'w-20',
 } as const;
@@ -34,7 +34,7 @@ function toolColumns(linkQuery: LinkQuery): readonly DataTableColumn<UserDayTool
           toolId={row.toolId}
           tool={row.tool}
           linkQuery={linkQuery}
-          className="break-all"
+          className="wrap-break-word"
         />
       ),
     },

@@ -2,6 +2,7 @@ import type { UserDayVisitDto } from '@nexus/shared';
 import Link from 'next/link';
 
 import { AppChip } from '@/components/AppChip';
+import { BreakableText } from '@/components/BreakableText';
 import { DataTable, type DataTableColumn } from '@/components/DataTable';
 import { EMPTY_VALUE, formatClockTime, formatHoursMinutes, formatInteger } from '@/lib/format';
 import { METRIC_COPY, metricInfo } from '@/lib/metricCopy';
@@ -13,17 +14,17 @@ type LinkQuery = Readonly<Record<string, string | undefined>>;
 const STEPS_LINK_CLASS =
   'rounded-sm font-medium text-link underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/60';
 
-/** Fixed widths of the 'fit' table; Entry → exit has none and takes the rest (39rem fixed). */
+/** Fixed widths of the 'fit' table; Entry → exit has none and takes the rest (40rem fixed). */
 const COLUMN_WIDTH = {
   clock: 'w-20',
-  app: 'w-28',
+  app: 'w-32',
   count: 'w-20',
   tabVisible: 'w-24',
   steps: 'w-24',
 } as const;
 
-/** 39rem of fixed columns + at least 11rem for Entry → exit; below it the table scrolls in place. */
-export const DAY_VISITS_TABLE_MIN_WIDTH_CLASS = 'min-w-[50rem]';
+/** 40rem of fixed columns + at least 11rem for Entry → exit; below it the table scrolls in place. */
+export const DAY_VISITS_TABLE_MIN_WIDTH_CLASS = 'min-w-[51rem]';
 
 function visitColumns(
   window: { from: string; to: string },
@@ -52,8 +53,9 @@ function visitColumns(
       id: 'path',
       header: 'Entry → exit',
       cell: (row) => (
-        <span className="font-mono text-xs break-all">
-          {row.entryPath ?? EMPTY_VALUE} → {row.exitPath ?? EMPTY_VALUE}
+        <span className="font-mono text-xs wrap-break-word">
+          <BreakableText text={row.entryPath ?? EMPTY_VALUE} /> →{' '}
+          <BreakableText text={row.exitPath ?? EMPTY_VALUE} />
         </span>
       ),
     },

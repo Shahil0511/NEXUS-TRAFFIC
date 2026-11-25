@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { PAGES, withQuery } from '@/lib/pages';
 import { cn } from '@/lib/utils';
 
+import { BreakableText } from './BreakableText';
+
 type LinkQuery = Readonly<Record<string, string | undefined>>;
 
 /**
@@ -35,8 +37,9 @@ export function PageLink({
       href={withQuery(PAGES.pageDetail(app, pageId), linkQuery)}
       className={cn('font-mono', ENTITY_LINK_CLASS, className)}
       title={pathTemplate}
+      aria-label={pathTemplate}
     >
-      {pathTemplate}
+      <BreakableText text={pathTemplate} />
     </Link>
   );
 }
@@ -60,8 +63,9 @@ export function ToolLink({
       href={withQuery(PAGES.toolDetail(app, toolId), linkQuery)}
       className={cn(ENTITY_LINK_CLASS, className)}
       title={tool}
+      aria-label={tool}
     >
-      {tool}
+      <BreakableText text={tool} />
     </Link>
   );
 }

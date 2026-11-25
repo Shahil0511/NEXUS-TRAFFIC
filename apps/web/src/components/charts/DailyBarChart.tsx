@@ -32,6 +32,15 @@ const END_RADIUS: [number, number, number, number] = [3, 3, 0, 0];
 const VALUE_AXIS_WIDTH = 52;
 
 /**
+ * WHY: recharts wraps a tick label at its spaces when the label is wider than its measured room,
+ * so "1h 30m" was drawn as "1h" over "30m" and read like a second "1h". A no-break space keeps
+ * the label on one line; it looks the same as a space.
+ */
+export function formatValueTick(ms: number): string {
+  return formatHoursMinutesShort(ms).replaceAll(' ', ' ');
+}
+
+/**
  * WHY: a length of time per IST day (one person's tab visible time) as plain vertical bars, one
  * per day, in ONE data colour. There is deliberately no average, target or reference line: the
  * chart shows what happened on each day, not how a day compares with a goal. The value axis has
@@ -70,7 +79,7 @@ export function DailyBarChart<P extends DailyBarPoint>({
             ticks={ticks}
             domain={[0, ticks.at(-1) ?? 0]}
             interval={0}
-            tickFormatter={formatHoursMinutesShort}
+            tickFormatter={formatValueTick}
           />
           <Tooltip
             cursor={{ fill: CHART_COLORS.cursor }}

@@ -18,6 +18,42 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Person 360 daily depth: fixes from the live check after the deploy of steps 1–7
+
+Web only; no contract, API or migration change. The owner pushed cc0ea41..5268f73. Production health was
+`ok` and `schemaCurrent`, with no console errors. A Chrome check at a 1536 px viewport confirmed these:
+- The Daily activity table fits its 905 px box with no sideways scroll, and Visits is visible.
+- The one-day view, Visit steps and the access-log parts "One day" and "Visit steps" work.
+- No pattern request is sent while the flag is off.
+- The People headers read First / Last activity.
+
+**Fixed**
+- **Chart value axis:** recharts wrapped "1h 30m" at its space, so it showed as "1h" over "30m" and looked
+  like a second "1h". `DailyBarChart` now formats ticks with `formatValueTick`, which joins them with a
+  no-break space.
+- **Mid-word breaks in the one-day tables:** paths and feature names were split mid-word ("/leaderboar
+  d/regions"). A new `components/BreakableText.tsx` puts a `<wbr>` after each `/ . - _`, and `PageLink` and
+  `ToolLink` use it. Those two links now set an `aria-label` with the full name, because some name
+  computations read a `<wbr>` as a space. The cells use `wrap-break-word` instead of `break-all`.
+- **Cut-off app chips:** "nexus-port…" and "ebo-lead…" were cut off. The App column of the day Pages,
+  Features and Visits tables is now w-32. Minimum widths: half tables `min-w-[28rem]`, visits
+  `min-w-[51rem]`.
+- **Visits copy:** the Visits list on a day said "Newest first", but it is ordered by last activity. It now
+  says "Latest activity first".
+
+**Tests:** `BreakableText.test.tsx` (new) and `formatValueTick` cases in `durationTicks.test.ts`.
+
+**Next**
+- Check the 1280 px and 360 px layouts in a real window. The Chrome window was maximised, so only 1536 px
+  was checked.
+- The owner's production `EXPLAIN ANALYZE` for `users.pattern` is still needed before the flag is turned on.
+- After that, option 2: the visit story (B4).
+
+**Known:** many visits on a day show "— → —" with 0 page views. These are sessions with feature uses or API
+calls but no page view. That comes from the data, not from this view.
+
+---
+
 ## 2026-11-25 — Person 360 daily depth, step 7: the People list sorts by time only (ADR 0017)
 
 Contract, API and web; no migration, no new route. Default of the open question (the owner can veto it).
