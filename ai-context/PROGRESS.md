@@ -18,6 +18,57 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — Apps list: headline sentence and Data health marks (B8-1)
+
+The Apps page loses its row of four KPI cards; the four facts become one sentence in the page hero, and every
+app row starts with a Data health mark. Web only: no contract, API or migration change.
+
+**Done**
+- **Shared pieces (reused by the next B8 steps):** `components/HeadlineSentence.tsx` (`SentencePart`: plain text,
+  or a bold number with an optional `href`, status `tone` and `info` tip beside it, outside the link);
+  `PageHeader` gets an optional `headline` slot under the description (a `div`, so no `p` in `p`);
+  `components/HealthMark.tsx` (`CheckState` pass / warn / fail; `badge` with a visible label, `dot` with the
+  label as screen-reader text); `features/integration/healthMark.ts` (`healthMarkOf`: fail = disabled app or a
+  warning whose `WARNING_COPY` tone is red, warn = not healthy or any other warning, else pass;
+  `HEALTH_MARK_COPY`).
+- **Apps page:** `applications/appsHeadline.ts` now holds `FAILING_ERROR_RATE` and `totalsOf` (moved out of
+  the view) and builds the sentence: apps registered, "N of M" sent data (opens Data health, same info tip),
+  the API calls total (opens Request types with the filters, same tip), and how many apps had an error rate of
+  5 % or more (opens Problems with the filters, red only when there are some, the old card's tip). Singular /
+  plural handled; with no apps it leads with "No apps registered yet." and keeps the rest (0 of 0, 0 API calls,
+  no app failing) so the three links and info tips stay. A toned linked number keeps its status colour on
+  hover and focus (red stays red; underline marks the link). A skeleton line shows while loading, nothing on
+  error.
+- **Data health marks:** the view calls `useIntegrationHealth()` (open to every viewer) and maps slug →
+  `healthMarkOf`; `appTrafficColumns` takes a 4th parameter `healthOf` and puts a `dot` mark on the
+  bottom-right corner of the initials tile, inside the existing row link ("Data health: Healthy / Needs
+  attention / Action needed" for screen readers). The mark is Data health now (last 24 h), not the range; while
+  it loads or if its read fails the table renders without marks. The hook's query key is shared with the
+  Integration page (one cache entry, one 60 s poll). Every column, change pill, online-now cell,
+  "no data" badge and the Register-an-app empty state are unchanged (the "Tool uses" header keeps its name in
+  this step).
+- **KPI card guard:** new `features/noKpiCardRows.test.ts` scans `features/` for views importing `KpiCard`
+  (`DeltaPill` / `DeltaPolarity` alone do not count; alias or relative specifier, optional `.tsx`, re-exports
+  too) against a sorted allow-list of 13 views that only shrinks; `ApplicationsView.tsx` is not on it.
+
+**Tests:** `HeadlineSentence.test.tsx` (one paragraph, link href, tone class, no hover/focus violet on a toned
+link, info tip outside the link),
+`PageHeader.test.tsx` (headline under the title, not inside a paragraph), `HealthMark.test.tsx` (label in both
+variants, icon colours), `healthMark.test.ts` (healthy, stale, never, amber `private_ips`, red `exposed_key`,
+disabled), `appsHeadline.test.ts` (zero apps keeps links and tips, one app, failing 0 vs 2, hrefs carry the filters, `totalsOf`),
+`appTrafficColumns.test.ts` (mark inside the row link, none when unknown), `ApplicationsView.test.tsx` (no
+Totals region or Registered apps card, the sentence and its three links, each row's mark, no mark without an
+entry, a 500 from the health read — awaited — still renders the table, banned-word scan),
+`noKpiCardRows.test.ts` (the import parser on alias, relative, `.tsx`, re-export and DeltaPill-only sources).
+
+**Docs:** 03-code-navigation applications row; 05-conventions §5b (headline sentence instead of KPI cards, the
+shrinking allow-list).
+
+**Next:** B8-2. Browser check after the push: /applications at 1280 and 360 px, both themes (the sentence wraps,
+the table scrolls only inside its card, the mark is readable on the tile), scroll to "End of Apps".
+
+---
+
 ## 2026-11-25 — People list: count sorts restored after the owner's veto (ADR 0018)
 
 The owner vetoed B10-7 (ADR 0017 point 10): the People list must sort by its count columns again. Forward

@@ -44,6 +44,18 @@ describe('PageHeader', () => {
     expect(heading).toHaveClass('break-words');
   });
 
+  it('renders a headline under the title, outside the description paragraph', () => {
+    render(
+      <PageHeader title="Apps" description="Last 7 days" headline={<p>10 apps registered.</p>} />,
+    );
+    const heading = screen.getByRole('heading', { level: 1, name: 'Apps' });
+    const headline = screen.getByText('10 apps registered.');
+    expect(
+      heading.compareDocumentPosition(headline) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(headline.parentElement?.closest('p')).toBeNull();
+  });
+
   it('shows neither on a page outside the navigation', () => {
     pathname.current = '/somewhere-else';
     const { container } = render(<PageHeader title="Elsewhere" />);

@@ -1,44 +1,41 @@
 'use client';
 
-import type { AppTrafficDto } from '@nexus/shared';
-import { Activity, Boxes, PlugZap, TriangleAlert, UserCheck } from 'lucide-react';
+import { UserCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useMemo } from 'react';
 
 import { DataTable } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { KpiCard } from '@/components/KpiCard';
+import { HeadlineSentence } from '@/components/HeadlineSentence';
+import type { CheckState } from '@/components/HealthMark';
 import { PageHeader } from '@/components/PageHeader';
 import { RelativeTime } from '@/components/RelativeTime';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { filterLinkQuery, useGlobalFilters } from '@/features/filters/useGlobalFilters';
+import { healthMarkOf } from '@/features/integration/healthMark';
+import { useIntegrationHealth } from '@/features/integration/useIntegrationHealth';
 import { onlineCountOf, useOnlineNow } from '@/features/live/useOnlineNow';
-import { formatCompact, formatInteger, formatWindowCaption } from '@/lib/format';
-import { metricInfo } from '@/lib/metricCopy';
-import { PAGES, withQuery } from '@/lib/pages';
+import { formatWindowCaption } from '@/lib/format';
+import { PAGES } from '@/lib/pages';
 
-import { appTrafficColumns, isSilent } from './appTrafficColumns';
+import { appsHeadline } from './appsHeadline';
+import { appTrafficColumns } from './appTrafficColumns';
 import { useAppTraffic } from './useAppTraffic';
-
-/** Totals across apps for the header cards (users are NOT summed: one person uses several apps). */
-function totalsOf(items: readonly AppTrafficDto[]) {
-  return {
-    active: items.filter((item) => !isSilent(item)).length,
-    requests: items.reduce((sum, item) => sum + (item.requests.value ?? 0), 0),
-    failing: items.filter((item) => (item.errorRate.value ?? 0) >= FAILING_ERROR_RATE).length,
-  };
-}
-
-/** Error rate (%) from which an app counts as "needs attention" in the header card. */
-const FAILING_ERROR_RATE = 5;
 
 /**
  * The Applications page: every registered app side by side — users, API calls, error rate,
  * latency, page views, sessions and tool uses, each with its change versus the previous window,
  * plus how many people are in each app right now (useOnlineNow, polled every 15 s).
  * Answers "how is each app doing and who uses it?"; a row opens the app's own page.
+ *
+ * WHY a headline sentence: the totals (apps, sending data, API calls, apps failing often) read as
+ * one sentence in the page hero (appsHeadline), not a KPI card row. WHY the health mark: each row
+ * starts with the app's Data health (useIntegrationHealth → healthMarkOf). That mark is Data
+ * health NOW (its last 24 h), independent of the page's range, like "Online now"; while it loads
+ * or if its read fails the table still renders, just without marks.
  */
 export function ApplicationsView() {
   const { filters } = useGlobalFilters();
@@ -47,18 +44,27 @@ export function ApplicationsView() {
   // Who is online right now, in every app (never range- or app-filtered), merged by slug.
   const online = useOnlineNow({});
   const linkQuery = useMemo(() => filterLinkQuery(filters), [filters]);
+  // Data health now (last 24 h, every app), merged by slug; never blocks the table.
+  const health = useIntegrationHealth();
   const onlineData = online.data;
+  const healthBySlug = useMemo(
+    () =>
+      new Map<string, CheckState>(
+        (health.data?.apps ?? []).map((entry) => [entry.app, healthMarkOf(entry)]),
+      ),
+    [health.data],
+  );
   const columns = useMemo(
     () =>
       appTrafficColumns(
         linkQuery,
         (iso) => <RelativeTime iso={iso} />,
         (app) => (onlineData ? onlineCountOf(onlineData, app) : undefined),
+        (app) => healthBySlug.get(app),
       ),
-    [linkQuery, onlineData],
+    [linkQuery, onlineData, healthBySlug],
   );
   const items = query.data?.items;
-  const totals = items ? totalsOf(items) : null;
 
   return (
     <div className="space-y-6">
@@ -69,40 +75,14 @@ export function ApplicationsView() {
             ? formatWindowCaption(query.data.window)
             : 'Every app side by side: who uses it, how much, and how well it works'
         }
+        headline={
+          items ? (
+            <HeadlineSentence parts={appsHeadline(items, linkQuery)} />
+          ) : query.isPending ? (
+            <Skeleton className="h-7 w-full max-w-xl" />
+          ) : null
+        }
       />
-      <section aria-label="Totals" className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard
-          label="Registered apps"
-          icon={Boxes}
-          loading={query.isPending}
-          value={formatInteger(items?.length)}
-        />
-        <KpiCard
-          label="Sending data"
-          icon={PlugZap}
-          loading={query.isPending}
-          value={totals ? `${totals.active} of ${items?.length ?? 0}` : ''}
-          hint="in this range"
-          info={metricInfo('sendingData')}
-          href={withQuery(PAGES.integration(), {})}
-        />
-        <KpiCard
-          label="API calls"
-          icon={Activity}
-          loading={query.isPending}
-          value={formatCompact(totals?.requests)}
-          info={metricInfo('requests')}
-          href={withQuery(PAGES.endpoints(), linkQuery)}
-        />
-        <KpiCard
-          label={`Error rate ≥ ${FAILING_ERROR_RATE} %`}
-          info={`Apps where ${FAILING_ERROR_RATE} % or more of the API calls failed in this range. ${metricInfo('errorRate')}`}
-          icon={TriangleAlert}
-          loading={query.isPending}
-          value={totals ? `${totals.failing} ${totals.failing === 1 ? 'app' : 'apps'}` : ''}
-          href={withQuery(PAGES.errors(), linkQuery)}
-        />
-      </section>
 
       <Card className="overflow-hidden" aria-busy={query.isFetching}>
         {query.isError ? (

@@ -14,6 +14,11 @@ export interface PageHeaderProps {
   actions?: ReactNode;
   /** Small line above the title (breadcrumb / back link). */
   eyebrow?: ReactNode;
+  /**
+   * The page's numbers in one sentence (components/HeadlineSentence), under the description —
+   * pages state their totals here instead of a KPI card row.
+   */
+  headline?: ReactNode;
 }
 
 /**
@@ -29,7 +34,7 @@ export interface PageHeaderProps {
  * pages only: a detail title is a long identifier (an email, a route, a page path) whose END tells
  * two items apart, so it gets the full width and wraps instead of being cut off.
  */
-export function PageHeader({ title, description, actions, eyebrow }: PageHeaderProps) {
+export function PageHeader({ title, description, actions, eyebrow, headline }: PageHeaderProps) {
   const pathname = usePathname() ?? '';
   const item = activeNavItem(pathname);
   const isListPage = item !== undefined && pathname === item.href;
@@ -72,6 +77,7 @@ export function PageHeader({ title, description, actions, eyebrow }: PageHeaderP
                 <p className="max-w-3xl text-sm text-foreground/90">{item.question}</p>
               ) : null}
               {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+              {headline ? <div className="pt-1">{headline}</div> : null}
             </div>
           </div>
           {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

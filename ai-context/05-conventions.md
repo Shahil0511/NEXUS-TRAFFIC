@@ -84,6 +84,10 @@ Split it: `parseApiKey()` (pure) → `ApiKeyVerifier.matches()` → `AppKeyAuthe
   (`metricInfo(key)`), surfaced through `KpiCard info`, `DataTable` column `hint` or `InfoTip`.
 - Entities link through the shared helpers only: `UserLink` (`components/ActorCell.tsx`), `AppChip`,
   `PageLink` / `ToolLink` (`components/EntityLinks.tsx`), route links via `PAGES.endpointDetail`.
+- Numbers above a table go into one `HeadlineSentence` (`components/HeadlineSentence.tsx`, passed as the
+  `PageHeader` `headline`; a pure builder returns its `SentencePart[]`), not a row of KPI cards.
+  `apps/web/src/features/noKpiCardRows.test.ts` holds the allow-list of views that still import `KpiCard`; it
+  only shrinks (`DeltaPill` alone is fine anywhere).
 - Detail pages open with `Breadcrumbs` (`components/Breadcrumbs.tsx`, emails masked); "no data in this
   window" states offer `WidenRangeButton`; ids people quote get a `CopyButton` / `CopyableText`.
 

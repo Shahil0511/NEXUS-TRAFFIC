@@ -9,7 +9,9 @@ import { qk } from '@/lib/query/keys';
 const HEALTH_REFETCH_MS = 60_000;
 
 /**
- * WHY: per-app ingest health for the Integration page (status, counters, SDKs, warnings).
+ * WHY: per-app ingest health (status, counters, SDKs, warnings) for the Integration page and the
+ * Apps list's Data health marks (healthMarkOf; @see features/applications/ApplicationsView.tsx).
+ * Both share one query key, so they reuse one cache entry and one 60 s poll.
  * Chain: api.integration.health → ROUTES.integration.health → IntegrationController.health →
  * IntegrationService.health → IngestHealthRepository.perApp.
  */

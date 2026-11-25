@@ -1,13 +1,15 @@
 import { ROUTES, type OnlineNowDto } from '@nexus/shared';
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { COVERAGE_WARN_PCT, METRIC_COPY } from '@/lib/metricCopy';
 import { collectRenderedText, findBannedWords } from '@/lib/neutralCopy';
+import { appHealth, INTEGRATION_HEALTH } from '@/test/adminFixtures';
 import {
   APP_TRAFFIC,
+  appTraffic,
   BREAKDOWN,
   DEVICE_RETURN,
   ENDPOINT_PAGE,
@@ -44,6 +46,8 @@ beforeEach(() => {
         app ? { ...ONLINE, apps: ONLINE.apps.filter((item) => item.app === app) } : ONLINE,
       );
     }),
+    // Data health per app (the list's marks): ebo-sales has a red warning, hr-portal never sent.
+    http.get(routeUrl(ROUTES.integration.health), () => HttpResponse.json(INTEGRATION_HEALTH)),
   );
 });
 
@@ -80,7 +84,118 @@ describe('ApplicationsView', () => {
     expect(seen[0]?.get('app')).toBeNull();
     expect(within(table).getByText('38')).toBeInTheDocument();
     expect(within(table).getByText('no data')).toBeInTheDocument();
-    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+    // The list's copy uses neutral words only.
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+});
+
+describe('ApplicationsView headline', () => {
+  it('states the totals in one sentence with the links of the old cards, and no card row', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.overview.apps), () =>
+        HttpResponse.json({
+          ...APP_TRAFFIC,
+          items: [
+            ...APP_TRAFFIC.items,
+            appTraffic({
+              app: 'crm',
+              displayName: 'CRM',
+              requests: { value: 1_000, previous: 900, deltaPct: 11.11 },
+              errorRate: { value: 7, previous: 2, deltaPct: 250 },
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<ApplicationsView />, { searchParams: '?range=7d&env=staging' });
+    const table = await screen.findByRole('table', { name: 'Applications' });
+    await within(table).findByRole('link', { name: /CRM/ });
+
+    expect(screen.queryByRole('region', { name: 'Totals' })).toBeNull();
+    expect(screen.queryByText('Registered apps')).toBeNull();
+
+    const sentence = screen.getByText(/apps registered\./).closest('p')!;
+    expect(sentence).toHaveTextContent(
+      '3 apps registered. 2 of 3 sent data in this range. 10K API calls in total. 1 app with an error rate of 5 % or more.',
+    );
+    // Data health (no range there), Request types and Problems, with the page's filters.
+    expect(within(sentence).getByRole('link', { name: '2 of 3' })).toHaveAttribute(
+      'href',
+      '/integration',
+    );
+    expect(within(sentence).getByRole('link', { name: '10K' })).toHaveAttribute(
+      'href',
+      '/endpoints?range=7d&env=staging',
+    );
+    const failing = within(sentence).getByRole('link', { name: '1 app' });
+    expect(failing).toHaveAttribute('href', '/errors?range=7d&env=staging');
+    expect(failing.closest('strong')).toHaveClass('text-destructive');
+    for (const label of ['Sending data', 'API calls', 'Error rate ≥ 5 %']) {
+      expect(
+        within(sentence).getByRole('button', { name: `What is ${label}?` }),
+      ).toBeInTheDocument();
+    }
+    expect(findBannedWords(collectRenderedText(document.body))).toEqual([]);
+  });
+});
+
+describe('ApplicationsView Data health marks', () => {
+  it('starts each row with its Data health mark; an app without an entry has none', async () => {
+    server.use(
+      http.get(routeUrl(ROUTES.overview.apps), () =>
+        HttpResponse.json({
+          ...APP_TRAFFIC,
+          items: [
+            ...APP_TRAFFIC.items,
+            appTraffic({ app: 'crm', displayName: 'CRM' }),
+            appTraffic({ app: 'stock', displayName: 'Stock' }),
+          ],
+        }),
+      ),
+      http.get(routeUrl(ROUTES.integration.health), () =>
+        HttpResponse.json({
+          ...INTEGRATION_HEALTH,
+          apps: [
+            ...INTEGRATION_HEALTH.apps,
+            appHealth({ app: 'crm', displayName: 'CRM', status: 'healthy', warnings: [] }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<ApplicationsView />);
+    const table = await screen.findByRole('table', { name: 'Applications' });
+    const link = (name: RegExp) => within(table).getByRole('link', { name });
+
+    await within(table).findByText('Data health: Healthy');
+    expect(link(/CRM/)).toHaveTextContent('Data health: Healthy');
+    expect(link(/EBO Sales/)).toHaveTextContent('Data health: Action needed');
+    expect(link(/HR Portal/)).toHaveTextContent('Data health: Needs attention');
+    expect(link(/Stock/)).not.toHaveTextContent('Data health');
+  });
+
+  it('still renders the table when the Data health read fails, just without marks', async () => {
+    let healthServed = false;
+    server.use(
+      http.get(routeUrl(ROUTES.overview.apps), () => HttpResponse.json(APP_TRAFFIC)),
+      http.get(routeUrl(ROUTES.integration.health), () => {
+        healthServed = true;
+        return HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 });
+      }),
+    );
+    renderWithProviders(<ApplicationsView />);
+    const table = await screen.findByRole('table', { name: 'Applications' });
+    // Wait for the 500 to be served, then for the view to settle after it.
+    await waitFor(() => expect(healthServed).toBe(true));
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole('table', { name: 'Applications' })).getByRole('link', {
+          name: /EBO Sales/,
+        }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('table', { name: 'Applications' })).toBe(table);
+    expect(within(table).queryByText(/Data health:/)).toBeNull();
+    expect(screen.getByText(/apps registered\./)).toBeInTheDocument();
   });
 });
 

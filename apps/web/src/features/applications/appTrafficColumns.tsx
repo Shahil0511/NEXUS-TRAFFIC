@@ -4,8 +4,10 @@ import type { ReactNode } from 'react';
 
 import { CoverageValue } from '@/components/CoverageValue';
 import type { DataTableColumn } from '@/components/DataTable';
+import { HealthMark, type CheckState } from '@/components/HealthMark';
 import { DeltaPill, type DeltaPolarity } from '@/components/KpiCard';
 import { Badge } from '@/components/ui/badge';
+import { HEALTH_MARK_COPY } from '@/features/integration/healthMark';
 import {
   EMPTY_VALUE,
   formatCompact,
@@ -54,6 +56,32 @@ function OnlineNowCell({ count }: { count: number | undefined }) {
   );
 }
 
+/**
+ * The app's initials tile with its Data health mark on the bottom-right corner. The initials are
+ * decorative (the name follows); the mark's words are screen-reader text.
+ */
+function AppTile({ initials, health }: { initials: string; health: CheckState | undefined }) {
+  return (
+    <span className="relative shrink-0">
+      <span
+        aria-hidden="true"
+        className="flex size-8 items-center justify-center rounded-lg bg-accent text-xs font-semibold text-accent-foreground uppercase"
+      >
+        {initials}
+      </span>
+      {health ? (
+        <span className="absolute -right-1 -bottom-1 flex">
+          <HealthMark
+            variant="dot"
+            state={health}
+            label={`Data health: ${HEALTH_MARK_COPY[health]}`}
+          />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 /** Whether an app sent nothing at all in the window (a silent integration). */
 export function isSilent(row: AppTrafficDto): boolean {
   return row.lastEventAt === null;
@@ -69,7 +97,10 @@ export const SECONDARY_COLUMN = 'hidden 2xl:table-cell';
  * metric header carries an (i) with its plain-language definition (lib/metricCopy) — that is
  * where "Identified" / "Linked" and their COVERAGE_WARN_PCT threshold are explained (CoverageValue).
  * "Online now" ignores the range: `onlineOf(app)` comes from useOnlineNow (features/live), merged
- * by app slug in the view.
+ * by app slug in the view. `healthOf(app)` is the app's Data health mark (healthMarkOf, last 24 h,
+ * also range-independent) on the corner of its initials tile; undefined (unknown, still loading,
+ * or the health read failed) shows no mark. The mark sits INSIDE the row link: it is text, not a
+ * second link.
  *
  * Width: twelve columns did not fit the content area below about 1500px, so the secondary ones
  * (p95, Visits, Tool uses, Linked) show from 2xl only (SECONDARY_COLUMN; the app page and Data
@@ -79,6 +110,7 @@ export function appTrafficColumns(
   linkQuery: LinkQuery,
   formatLastEvent: (iso: string | null) => ReactNode,
   onlineOf: (app: string) => number | undefined,
+  healthOf: (app: string) => CheckState | undefined,
 ): DataTableColumn<AppTrafficDto>[] {
   return [
     {
@@ -90,12 +122,7 @@ export function appTrafficColumns(
           href={withQuery(PAGES.applicationDetail(row.app), { ...linkQuery, app: undefined })}
           className="flex min-w-0 items-center gap-2.5 rounded-sm outline-none hover:text-link focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <span
-            aria-hidden="true"
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-xs font-semibold text-accent-foreground uppercase"
-          >
-            {row.displayName.slice(0, 2)}
-          </span>
+          <AppTile initials={row.displayName.slice(0, 2)} health={healthOf(row.app)} />
           <span className="min-w-0">
             <span className="flex items-center gap-2">
               <span className="truncate font-medium">{row.displayName}</span>
