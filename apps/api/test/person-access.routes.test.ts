@@ -15,6 +15,7 @@ import {
   PERSON_FILTERED_ROUTE_LEAVES,
   PERSON_ROUTE_LEAVES,
   ROUTES,
+  USER_SORT_VALUES,
   type RouteDescriptor,
 } from '@nexus/shared';
 import express, { type RequestHandler } from 'express';
@@ -237,17 +238,26 @@ describe('the access log is admin-only, the lists of people are not', () => {
     expect(res.body).toEqual({ ran: 'users.search' });
   });
 
-  it('the lists of people still open with a retired count sort (it falls back to last activity)', async () => {
-    // WHY: people are sorted by time keys only (USER_SORT_VALUES); an old link or open tab may still
-    // send `sort=requests`, which must not turn the People page into an error.
-    const list = await send(ROUTES.users.list, 'viewer', `${ROUTES.users.list.path}?sort=requests`);
-    expect(list.status).toBe(200);
-    expect(list.body).toEqual({ ran: 'users.list' });
-    const search = await send(ROUTES.users.search, 'viewer').send({
-      search: 'some',
-      sort: 'failed',
-    });
-    expect(search.status).toBe(200);
-    expect(search.body).toEqual({ ran: 'users.search' });
+  it('the lists of people open for a viewer with every sort key, count keys included (ADR 0018)', async () => {
+    // WHY: the People list sorts by its count columns again; a count sort must not need admin rights,
+    // and an unknown key (an old or hand-edited link) must fall back instead of a 400.
+    for (const sort of USER_SORT_VALUES) {
+      const list = await send(
+        ROUTES.users.list,
+        'viewer',
+        `${ROUTES.users.list.path}?sort=${sort}&dir=asc`,
+      );
+      expect(list.status, sort).toBe(200);
+      expect(list.body).toEqual({ ran: 'users.list' });
+      const search = await send(ROUTES.users.search, 'viewer').send({ search: 'some', sort });
+      expect(search.status, sort).toBe(200);
+      expect(search.body).toEqual({ ran: 'users.search' });
+    }
+    const unknown = await send(
+      ROUTES.users.list,
+      'viewer',
+      `${ROUTES.users.list.path}?sort=nonsense`,
+    );
+    expect(unknown.status).toBe(200);
   });
 });

@@ -209,12 +209,17 @@ function firstOf(expr: string, order: string, nonNull = `${expr} IS NOT NULL`): 
 }
 
 /**
- * User-stats sort key → SQL over the grouped `activity u`. The ONLY ORDER BY sources (whitelist).
- * Time keys only: people are never ordered by an amount (USER_SORT_VALUES). @see ADR 0017
+ * User-stats sort key → SQL over the grouped `activity u`. The ONLY ORDER BY sources (whitelist):
+ * the sort value picks an entry here and never reaches the SQL as text. Time keys and the count
+ * columns of the People list (restored by ADR 0018). @see ADR 0018
  */
 const USER_ORDER_SQL = Object.freeze({
   lastSeen: 'max(u.occurred_at)',
   firstSeen: 'min(u.occurred_at)',
+  requests: `count(*) FILTER (WHERE u.kind = '${API_KIND}')`,
+  pageViews: `count(*) FILTER (WHERE u.kind = '${PAGE_VIEW}')`,
+  sessions: `count(DISTINCT u.session_id) FILTER (WHERE u.kind <> '${API_KIND}')`,
+  failed: 'count(*) FILTER (WHERE u.failed)',
 } as const satisfies Record<UserSort, string>);
 
 /** Extra knobs of the shared user-stats statement. */
@@ -225,7 +230,7 @@ interface UserStatsQuery extends UserListOptions {
 
 /**
  * One row per verified user over api_requests ∪ web_events: list, search and the profile header.
- * Ordered by a whitelisted time key (USER_ORDER_SQL; default most recently active first; ties: user_key). `sessions` counts BROWSER sessions
+ * Ordered by a whitelisted key (USER_ORDER_SQL; default most recently active first; ties: user_key). `sessions` counts BROWSER sessions
  * only — the ones Journeys lists — so "3 sessions" always opens 3 replayable sessions.
  */
 function userStatsStatement(

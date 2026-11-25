@@ -150,4 +150,5 @@ Devices & places and the person page [0014](decisions/0014-object-first-navigati
 admin-only person pages and the person access log
 [0015](decisions/0015-admin-only-person-pages-and-access-log.md); English-only screen copy, page icons and
 illustrations [0016](decisions/0016-english-only-ui-icons-and-illustrations.md); per-person daily facts with
-neutral labels, a one-day drill-down and stated limits [0017](decisions/0017-person-daily-depth.md).
+neutral labels, a one-day drill-down and stated limits [0017](decisions/0017-person-daily-depth.md); the
+People list sorts by its count columns again [0018](decisions/0018-people-list-count-sorts-restored.md).

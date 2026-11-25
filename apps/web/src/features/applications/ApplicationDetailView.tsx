@@ -1,10 +1,10 @@
 'use client';
 
-import {
-  DEFAULT_USER_SORT,
-  type AppTrafficDto,
-  type TimeWindowDto,
-  type TimeWindowQuery,
+import type {
+  AppTrafficDto,
+  TimeWindowDto,
+  TimeWindowQuery,
+  UserSort,
 } from '@nexus/shared';
 import {
   Activity,
@@ -332,15 +332,23 @@ function FailingRoutesPanel({
   );
 }
 
+/** "Who uses it" order; the "All users" link opens the People list in the same order (ADR 0018). */
+const USERS_PANEL_SORT: UserSort = 'requests';
+
 function UsersPanel({ filters, linkQuery }: { filters: TimeWindowQuery; linkQuery: LinkQuery }) {
-  // Most recently active first: people are never put in an order by an amount (ADR 0017).
-  const users = useUserList({ ...filters, sort: DEFAULT_USER_SORT, dir: 'desc', limit: TOP_N });
+  // Most API calls to this app first; the description says so (ADR 0018).
+  const users = useUserList({ ...filters, sort: USERS_PANEL_SORT, dir: 'desc', limit: TOP_N });
   const rows = users.data?.pages[0]?.items;
   return (
     <Panel
       title="Who uses it"
-      description="Verified people, most recent activity first"
-      aside={<ViewAll href={withQuery(PAGES.users(), linkQuery)} label="All users of this app" />}
+      description="Verified people, most API calls first"
+      aside={
+        <ViewAll
+          href={withQuery(PAGES.users(), { ...linkQuery, sort: USERS_PANEL_SORT })}
+          label="All users of this app"
+        />
+      }
     >
       <QueryState
         query={users}

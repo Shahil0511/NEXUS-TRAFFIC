@@ -109,18 +109,26 @@ export type ErrorListQuery = z.infer<typeof errorListQuerySchema>;
 
 // ─── users ──────────────────────────────────────────────────────────────────
 /**
- * Sort keys of the People list (whitelisted ORDER BY in the repository). Time keys only: a list of
- * people is never put in an order by an amount (calls, page views, visits, failures). @see ADR 0017
+ * Sort keys of the People list (whitelisted ORDER BY in the repository): last / first activity and
+ * the count columns (API calls, page views, visits, failed). The count keys were retired by ADR 0017
+ * point 10 and restored by ADR 0018 (owner's veto). @see ADR 0018
  */
-export const USER_SORT_VALUES = ['lastSeen', 'firstSeen'] as const;
+export const USER_SORT_VALUES = [
+  'lastSeen',
+  'firstSeen',
+  'requests',
+  'pageViews',
+  'sessions',
+  'failed',
+] as const;
 export type UserSort = (typeof USER_SORT_VALUES)[number];
 /** Most recently active first. */
 export const DEFAULT_USER_SORT: UserSort = 'lastSeen';
 
 const userListShape = {
   /**
-   * WHY `.catch`: a bookmarked link or a tab opened before the count keys were retired may still send
-   * one (`sort=requests`); it falls back to the default instead of a 400. Any value that reaches the
+   * WHY `.catch`: an old bookmarked link or a hand-edited URL may send a key that is not (or no longer)
+   * in the whitelist; it falls back to the default instead of a 400. Any value that reaches the
    * repository is still one of USER_SORT_VALUES.
    */
   sort: z.enum(USER_SORT_VALUES).default(DEFAULT_USER_SORT).catch(DEFAULT_USER_SORT),

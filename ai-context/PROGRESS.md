@@ -18,6 +18,39 @@ date, what was done, files touched, what's next, known issues.
 
 ---
 
+## 2026-11-25 — People list: count sorts restored after the owner's veto (ADR 0018)
+
+The owner vetoed B10-7 (ADR 0017 point 10): the People list must sort by its count columns again. Forward
+change, no revert; contract, API and web; no migration, no new route.
+
+**Done**
+- **Shared (contract first):** `USER_SORT_VALUES` is again `lastSeen`, `firstSeen`, `requests`, `pageViews`,
+  `sessions`, `failed`. Kept from B10-7: `DEFAULT_USER_SORT` (`lastSeen`) and the `.catch` that turns an unknown
+  `sort` into the default (list query and search body; `dir` strict).
+- **API:** `USER_ORDER_SQL` (`web-event-query.repository.ts`) has the four count expressions back; still a
+  whitelist map, `u.user_key ASC` tie-breaker; `UserListOptions.sort` doc.
+- **Web:** `UsersView` puts the sort control back on API calls, Failed, Page views and Visits (both directions,
+  same control as First / Last activity; headers and hints of B10-7 kept). `useUserListParams` doc only (the
+  parser already follows `USER_SORT_VALUES`, so `?sort=requests` is kept again). The "Who uses it" panel of one
+  app (`ApplicationDetailView`) asks for `sort=requests` again, described as "Verified people, most API calls
+  first", and its "All users of this app" link carries `sort=requests` so the People list opens in the same
+  order. The command palette keeps `DEFAULT_USER_SORT`.
+- **Tests:** shared (`analytics.test.ts`: every key accepted in query and body, count keys kept, unknown falls
+  back, `dir` strict); repository (each key maps to its ORDER BY in both directions with the tie-breaker; every
+  key has an entry); controller (`UserController.list` passes count keys through, unknown → `lastSeen`);
+  person-access routes (every key 200 for a viewer, list and search); DB suite: the `pageViews` sort case is back
+  beside the first-activity case (written, not run). Web: `UsersView.test.tsx` (all six sort buttons, each count
+  header sorts desc then asc and lands in the URL, `?sort=<count>` is kept, unknown → `lastSeen`, banned-word scan
+  kept), `ApplicationsView.test.tsx` (the panel asks for `requests`, the "All users" link carries
+  `sort=requests`; banned-word scan kept).
+- **Docs:** new ADR 0018; ADR 0017 status header says "Superseded in part by ADR 0018", point 10 and its
+  consequence line marked superseded (text kept); ADR 0007
+  note; 02-architecture ADR list; 03-code-navigation.
+
+**Next:** `RUN_DB_TESTS=1 npm run test:db` (the restored count-sort case).
+
+---
+
 ## 2026-11-25 — Usual activity hours switched on after the production measurement (ADR 0017)
 
 The owner gave access, and I ran the `users.pattern` read on production (10.150.0.5 / nexus_traffic) myself.

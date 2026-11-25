@@ -101,19 +101,32 @@ function buildApp(service: FakeUsers): Express {
 }
 
 describe('UserController.list', () => {
-  it('→ 200 sorted by a time key; a retired count sort reaches the service as the default', async () => {
+  it('→ 200 sorted by a time or a count key; an unknown key reaches the service as the default', async () => {
     const service = new FakeUsers();
     const app = buildApp(service);
     const first = await request(app).get(`${ROUTES.users.list.path}?sort=firstSeen&dir=asc`);
     expect(first.status).toBe(200);
     expect(first.headers['cache-control']).toBe(DASHBOARD_ANALYTICS_CACHE);
-    const retired = await request(app).get(`${ROUTES.users.list.path}?sort=pageViews&dir=asc`);
-    expect(retired.status).toBe(200);
+    const byCount = await request(app).get(`${ROUTES.users.list.path}?sort=pageViews&dir=asc`);
+    expect(byCount.status).toBe(200);
+    const unknown = await request(app).get(`${ROUTES.users.list.path}?sort=nonsense&dir=asc`);
+    expect(unknown.status).toBe(200);
     expect(service.calls).toEqual([
       [expect.objectContaining({ sort: 'firstSeen', dir: 'asc' })],
+      [expect.objectContaining({ sort: 'pageViews', dir: 'asc' })],
       [expect.objectContaining({ sort: 'lastSeen', dir: 'asc' })],
     ]);
   });
+
+  it.each(['requests', 'failed', 'sessions'] as const)(
+    'passes the count sort %s through to the service (ADR 0018)',
+    async (sort) => {
+      const service = new FakeUsers();
+      const res = await request(buildApp(service)).get(`${ROUTES.users.list.path}?sort=${sort}`);
+      expect(res.status).toBe(200);
+      expect(service.calls).toEqual([[expect.objectContaining({ sort, dir: 'desc' })]]);
+    },
+  );
 });
 
 const dayPath = buildPath(ROUTES.users.day, { userKey: USER_KEY });

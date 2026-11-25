@@ -19,8 +19,9 @@
   3. **Who uses what, both ways** — new DTO fields, no new tables: `EndpointDetailDto.uniqueUsers/topUsers`,
      `ErrorSummaryDto.usersAffected/topAffectedUsers` (+ `userKey` scope on both errors leaves),
      `UserProfileDto.topEndpoints/perApp`, `UserSummaryDto.failedRequests/firstSeenAt`, the Users list
-     sortable by `USER_SORT_VALUES` (whitelisted ORDER BY; since ADR 0017 point 10 by last / first activity
-     only), `PageStatsDto.distinctUsers`, `ROUTES.users.activity`
+     sortable by `USER_SORT_VALUES` (whitelisted ORDER BY; ADR 0017 point 10 limited it to last / first
+     activity, [ADR 0018](0018-people-list-count-sorts-restored.md) restored the count keys),
+     `PageStatsDto.distinctUsers`, `ROUTES.users.activity`
      (DAU per IST day + WAU/MAU), `AppTrafficDto.identifiedPct/linkedPct` (integration quality).
   4. One shared shape for "a user and a count": `UserUsageDto` (route callers, page viewers, tool users,
      users hit by failures), rendered by `components/TopUsersList.tsx`.

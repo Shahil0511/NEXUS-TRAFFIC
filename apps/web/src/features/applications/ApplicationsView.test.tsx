@@ -158,9 +158,14 @@ describe('ApplicationDetailView', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'EBO Sales' })).toBeInTheDocument();
     const users = await screen.findByRole('list', { name: 'Users of this app' });
-    // "Who uses it" lists the most recently active people, never an order by an amount.
-    expect([...new Set(userSorts)]).toEqual(['lastSeen']);
-    expect(screen.getByText('Verified people, most recent activity first')).toBeInTheDocument();
+    // "Who uses it" lists the people with the most API calls first, and its description says so (ADR 0018).
+    expect([...new Set(userSorts)]).toEqual(['requests']);
+    expect(screen.getByText('Verified people, most API calls first')).toBeInTheDocument();
+    // "All users of this app" opens the People list in the same order as the panel.
+    const allUsers = screen.getByRole('link', { name: /All users of this app/ });
+    expect(new URL(allUsers.getAttribute('href')!, 'http://x').searchParams.get('sort')).toBe(
+      'requests',
+    );
     // The panel's person-level copy uses neutral words only (ADR 0017).
     const usersPanel = users.closest('[aria-labelledby]');
     expect(usersPanel).toHaveTextContent('Who uses it');

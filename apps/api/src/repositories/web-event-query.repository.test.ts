@@ -7,7 +7,9 @@ import {
   BREAKDOWN_DIMENSION_VALUES,
   USER_DAILY_APP_ROWS_LIMIT,
   USER_DAY_BLOCK_GAP_MS,
+  USER_SORT_VALUES,
   VISIBLE_DELTA_CREDIT_CAP_MS,
+  type UserSort,
 } from '@nexus/shared';
 import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
@@ -92,16 +94,42 @@ describe('WebEventQueryRepository SQL (S3)', () => {
     expect(statement?.text).not.toContain('50%');
   });
 
-  it('people are ordered by a time key only: last activity by default, first activity on request', async () => {
+  it('people are ordered by last activity by default, then user_key as the stable tie-breaker', async () => {
     const { exec, repo } = build();
     await repo.listUsers(FILTER, { limit: 3, offset: 0 });
-    await repo.listUsers(FILTER, { sort: 'firstSeen', dir: 'asc', limit: 3, offset: 0 });
-    const [byLast, byFirst] = exec.statements.map(({ text }) => text);
-    expect(byLast).toContain('ORDER BY max(u.occurred_at) DESC NULLS LAST, u.user_key ASC');
-    expect(byFirst).toContain('ORDER BY min(u.occurred_at) ASC NULLS LAST, u.user_key ASC');
-    for (const text of [byLast, byFirst]) {
-      expect(text?.slice(text.lastIndexOf('ORDER BY'))).not.toMatch(/count\(/);
+    const [statement] = exec.statements;
+    expect(statement?.text).toContain(
+      'ORDER BY max(u.occurred_at) DESC NULLS LAST, u.user_key ASC',
+    );
+  });
+
+  it.each([
+    ['lastSeen', 'max(u.occurred_at)'],
+    ['firstSeen', 'min(u.occurred_at)'],
+    ['requests', "count(*) FILTER (WHERE u.kind = 'api')"],
+    ['pageViews', "count(*) FILTER (WHERE u.kind = 'page_view')"],
+    ['sessions', "count(DISTINCT u.session_id) FILTER (WHERE u.kind <> 'api')"],
+    ['failed', 'count(*) FILTER (WHERE u.failed)'],
+  ] as const satisfies ReadonlyArray<readonly [UserSort, string]>)(
+    'the People sort %s maps to its whitelisted ORDER BY, in both directions (ADR 0018)',
+    async (sort, expr) => {
+      const { exec, repo } = build();
+      await repo.listUsers(FILTER, { sort, dir: 'asc', limit: 3, offset: 0 });
+      await repo.listUsers(FILTER, { sort, dir: 'desc', limit: 3, offset: 0 });
+      const [asc, desc] = exec.statements;
+      expect(asc?.text).toContain(`ORDER BY ${expr} ASC NULLS LAST, u.user_key ASC`);
+      expect(desc?.text).toContain(`ORDER BY ${expr} DESC NULLS LAST, u.user_key ASC`);
+      // The sort value only picks a whitelist entry: it is neither spliced in nor bound as a value.
+      expect(asc?.values).not.toContain(sort);
+    },
+  );
+
+  it('every People sort key has an ORDER BY entry', async () => {
+    const { exec, repo } = build();
+    for (const sort of USER_SORT_VALUES) {
+      await repo.listUsers(FILTER, { sort, limit: 3, offset: 0 });
     }
+    expect(exec.statements).toHaveLength(USER_SORT_VALUES.length);
   });
 
   it('the timeline pages both tables with the same keyset and folds page_time away', async () => {

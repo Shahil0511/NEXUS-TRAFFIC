@@ -4,6 +4,7 @@
   (the person page and its Daily activity tab) and keeps every safeguard of
   [ADR 0015](0015-admin-only-person-pages-and-access-log.md) (admin-only person reads, the person access log).
   Later steps of the same work extend this ADR in place; each extension says which step added it.
+- **Superseded in part by [ADR 0018](0018-people-list-count-sorts-restored.md):** point 10 (People list sorts by time only) and its consequence line; the People list sorts by its count columns again.
 - **Context:** the Daily activity tab already showed, per IST day of one verified person, the first and last
   recorded event, the summed tab-visible time and some counts. The owner decided (option 2c) that the person
   page may go deeper into these per-person, per-day facts, under the existing ADR 0015 rules and without a
@@ -169,7 +170,10 @@
        offer the 7-day range only. The API leaf is registered and tested either way. **Switched on
        2026-11-25:** the measurement took 57–111 ms warm and at most 635 ms cold, using the per-partition
        indexes.
-  10. **The People list sorts by time only (shipped in step 7).**
+  10. **The People list sorts by time only (shipped in step 7).** **Superseded by
+      [ADR 0018](0018-people-list-count-sorts-restored.md) (2026-11-25):** the owner vetoed this default, and
+      the count sorts are restored; the default sort, the `.catch` fallback and the First / Last activity
+      headers stay. The text below is kept as the record of step 7.
       - `USER_SORT_VALUES` is `lastSeen`, `firstSeen` (`packages/shared/src/schemas/analytics.ts`); the count
         keys (API calls, page views, visits, failed) are retired from the contract, the repository whitelist
         (`USER_ORDER_SQL`) and the table, because putting people in an order by an amount reads as grading
@@ -182,7 +186,8 @@
 - **Consequences:**
   - A new person-level label must pass `personCopy.test.tsx`; a new person-level screen must be added to it.
     The People list and the "Who uses it" panel of one app scan their own rendered copy in their view tests.
-  - A new sort key of the People list must be a time key; a count key would undo point 10.
+  - ~~A new sort key of the People list must be a time key; a count key would undo point 10.~~ Superseded by
+    [ADR 0018](0018-people-list-count-sorts-restored.md): the count keys are sort keys again.
   - A new DTO field cannot carry a grading or ordering name; the shared test fails on it.
   - The one-day Visits link opens a list read that writes a `person_visits` access-log row, like "View visits".
   - A new read that sums `visible_ms` for a shown time must go through `creditedVisibleMs`; the

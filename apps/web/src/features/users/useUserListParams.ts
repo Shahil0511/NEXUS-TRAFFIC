@@ -5,9 +5,9 @@
  * it never goes in a URL (ADR 0006).
  *
  * WHY THE URL: a sorted table must survive a reload and be shareable. The values are the API's
- * whitelist (USER_SORT_VALUES: last or first activity only), so the URL can never carry a key the API
- * would reject. A link from before the count sorts were retired (`?sort=requests`) parses to the
- * default, last activity first, instead of breaking the page. @see ADR 0017
+ * whitelist (USER_SORT_VALUES: last / first activity and the count columns), so the URL can never
+ * carry a key the API would reject. An unknown `?sort=` parses to the default, last activity first,
+ * instead of breaking the page. @see ADR 0018
  */
 import {
   DEFAULT_USER_SORT,
